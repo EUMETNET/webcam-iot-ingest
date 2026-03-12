@@ -1,0 +1,45 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking / linting
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+docker-compose*.yml
+.dockerignore
+Dockerfile*
+
+# Data & logs
+data/
+*.log
+
+# Docs & misc
+README.md
+.DS_Store
