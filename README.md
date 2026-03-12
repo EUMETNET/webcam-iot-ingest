@@ -59,3 +59,6 @@ Pre-built dashboards for FastAPI and MQTT are provisioned automatically.
 pip install -e .
 pytest tests/
 ```
+
+## Example image ingestion
+Example Python script to ingest a randomly colored 640x480 png image provided in `test_sender.py`
