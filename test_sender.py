@@ -33,7 +33,7 @@ PAYLOAD = {
 
 
 def send_jpg_to_endpoint():
-    response = requests.post("http://localhost:8009/upload", json=PAYLOAD)
+    response = requests.post("http://localhost:8011/upload", json=PAYLOAD)
     body = response.json()
     print(f"Status code: {response.status_code}")
     print(body)

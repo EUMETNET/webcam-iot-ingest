@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8009:8001"
+      - "8011:8001"
     network_mode: ""
     environment:
       - MQTT_HOST=${MQTT_HOST:-mqtt}
@@ -43,6 +43,7 @@ services:
       start_period: 10s
 
   mosquitto-exporter:
+    profiles: ["monitoring"]
     image: sapcc/mosquitto-exporter
     ports:
       - "9234:9234"
