@@ -17,20 +17,17 @@ BUCKET_OBJECT_URL = os.getenv(
 logger = logging.getLogger(__name__)
 
 
-async def upload_fileobject(
-    file_name: str, file_object: File, delete_after_24h: bool = True
-) -> str | None:
+async def upload_fileobject(file_name: str, file_object: File) -> str | None:
     """Upload a file to an S3 bucket and return the public URL of the uploaded file.
+
+    Retention in the bucket is controlled by the bucket's lifecycle policy,
+    which should be configured to delete objects after a set number of days.
 
     :param file_name: S3 object key
     :param file_object: File-like object to upload
     :param delete_after_24h: Whether to set the object to expire after 24 hours
     :return: Public object URL on success, None on failure
     """
-
-    extra_args = {}
-    if delete_after_24h:
-        extra_args["Tagging"] = "expires-after=24h"
 
     session = aioboto3.Session()
     async with session.client(
@@ -44,7 +41,6 @@ async def upload_fileobject(
                 file_object,
                 BUCKET_NAME,
                 file_name,
-                ExtraArgs=extra_args,
             )
             object_url = f"{BUCKET_OBJECT_URL}/{file_name}"
             logger.debug(f"Uploaded {file_name} to {BUCKET_NAME}, url={object_url}")
