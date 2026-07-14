@@ -22,6 +22,7 @@ env/
 .env
 .env.*
 !.env.example
+.secrets/
 *.pyc
 
 # Testing

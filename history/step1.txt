@@ -1,0 +1,129 @@
+Checkpoint 1 implementation history
+===================================
+
+Scope
+-----
+
+Checkpoint 1 establishes the local PostgreSQL and Mosquitto infrastructure
+and the pilot database schema. No provider discovery or image ingestion was
+implemented. Work remained on the codex branch; nothing was committed or
+pushed as part of this checkpoint.
+
+Repository inspection
+---------------------
+
+- Read AGENTS.md and used the private ingestion architecture document as
+  read-only implementation context.
+- Confirmed that the active branch is codex at the start of the checkpoint.
+- Confirmed that the repository already had a Docker Compose Mosquitto
+  service, monitoring services, and a legacy FastAPI upload service.
+- Confirmed that PostgreSQL and database migrations were not yet present.
+- Preserved the user-provided, untracked AGENTS.md file without modifying it.
+
+Local infrastructure changes
+----------------------------
+
+- Added a PostgreSQL service to docker-compose.yml using the pinned
+  postgres:16.9-bookworm image.
+- Bound PostgreSQL port 5432 to the VM loopback interface only.
+- Added a PostgreSQL health check based on pg_isready.
+- Added a named postgres-data volume so normal container restarts preserve
+  database state.
+- Mounted the initial pilot schema into PostgreSQL's automatic initialization
+  directory.
+- Kept the existing Mosquitto service rather than building a custom broker.
+- Pinned Mosquitto to eclipse-mosquitto:2.0.21.
+- Bound MQTT port 1883 to the VM loopback interface only.
+- Kept anonymous MQTT access for this loopback-only local checkpoint.
+- Removed the sample Grafana password from committed Compose configuration.
+
+Secret handling
+---------------
+
+- Added .secrets/ to .gitignore and .dockerignore.
+- Kept .env ignored while retaining .env.example as a non-secret template.
+- Configured PostgreSQL to read its password from the Compose secret mounted
+  at /run/secrets/database_password.
+- Configured the local Compose secret source as the ignored file
+  .secrets/database_password.
+- Added Python configuration that reads the database password from a file
+  instead of accepting a committed password value.
+- No provider API keys, database passwords, MQTT credentials, or S3
+  credentials were added to version control.
+
+Pilot database schema
+---------------------
+
+Added database/schema/001_pilot_schema.sql with the three physical pilot
+tables specified by the architecture:
+
+1. network
+2. site
+3. source_stream
+
+The schema includes:
+
+- Primary and foreign keys.
+- timestamptz timestamp columns.
+- jsonb provider metadata constrained to JSON objects.
+- Latitude and longitude range constraints.
+- An uppercase two-letter country-code constraint when country is present.
+- active, inactive, and blacklisted source-stream statuses.
+- A nonnegative constraint for ema_download_period.
+- Provider identifier uniqueness within its owning network or site.
+- Indexes for network/site joins and due active-stream selection.
+- Initial network rows for Windy (win), Fintraffic (fin), and Skaping (ska).
+- Pilot renditions remain explicit source_stream values; discovery will later
+  assign preview for Windy, full_jpeg for Fintraffic, and mini for Skaping.
+
+Database tooling and tests
+--------------------------
+
+- Added config/deployment_config.py to load non-secret database settings and
+  read the database password file.
+- Added database/healthcheck.py to verify connectivity and the presence of the
+  three pilot tables.
+- Added psycopg with its binary distribution to pyproject.toml.
+- Updated uv.lock.
+- Added unit tests for password-file configuration.
+- Added opt-in PostgreSQL integration tests covering table and seed presence,
+  JSON metadata round-tripping, coordinate constraints, status constraints,
+  and foreign-key enforcement.
+- Added pytest configuration so repository packages resolve consistently.
+- Added just infrastructure and just database-check recipes.
+- Marked the existing just destroy recipe as destructive in its description.
+
+Documentation
+-------------
+
+- Expanded .env.example with non-secret PostgreSQL and MQTT settings.
+- Added local infrastructure setup and security guidance to README.md.
+- Documented that the local anonymous MQTT listener must remain loopback-only.
+- Documented that normal restarts preserve PostgreSQL state and that deleting
+  volumes is not a routine validation operation.
+
+Validation performed in the Codex workspace
+-------------------------------------------
+
+- uv resolved the project with Python 3.14.6.
+- uv.lock was successfully updated for psycopg.
+- The new focused test selection completed with 2 tests passing and 6
+  PostgreSQL integration tests skipped because no PostgreSQL server or Docker
+  executable is available in the Codex workspace.
+- Python compilation checks passed for the new config, database, and database
+  test modules.
+- git diff --check passed.
+- The active branch remained codex.
+
+Known validation limitation
+---------------------------
+
+Docker is not installed in the Codex execution environment, so the Compose
+configuration, PostgreSQL initialization, schema integration tests, and MQTT
+publish/subscribe check must be run by the repository owner using the separate
+checkpoint validation runbook.
+
+The repository's pre-existing upload test suite also currently imports
+api.main before its MQTT mock takes effect. With no broker running, those
+legacy tests fail with a connection-refused error during test setup. This is a
+pre-existing test-isolation issue and was not changed as part of Checkpoint 1.

@@ -24,6 +24,32 @@ just up
 
 API docs available at http://localhost:8009/docs
 
+## Local pilot infrastructure
+
+PostgreSQL and Mosquitto run locally through Docker Compose. Their host
+ports bind to loopback only. Create local configuration and a database
+password before starting them:
+
+```bash
+cp .env.example .env
+install -m 700 -d .secrets
+touch .secrets/database_password
+chmod 600 .secrets/database_password
+# Open .secrets/database_password in an editor and enter the local password.
+docker compose --env-file .env up -d postgres mqtt
+uv run python -m database.healthcheck
+```
+
+The `.env` and `.secrets/` paths are ignored by Git. Do not put provider,
+database, MQTT, or S3 credentials in committed configuration. The local
+Mosquitto listener permits anonymous clients and must not be exposed beyond
+the VM loopback interface.
+
+The PostgreSQL container initializes the pilot `network`, `site`, and
+`source_stream` tables from `database/schema/001_pilot_schema.sql` on a new
+data volume. Normal container restarts preserve the volume and its schema.
+Avoid `just destroy` unless deleting all local service data is intentional.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -34,6 +60,11 @@ API docs available at http://localhost:8009/docs
 | `MQTT_PASSWORD` | — | Broker password |
 | `MQTT_TLS` | `False` | Enable TLS |
 | `MQTT_TOPIC_PREPEND` | - | Topic prefix |
+| `DATABASE_HOST` | `localhost` | PostgreSQL hostname |
+| `DATABASE_PORT` | `5432` | PostgreSQL port |
+| `DATABASE_NAME` | `webcam_ingestion` | PostgreSQL database |
+| `DATABASE_USER` | `webcam_ingestion` | PostgreSQL user |
+| `DATABASE_PASSWORD_FILE` | `.secrets/database_password` | Path to the database password file |
 | `BUCKET_NAME` | - | Bucket name |
 | `BUCKET_ACCESS_KEY_ID` | — | S3 access key |
 | `BUCKET_SECRET_ACCESS_KEY` | — | S3 secret key |
@@ -49,7 +80,7 @@ just local
 ```
 
 - Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (admin / mysecretpassword)
+- Grafana: http://localhost:3000
 
 Pre-built dashboards for FastAPI and MQTT are provisioned automatically.
 

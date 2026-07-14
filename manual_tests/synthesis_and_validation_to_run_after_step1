@@ -1,0 +1,180 @@
+Checkpoint 1 synthesis and validation runbook
+==============================================
+
+Checkpoint outcome
+------------------
+
+Checkpoint 1 adds local PostgreSQL and Mosquitto infrastructure, secret-file
+handling, and the three-table pilot registry schema. It does not implement
+Windy, Fintraffic, or Skaping discovery or ingestion.
+
+The PostgreSQL and MQTT host ports are bound to 127.0.0.1. Mosquitto permits
+anonymous clients for local development only and must not be exposed outside
+the VM. The database password must exist only in the ignored
+.secrets/database_password file.
+
+Nothing in this runbook requires deleting a Docker volume. Do not run
+`just destroy` or `docker compose down --volumes` during routine validation.
+
+1. Confirm branch and working tree
+----------------------------------
+
+Run from the repository root:
+
+    git branch --show-current
+    git status --short
+    git diff --check
+
+The branch must be codex. AGENTS.md may appear as an untracked file; do not add
+or modify it as part of this checkpoint.
+
+2. Create local non-secret configuration
+----------------------------------------
+
+    cp .env.example .env
+    install -m 700 -d .secrets
+    touch .secrets/database_password
+    chmod 600 .secrets/database_password
+
+Open .secrets/database_password in an editor and enter a strong local password
+as its only line. Do not put the password directly in a shell command, .env,
+Compose YAML, documentation, or Git.
+
+Confirm that the local files are ignored:
+
+    git check-ignore -v .env .secrets/database_password
+
+Both paths must be reported as ignored.
+
+3. Validate the Compose model
+-----------------------------
+
+    docker compose --env-file .env config
+
+Inspect the result and confirm:
+
+- postgres uses postgres:16.9-bookworm;
+- mqtt uses eclipse-mosquitto:2.0.21;
+- published PostgreSQL and MQTT addresses start with 127.0.0.1;
+- the database password is represented as a secret-file mount, not a value;
+- no real credentials appear in the rendered configuration.
+
+4. Start only Checkpoint 1 infrastructure
+-----------------------------------------
+
+    docker compose --env-file .env up -d postgres mqtt
+    docker compose ps
+
+Wait until both services are healthy. If either service is not healthy, inspect
+its logs without copying secret values into an issue or commit:
+
+    docker compose logs --no-log-prefix postgres mqtt
+
+5. Validate PostgreSQL connectivity and schema
+----------------------------------------------
+
+    docker compose exec postgres pg_isready
+    uv sync --locked
+    uv run python -m database.healthcheck
+
+Expected health-check output names all three tables:
+
+    network, site, source_stream
+
+Inspect PostgreSQL directly:
+
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c '\dt'
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      'SELECT network_id, network_name, api_version FROM network ORDER BY network_id;'
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c '\d+ site'
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c '\d+ source_stream'
+
+The network query must return:
+
+    fin | Fintraffic | v1
+    ska | Skaping    | NULL
+    win | Windy      | v3
+
+6. Run focused automated tests
+------------------------------
+
+Run tests that do not require a live database:
+
+    uv run pytest tests/test_deployment_config.py -v
+
+Run the live PostgreSQL integration tests:
+
+    RUN_DATABASE_TESTS=1 uv run pytest tests/database/test_pilot_schema.py -v
+
+All focused tests must pass. The integration tests use transactions and roll
+back their test data.
+
+The existing tests/test_upload.py suite may fail if no MQTT broker is running
+at import time because of a pre-existing test-isolation problem. With the local
+broker started above, it can also be checked separately:
+
+    uv run pytest tests/test_upload.py -v
+
+Do not treat an import-time MQTT connection failure in that legacy suite as a
+pilot-schema failure; record it separately.
+
+7. Validate MQTT publish and subscribe
+--------------------------------------
+
+In terminal 1, start a subscriber:
+
+    docker compose exec mqtt mosquitto_sub -h localhost -t 'webcam/test' -C 1 -W 10
+
+Before its timeout, run in terminal 2:
+
+    docker compose exec mqtt mosquitto_pub -h localhost -t 'webcam/test' -m '{"ok":true}'
+
+Terminal 1 must print:
+
+    {"ok":true}
+
+8. Validate persistence across normal restart
+----------------------------------------------
+
+    docker compose restart postgres mqtt
+    docker compose exec postgres pg_isready
+    uv run python -m database.healthcheck
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      'SELECT count(*) FROM network;'
+
+The final query must return 3. This confirms that a normal restart reused the
+PostgreSQL volume rather than recreating the schema.
+
+9. Final repository safety checks
+---------------------------------
+
+    git diff --check
+    git status --short
+    git diff
+
+Review the diff and verify that it contains no real passwords, API keys,
+tokens, S3 credentials, or copied architecture-document content.
+
+Confirm once more that secret paths are ignored:
+
+    git check-ignore -v .env .secrets/database_password
+
+10. Stop without deleting data
+------------------------------
+
+    docker compose stop postgres mqtt
+
+This preserves the PostgreSQL volume for the next checkpoint.
+
+Checkpoint decision
+-------------------
+
+Proceed to Checkpoint 2 only after:
+
+- Compose renders successfully;
+- PostgreSQL and MQTT become healthy;
+- the schema health check succeeds;
+- all focused PostgreSQL integration tests pass;
+- MQTT publish/subscribe succeeds;
+- database state survives a normal restart;
+- the Git diff contains no secrets.

@@ -1,6 +1,27 @@
 name: iot-webcam-ingest
 
 services:
+  postgres:
+    image: postgres:16.9-bookworm
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-webcam_ingestion}
+      POSTGRES_USER: ${DATABASE_USER:-webcam_ingestion}
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+    secrets:
+      - database_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/schema/001_pilot_schema.sql:/docker-entrypoint-initdb.d/001_pilot_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   ingest:
     build:
       context: .
@@ -28,10 +49,10 @@ services:
         condition: service_healthy
 
   mqtt:
-    image: eclipse-mosquitto
+    image: eclipse-mosquitto:2.0.21
     restart: unless-stopped
     ports:
-      - "1883:1883"
+      - "127.0.0.1:1883:1883"
     volumes:
       - ./mosquitto:/etc/mosquitto
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
@@ -67,9 +88,6 @@ services:
     image: grafana/grafana-oss:11.2.0
     ports:
       - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=mysecretpassword
     volumes:
       - grafana-storage:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:rw
@@ -78,5 +96,10 @@ services:
       - prometheus
 
 volumes:
+  postgres-data:
   grafana-storage:
   prometheus-data:
+
+secrets:
+  database_password:
+    file: ./.secrets/database_password
