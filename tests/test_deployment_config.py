@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment_config import DatabaseConfig
+from config.deployment_config import DatabaseConfig, WindyConfig
 
 
 def test_database_config_reads_password_from_file(tmp_path: Path) -> None:
@@ -34,3 +34,72 @@ def test_database_config_rejects_empty_password_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="password file is empty"):
         config.read_password()
+
+
+def test_windy_config_loads_query_discs(monkeypatch, tmp_path: Path) -> None:
+    areas_file = tmp_path / "areas.json"
+    areas_file.write_text(
+        '[{"latitude":60,"longitude":25,"radius_km":100,"countries":["fi","SE"]}]',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WINDY_DISCOVERY_AREAS_FILE", str(areas_file))
+    config = WindyConfig.from_environment()
+
+    assert config.discovery_areas[0].countries == ("FI", "SE")
+    assert config.discovery_areas[0].radius_km == 100
+    assert len(config.member_countries) == 33
+
+
+def test_windy_config_requires_query_discs(monkeypatch, tmp_path: Path) -> None:
+    areas_file = tmp_path / "areas.json"
+    areas_file.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("WINDY_DISCOVERY_AREAS_FILE", str(areas_file))
+    with pytest.raises(ValueError, match="at least one Windy discovery area"):
+        WindyConfig.from_environment()
+
+
+def test_windy_config_requires_whole_kilometre_radius(
+    monkeypatch, tmp_path: Path
+) -> None:
+    areas_file = tmp_path / "areas.json"
+    areas_file.write_text(
+        '[{"latitude":60,"longitude":25,"radius_km":50.5,"countries":["FI"]}]',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("WINDY_DISCOVERY_AREAS_FILE", str(areas_file))
+
+    with pytest.raises(ValueError, match="radius must use whole kilometres"):
+        WindyConfig.from_environment()
+
+
+def test_windy_config_rejects_invalid_query_disc_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    areas_file = tmp_path / "areas.json"
+    areas_file.write_text("not JSON", encoding="utf-8")
+    monkeypatch.setenv("WINDY_DISCOVERY_AREAS_FILE", str(areas_file))
+
+    with pytest.raises(ValueError, match="discovery areas file is invalid"):
+        WindyConfig.from_environment()
+
+
+def test_windy_config_rejects_missing_query_disc_file(
+    monkeypatch, tmp_path: Path
+) -> None:
+    areas_file = tmp_path / "missing.json"
+    monkeypatch.setenv("WINDY_DISCOVERY_AREAS_FILE", str(areas_file))
+
+    with pytest.raises(ValueError, match="cannot read Windy discovery areas file"):
+        WindyConfig.from_environment()
+
+
+def test_windy_config_reads_api_key_from_file(tmp_path: Path) -> None:
+    key_file = tmp_path / "windy_api_key"
+    key_file.write_text("windy-test-key\n", encoding="utf-8")
+    config = WindyConfig(
+        api_key_file=key_file,
+        discovery_areas=(),
+        site_distance_threshold_m=100,
+        request_timeout_s=15,
+    )
+    assert config.read_api_key() == "windy-test-key"

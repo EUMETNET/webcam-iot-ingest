@@ -6,7 +6,6 @@ import argparse
 import json
 import math
 from pathlib import Path
-import shlex
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
@@ -22,21 +21,21 @@ CENTER = (208, 48, 80, 230)
 
 
 def read_areas(env_file: Path) -> list[dict[str, Any]]:
-    """Read WINDY_DISCOVERY_AREAS_JSON without evaluating the env file."""
+    """Read the Windy discovery areas file referenced by the env file."""
     for raw_line in env_file.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         name, value = line.split("=", 1)
-        if name == "WINDY_DISCOVERY_AREAS_JSON":
-            tokens = shlex.split(value, comments=False, posix=True)
-            if len(tokens) != 1:
-                raise ValueError("WINDY_DISCOVERY_AREAS_JSON must be one value")
-            areas = json.loads(tokens[0])
+        if name == "WINDY_DISCOVERY_AREAS_FILE":
+            areas_file = Path(value)
+            if not areas_file.is_absolute():
+                areas_file = env_file.parent / areas_file
+            areas = json.loads(areas_file.read_text(encoding="utf-8"))
             if not isinstance(areas, list) or not areas:
                 raise ValueError("Windy discovery area list is empty")
             return areas
-    raise ValueError(f"WINDY_DISCOVERY_AREAS_JSON is absent from {env_file}")
+    raise ValueError(f"WINDY_DISCOVERY_AREAS_FILE is absent from {env_file}")
 
 
 def render(areas: list[dict[str, Any]], output: Path) -> None:
