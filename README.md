@@ -2,6 +2,11 @@
 
 FastAPI service that ingests webcam images, stores them in S3-compatible object storage, and publishes notifications to an MQTT broker.
 
+## Project slides
+
+A presentation describing the repository and the current Windy discovery
+statistics is available on [GitHub Pages](https://nanopiero.github.io/webcam-iot-ingest/).
+
 ## What it does
 
 1. Accepts a `POST /upload` payload with a base64-encoded image
