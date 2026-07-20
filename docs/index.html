@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Windy discovery coverage</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #edf5ff; }
+    main { width: min(1500px, 100%); min-height: 100vh; margin: auto; padding: 3vh 3vw; display: flex; flex-direction: column; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin-bottom: 2vh; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 4.5rem); letter-spacing: -.045em; }
+    .total { color: #70d7ff; font-size: clamp(1.1rem, 2vw, 2rem); font-weight: 750; white-space: nowrap; }
+    .subtitle { margin: .45rem 0 0; color: #9fb2c8; font-size: clamp(.8rem, 1.15vw, 1.15rem); }
+    .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 3fr) minmax(250px, 1fr); gap: 1.6rem; }
+    section { border: 1px solid #294059; border-radius: 16px; background: #0c1a2b; padding: 1rem 1.2rem; }
+    h2 { margin: 0 0 .65rem; color: #70d7ff; font-size: clamp(1rem, 1.4vw, 1.4rem); }
+    .countries { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: clamp(.68rem, .9vw, .92rem); }
+    .countries th { color: #91a8bf; text-align: left; font-weight: 600; }
+    .countries th, .countries td { padding: .24rem .42rem; border-bottom: 1px solid #1d3045; }
+    .countries td:nth-child(2n) { text-align: right; color: #d6eaff; font-weight: 650; }
+    .countries tr:last-child td { border-bottom: 0; }
+    .tags { width: 100%; border-collapse: collapse; font-size: clamp(.85rem, 1.15vw, 1.15rem); font-variant-numeric: tabular-nums; }
+    .tags td { padding: .75rem .2rem; border-bottom: 1px solid #294059; }
+    .tags td:last-child { text-align: right; color: #70d7ff; font-weight: 750; }
+    .note { margin-top: 1rem; color: #91a8bf; font-size: clamp(.72rem, .9vw, .9rem); line-height: 1.45; }
+    footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; gap: .3rem; }
+      .layout { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Windy webcam discovery</h1>
+        <p class="subtitle">Active cameras discovered across EUMETNET member countries</p>
+      </div>
+      <div class="total">24,740 cameras · 33 countries</div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2>Active cameras by country</h2>
+        <table class="countries" aria-label="Active Windy cameras by country">
+          <thead><tr><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th></tr></thead>
+          <tbody>
+            <tr><td>AT</td><td>2,807</td><td>IE</td><td>33</td><td>NL</td><td>145</td></tr>
+            <tr><td>BE</td><td>120</td><td>IS</td><td>150</td><td>NO</td><td>1,439</td></tr>
+            <tr><td>CH</td><td>1,458</td><td>IT</td><td>3,013</td><td>PL</td><td>716</td></tr>
+            <tr><td>CY</td><td>11</td><td>LT</td><td>25</td><td>PT</td><td>171</td></tr>
+            <tr><td>CZ</td><td>1,473</td><td>LU</td><td>38</td><td>RO</td><td>136</td></tr>
+            <tr><td>DE</td><td>2,768</td><td>LV</td><td>36</td><td>RS</td><td>61</td></tr>
+            <tr><td>DK</td><td>42</td><td>ME</td><td>12</td><td>SE</td><td>970</td></tr>
+            <tr><td>EE</td><td>25</td><td>MK</td><td>15</td><td>SI</td><td>783</td></tr>
+            <tr><td>ES</td><td>1,449</td><td>MT</td><td>1</td><td>SK</td><td>295</td></tr>
+            <tr><td>FI</td><td>1,669</td><td>FR</td><td>2,031</td><td>GB</td><td>1,338</td></tr>
+            <tr><td>GR</td><td>485</td><td>HR</td><td>303</td><td>HU</td><td>722</td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section>
+        <h2>Five most frequent tags</h2>
+        <table class="tags" aria-label="Most frequent Windy category tags">
+          <tbody>
+            <tr><td>landscape</td><td>8,250</td></tr>
+            <tr><td>traffic</td><td>7,344</td></tr>
+            <tr><td>mountain</td><td>3,823</td></tr>
+            <tr><td>meteo</td><td>3,628</td></tr>
+            <tr><td>city</td><td>3,521</td></tr>
+          </tbody>
+        </table>
+        <p class="note">A camera may carry several tags, so tag counts are not additive. Inactive and indoor cameras are excluded.</p>
+      </section>
+    </div>
+    <footer>Windy Webcams API v3 discovery snapshot · 20 July 2026</footer>
+  </main>
+</body>
+</html>
