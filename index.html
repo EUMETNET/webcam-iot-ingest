@@ -21,6 +21,8 @@
     .countries th, .countries td { padding: .24rem .42rem; border-bottom: 1px solid #1d3045; }
     .countries td:nth-child(2n) { text-align: right; color: #d6eaff; font-weight: 650; }
     .countries tr:last-child td { border-bottom: 0; }
+    .site-total { display: flex; justify-content: space-between; gap: 1rem; margin-top: .7rem; padding: .55rem .7rem; border-radius: 10px; background: #10263d; color: #9fb2c8; font-size: .78rem; }
+    .site-total strong { color: #70d7ff; font-size: 1rem; }
     .tags { width: 100%; border-collapse: collapse; font-size: clamp(.85rem, 1.15vw, 1.15rem); font-variant-numeric: tabular-nums; }
     .tags td { padding: .75rem .2rem; border-bottom: 1px solid #294059; }
     .tags td:last-child { text-align: right; color: #70d7ff; font-weight: 750; }
@@ -44,7 +46,7 @@
         <h1>Windy webcam discovery</h1>
         <p class="subtitle">Active cameras discovered across EUMETNET member countries</p>
       </div>
-      <div class="total">25,030 cameras · 33 countries</div>
+      <div class="total">25,055 cameras · 33 countries</div>
     </header>
     <div class="layout">
       <section>
@@ -52,42 +54,43 @@
         <table class="countries" aria-label="Active Windy cameras by country">
           <thead><tr><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th></tr></thead>
           <tbody>
-            <tr><td>AT</td><td>2,831</td><td>IE</td><td>34</td><td>NL</td><td>147</td></tr>
-            <tr><td>BE</td><td>124</td><td>IS</td><td>153</td><td>NO</td><td>1,447</td></tr>
-            <tr><td>CH</td><td>1,472</td><td>IT</td><td>3,070</td><td>PL</td><td>732</td></tr>
+            <tr><td>AT</td><td>2,829</td><td>IE</td><td>34</td><td>NL</td><td>148</td></tr>
+            <tr><td>BE</td><td>123</td><td>IS</td><td>153</td><td>NO</td><td>1,450</td></tr>
+            <tr><td>CH</td><td>1,470</td><td>IT</td><td>3,094</td><td>PL</td><td>725</td></tr>
             <tr><td>CY</td><td>11</td><td>LT</td><td>26</td><td>PT</td><td>173</td></tr>
-            <tr><td>CZ</td><td>1,485</td><td>LU</td><td>38</td><td>RO</td><td>140</td></tr>
-            <tr><td>DE</td><td>2,799</td><td>LV</td><td>37</td><td>RS</td><td>62</td></tr>
-            <tr><td>DK</td><td>43</td><td>ME</td><td>12</td><td>SE</td><td>972</td></tr>
-            <tr><td>EE</td><td>25</td><td>MK</td><td>15</td><td>SI</td><td>786</td></tr>
-            <tr><td>ES</td><td>1,470</td><td>MT</td><td>1</td><td>SK</td><td>313</td></tr>
-            <tr><td>FI</td><td>1,675</td><td>FR</td><td>2,049</td><td>GB</td><td>1,349</td></tr>
-            <tr><td>GR</td><td>507</td><td>HR</td><td>306</td><td>HU</td><td>726</td></tr>
+            <tr><td>CZ</td><td>1,487</td><td>LU</td><td>38</td><td>RO</td><td>141</td></tr>
+            <tr><td>DE</td><td>2,793</td><td>LV</td><td>37</td><td>RS</td><td>62</td></tr>
+            <tr><td>DK</td><td>43</td><td>ME</td><td>12</td><td>SE</td><td>971</td></tr>
+            <tr><td>EE</td><td>25</td><td>MK</td><td>15</td><td>SI</td><td>787</td></tr>
+            <tr><td>ES</td><td>1,468</td><td>MT</td><td>1</td><td>SK</td><td>314</td></tr>
+            <tr><td>FI</td><td>1,676</td><td>FR</td><td>2,056</td><td>GB</td><td>1,351</td></tr>
+            <tr><td>GR</td><td>508</td><td>HR</td><td>309</td><td>HU</td><td>725</td></tr>
           </tbody>
         </table>
+        <div class="site-total"><strong>21,823 sites</strong><span>10 m maximum colocation distance · 2,112 multi-camera sites</span></div>
       </section>
       <section>
         <h2>Frequent and grouped tags</h2>
         <table class="tags" aria-label="Most frequent Windy category tags">
           <tbody>
-            <tr><td>landscape</td><td>8,340</td></tr>
-            <tr><td>traffic</td><td>7,371</td></tr>
-            <tr><td>mountain</td><td>3,874</td></tr>
-            <tr><td>meteo</td><td>3,688</td></tr>
-            <tr><td>city</td><td>3,553</td></tr>
-            <tr><td>coastal *</td><td>2,797</td></tr>
+            <tr><td>landscape</td><td>8,350</td></tr>
+            <tr><td>traffic</td><td>7,375</td></tr>
+            <tr><td>mountain</td><td>3,880</td></tr>
+            <tr><td>meteo</td><td>3,682</td></tr>
+            <tr><td>city</td><td>3,558</td></tr>
+            <tr><td>coastal *</td><td>2,802</td></tr>
             <tr><td>lakes &amp; rivers **</td><td>1,793</td></tr>
           </tbody>
         </table>
         <p class="note">A camera may carry several tags. * beach, coast or port. ** lake or river. Group totals count each camera once. Indoor cameras are excluded; provider status is ignored.</p>
-        <div class="detail"><strong>Implementation detail.</strong> Windy’s provider status fluctuates between consecutive discoveries. It is retained in <code>source_stream.provider_metadata</code> JSONB but ignored for registry eligibility; 303 records currently carry provider status <code>inactive</code>.</div>
+        <div class="detail"><strong>Implementation detail.</strong> Windy’s provider status fluctuates between consecutive discoveries. It is retained in <code>source_stream.provider_metadata</code> JSONB but ignored for registry eligibility; 522 records currently carry provider status <code>inactive</code>.</div>
         <div class="benchmark">
           <strong>10 min 03 s</strong>
           <span>Fresh full discovery · 0.1 s request pacing · API retrieval through database reconciliation</span>
         </div>
       </section>
     </div>
-    <footer>Windy Webcams API v3 discovery snapshot · 20 July 2026</footer>
+    <footer>Windy Webcams API v3 discovery snapshot · 21 July 2026</footer>
   </main>
 </body>
 </html>

@@ -1,0 +1,92 @@
+Checkpoint 3 validation record - Windy discovery
+=================================================
+
+Checkpoint outcome
+------------------
+
+Checkpoint 3 is accepted. Windy discovery covers the 33 EUMETNET member
+countries with a hybrid country-listing and geographic-disc strategy,
+deduplicates provider IDs, preserves provider metadata, and reconciles a
+complete snapshot transactionally. It does not acquire webcam images.
+
+Configuration and safety checks
+-------------------------------
+
+The implementation was validated on the codex branch. The Windy API key and
+database password remained in ignored files. No key or password was printed or
+added to Git.
+
+The committed discovery-area JSON was parsed successfully. Configuration
+tests verified member-country codes, disc coordinates and radii, pagination
+limits, timeouts, request delay, distance threshold, and secret-file loading.
+
+Automated validation completed
+------------------------------
+
+The final focused results were:
+
+    25 unit tests passed
+    7 live PostgreSQL integration tests passed
+
+Coverage includes pagination, country classification, overlapping-result
+deduplication, malformed and partial responses, throttling behavior, indoor
+filtering, stable identifiers, site inference, transactional reconciliation,
+and preservation of provider status as JSONB metadata without using it for
+registry eligibility.
+
+Live discovery validation completed
+-----------------------------------
+
+The live sequence included:
+
+1. Clearing only the Windy registry rows for a controlled clean run.
+2. A complete first discovery over all 33 member countries.
+3. An immediate repeated pass to verify registry idempotency.
+4. Additional fresh passes to investigate provider-listing stability.
+5. A final dry-run comparison that could not modify the database.
+
+The controlled first pass registered 25,030 source streams. The immediate
+repeat inserted no site or stream and made no activation transition.
+
+A later fresh pass returned 25,059 cameras, including 47 provider IDs not
+previously stored, while 18 stored IDs were absent. An immediate fresh dry run
+then returned the same 25,059 IDs: zero new IDs relative to the preceding run,
+with the same 18 older IDs absent.
+
+Provider-specific finding
+-------------------------
+
+Windy's status field is unstable across otherwise valid discovery responses.
+It is therefore retained in source_stream.provider_metadata JSONB for
+traceability but ignored for registry eligibility.
+
+The membership of Windy's listing can also vary between fresh runs. The final
+two snapshots were identical, but earlier snapshots were not. This is recorded
+as a Windy provider characteristic, not treated as a failed checkpoint.
+
+Current operational behavior marks a webcam inactive when it is absent from a
+complete snapshot. If operational evidence shows frequent disappearance and
+return, consider a Windy-specific grace or unavailable status before querying
+that stream again. Such a policy requires a separate implementation decision.
+
+Revalidation commands
+---------------------
+
+These commands can be used to repeat the non-destructive checks:
+
+    git branch --show-current
+    git check-ignore -v .env .secrets/windy_api_key .secrets/database_password
+    jq empty discovery/windy/discovery_areas.json
+    uv run --env-file .env pytest tests/test_deployment_config.py tests/discovery/windy tests/tools/test_count_windy_eumetnet_webcams.py -v
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database/test_registry_queries.py -v
+    uv run --env-file .env python -m discovery.windy.windy_discovery_workflow --dry-run
+    git diff --check
+
+The dry-run command reads the live API and registry but does not reconcile or
+write the snapshot. Do not clear the database for routine revalidation.
+
+Checkpoint decision
+-------------------
+
+Checkpoint 3 is accepted. Development may proceed to checkpoint 4: shared
+site-altitude enrichment. Windy image acquisition follows in checkpoint 5.

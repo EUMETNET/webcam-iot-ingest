@@ -99,7 +99,7 @@ class WindyConfig:
             ),
             discovery_areas=areas,
             site_distance_threshold_m=float(
-                os.getenv("WINDY_SITE_DISTANCE_THRESHOLD_M", "100")
+                os.getenv("WINDY_SITE_DISTANCE_THRESHOLD_M", "10")
             ),
             request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
             member_countries=tuple(

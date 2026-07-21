@@ -47,6 +47,7 @@ def test_windy_config_loads_query_discs(monkeypatch, tmp_path: Path) -> None:
 
     assert config.discovery_areas[0].countries == ("FI", "SE")
     assert config.discovery_areas[0].radius_km == 100
+    assert config.site_distance_threshold_m == 10
     assert len(config.member_countries) == 33
 
 

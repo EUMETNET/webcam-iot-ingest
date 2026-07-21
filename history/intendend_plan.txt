@@ -1,0 +1,384 @@
+Intended webcam ingestion development plan
+===========================================
+
+Purpose and working rules
+-------------------------
+
+This document records the intended implementation sequence derived from the
+ingestion architecture and the repository inspection performed before
+Checkpoint 1.
+
+The following rules apply throughout development:
+
+- Work only on the codex branch unless explicitly instructed otherwise.
+- Treat the private architecture document as read-only background material.
+- Do not copy or commit the private architecture document.
+- Do not commit passwords, API keys, tokens, or S3 credentials.
+- Read secrets at runtime from ignored, permission-restricted files.
+- Implement only one checkpoint at a time.
+- Stop after every checkpoint and provide validation commands.
+- Continue only after the repository owner has run or accepted the checkpoint
+  validation.
+- Implement providers in this order: Windy, Fintraffic, then Skaping.
+- Do not use destructive Git commands without first showing the exact command
+  and obtaining approval.
+- Do not delete PostgreSQL volumes as part of routine validation.
+
+Checkpoint 1 - Local infrastructure and pilot schema
+----------------------------------------------------
+
+Status: implemented in commit f9956c0.
+
+Objectives:
+
+- Provide local PostgreSQL and Mosquitto services through Docker Compose.
+- Keep host ports on the VM loopback interface for local development.
+- Pin the PostgreSQL and Mosquitto container versions.
+- Store the PostgreSQL password in an ignored secret file.
+- Create the three physical pilot tables: network, site, and source_stream.
+- Add schema constraints, foreign keys, indexes, and provider seed rows.
+- Add database configuration, a schema health check, and focused tests.
+
+Stop condition:
+
+- PostgreSQL and MQTT start and become healthy.
+- The schema health check finds all three tables.
+- Database integration tests pass.
+- MQTT publish/subscribe works.
+- PostgreSQL data survives a normal container restart.
+- No secret is present in the Git diff.
+
+The detailed validation commands are stored in:
+
+    manual_tests/sudo_install_and_validation_to_complete_step1
+
+Checkpoint 2 - Shared database registry access layer
+----------------------------------------------------
+
+Objectives:
+
+- Implement database/registry_queries.py independently of provider code.
+- Retrieve the current site and source-stream registry for one network.
+- Insert new sites and source streams transactionally.
+- Replace provider metadata snapshots for known records.
+- Preserve previously assigned internal identifiers.
+- Enforce active, inactive, and blacklisted transition rules.
+- Ensure discovery never automatically overrides blacklisted.
+- Retrieve active streams that are due for ingestion.
+- Update last_provider_image_marker, last_download_timestamp, and
+  ema_download_period at the correct workflow stages.
+- Add transaction rollback, idempotency, collision, and blacklist tests.
+
+Expected validation:
+
+    docker compose --env-file .env up -d postgres
+    uv run pytest tests/database -v
+    uv run python -m database.healthcheck
+    git diff --check
+    git status --short
+
+Stop after validation and wait for approval.
+
+Checkpoint 3 - Windy discovery
+------------------------------
+
+Objectives:
+
+- Load the Windy API key from an ignored secret file.
+- Implement Windy Webcams API v3 access with explicit timeouts and safe error
+  reporting.
+- Use configured geographic query discs and EUMETNET country filters.
+- Deduplicate overlapping results by Windy webcam identifier.
+- Exclude clearly unsuitable sources, including indoor webcams.
+- Normalize Windy metadata for registry comparison and storage.
+- Generate stable win-prefixed site and source-stream identifiers.
+- Infer Windy sites conservatively with the configured distance threshold.
+- Preserve identifiers after their initial assignment.
+- Support a dry-run discovery command.
+- Apply the completed discovery update in one database transaction.
+- Test normal, overlapping, malformed, throttled, and partial API responses
+  with fixtures.
+
+Expected offline validation:
+
+    uv run pytest tests/discovery/windy -v
+    uv run python -m discovery.windy.windy_discovery_workflow --help
+
+Expected live validation after creating .secrets/windy_api_key:
+
+    git check-ignore -v .secrets/windy_api_key
+    docker compose --env-file .env up -d postgres
+    uv run python -m discovery.windy.windy_discovery_workflow --dry-run
+    uv run python -m discovery.windy.windy_discovery_workflow
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win';"
+
+Stop after validation and wait for approval.
+
+Checkpoint 4 - Shared altitude enrichment
+-----------------------------------------
+
+Objectives:
+
+- Add provider-independent altitude enrichment under
+  discovery/shared/altitude_lookup.py.
+- Add configuration to enable or disable altitude lookup and select the
+  Open-Meteo Elevation API endpoint without storing secrets in Git.
+- Preserve a reliable provider altitude when one is available.
+- Treat missing or explicitly unreliable provider altitude values as
+  candidates for enrichment.
+- Retrieve approximate altitude from the Open-Meteo Elevation API, based on
+  Copernicus DEM GLO-90, for new sites without altitude and known sites whose
+  altitude remains missing.
+- Batch requests conservatively, enforce explicit timeouts, validate response
+  cardinality and numeric values, and apply bounded retry/backoff behavior.
+- Leave altitude unset after an unavailable, throttled, malformed, or partial
+  elevation response and retry it during a later discovery run.
+- Preserve a derived altitude while its source coordinates are unchanged.
+- Reset and recompute derived altitude when provider coordinates change.
+- Support corrected_altitude enrichment independently when corrected
+  coordinates are available, and reset it when those coordinates change.
+- Integrate enrichment into Windy discovery before the transactional registry
+  update, while preserving --dry-run as a no-write operation.
+- Ensure later provider discovery workflows can reuse the same altitude
+  enrichment component.
+
+Expected validation:
+
+    uv run pytest tests/discovery/shared tests/discovery/windy -v
+    RUN_DATABASE_TESTS=1 uv run pytest tests/database/test_registry_queries.py -v
+    uv run python -m discovery.windy.windy_discovery_workflow --dry-run
+    uv run python -m discovery.windy.windy_discovery_workflow
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) AS sites, count(altitude) AS sites_with_altitude FROM site WHERE network_id = 'win';"
+
+Repeat discovery and confirm that unchanged coordinates preserve the same
+altitudes. Exercise an elevation-service failure and confirm that discovery
+remains safe, affected altitudes remain null, and the next run retries them.
+Stop after validation and wait for approval.
+
+Checkpoint 5 - Windy image acquisition and ingestion state
+----------------------------------------------------------
+
+Objectives:
+
+- Retrieve due active Windy source streams from PostgreSQL.
+- Refresh image metadata by known Windy webcam identifier.
+- Treat lastUpdatedOn as an opaque provider image marker.
+- Select the preview rendition explicitly.
+- Skip streams whose provider marker has not changed.
+- Download tokenized Windy image URLs immediately.
+- Enforce HTTP timeouts, byte limits, content checks, and full image decoding.
+- Handle expired URLs, missing cameras, throttling, and transient failures with
+  bounded retry behavior.
+- Update database ingestion state only at the architecture-defined successful
+  stages.
+- Do not add S3 upload or MQTT notification in this checkpoint.
+
+Expected validation:
+
+    uv run pytest tests/ingestion/windy -v
+    uv run python -m ingestion.windy.windy_ingestion_workflow --once --dry-run
+    uv run python -m ingestion.windy.windy_ingestion_workflow --once
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 20;"
+
+Stop after validation and wait for approval.
+
+Checkpoint 6 - Shared transformation, S3 storage, and MQTT notification
+-----------------------------------------------------------------------
+
+Objectives:
+
+- Extract reusable image integrity and JPEG-normalization behavior from the
+  legacy FastAPI path.
+- Implement transformation version T0V0.
+- Enforce the configured maximum derived height.
+- Implement standard and panoramic encoded-size targets.
+- Compute the configured scalar image signature.
+- Upload immutable derived images to S3-compatible storage.
+- Read S3 credentials from ignored secret files.
+- Build architecture-versioned notification schema N0V0.
+- Correct or replace the legacy message builder rather than relying on its
+  current string/dictionary behavior.
+- Publish MQTT only after successful S3 upload.
+- Use MQTT QoS 1 and bounded publication retry behavior.
+- Test transformation, object-key construction, payload contracts, S3
+  failures, and MQTT failures.
+
+Expected validation:
+
+    docker compose --env-file .env up -d postgres mqtt
+    uv run pytest tests/transformation tests/storage tests/notification -v
+    docker compose exec mqtt mosquitto_sub -h localhost -t 'webcam/#' -v -C 1 -W 30
+    uv run python -m ingestion.windy.windy_ingestion_workflow --once
+
+The emitted N0V0 notification must validate, and its S3 reference must point
+to an existing object. Stop after validation and wait for approval.
+
+Checkpoint 7 - Operational Windy worker
+---------------------------------------
+
+Objectives:
+
+- Add the continuous Windy worker loop.
+- Enforce the minimum ingestion interval.
+- Bound worker threads, retries, and backoff.
+- Support graceful shutdown.
+- Expose low-cardinality Prometheus metrics.
+- Add application health checks.
+- Verify restart and state-recovery behavior.
+- Stabilize Compose operation before adding production systemd units.
+
+Expected validation:
+
+    docker compose --env-file .env up -d postgres mqtt
+    uv run pytest tests/ingestion/shared tests/ingestion/windy -v
+    timeout 60s uv run python -m ingestion.windy.windy_ingestion_workflow
+    curl --fail http://localhost:8001/metrics
+    docker compose restart postgres mqtt
+    uv run python -m database.healthcheck
+
+At this point Windy is the first complete provider slice. Stop and wait for
+approval before beginning Fintraffic.
+
+Checkpoint 8 - Fintraffic discovery
+-----------------------------------
+
+Objectives:
+
+- Implement Fintraffic station discovery.
+- Send the required non-secret Fintraffic-User application identifier.
+- Select stations with collectionStatus equal to GATHERING.
+- Select presets with inCollection equal to true.
+- Treat stations as sites and presets as source streams.
+- Generate fin{station_id}PRE{preset_id} internal identifiers.
+- Preserve provider station and preset metadata in jsonb snapshots.
+- Reuse the shared transactional registry update layer.
+- Add fixture-based and live dry-run tests.
+
+Expected validation:
+
+    uv run pytest tests/discovery/fintraffic -v
+    uv run python -m discovery.fintraffic.fintraffic_discovery_workflow --dry-run
+    uv run python -m discovery.fintraffic.fintraffic_discovery_workflow
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'fin';"
+
+Stop after validation and wait for approval.
+
+Checkpoint 9 - Fintraffic ingestion
+----------------------------------
+
+Objectives:
+
+- Use Fintraffic full-JPEG image URLs.
+- Use conditional HTTP requests with If-None-Match.
+- Treat the ETag as the opaque provider image marker.
+- Treat HTTP 304 as an unchanged image without downloading or transforming.
+- Feed changed images through the shared validation, T0V0, S3, and N0V0 MQTT
+  pipeline.
+- Add tests for changed, unchanged, missing, invalid, and transient responses.
+
+Expected validation:
+
+    uv run pytest tests/ingestion/fintraffic -v
+    uv run python -m ingestion.fintraffic.fintraffic_ingestion_workflow --once --dry-run
+    uv run python -m ingestion.fintraffic.fintraffic_ingestion_workflow --once
+
+A repeated run must exercise the unchanged or HTTP 304 path without creating a
+duplicate derived image for the same marker. Stop and wait for approval before
+beginning Skaping.
+
+Checkpoint 10 - Skaping discovery
+---------------------------------
+
+Objectives:
+
+- Load the Skaping API key from an ignored secret file.
+- Discover authorized cameras through summaryApp.
+- Treat Skaping cameras as sites.
+- Treat point_of_views entries with type=image as source streams.
+- Exclude video and frame point-of-view types.
+- Generate ska{camera_id}POV{point_of_view_id} identifiers.
+- Preserve customer, timezone, label, title, tag, and public-page metadata in
+  normalized jsonb snapshots.
+- Reuse the shared transactional registry update layer.
+- Add fixture-based and live dry-run tests.
+
+Expected validation:
+
+    uv run pytest tests/discovery/skaping -v
+    git check-ignore -v .secrets/skaping_api_key
+    uv run python -m discovery.skaping.skaping_discovery_workflow --dry-run
+    uv run python -m discovery.skaping.skaping_discovery_workflow
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'ska';"
+
+Stop after validation and wait for approval.
+
+Checkpoint 11 - Skaping ingestion
+---------------------------------
+
+Objectives:
+
+- Begin with the documented media/getArchives freshness method.
+- Do not enable the unresolved latest_media redirect optimization by default.
+- Normalize provider-local timestamps using the camera timezone.
+- Select the mini rendition.
+- Treat the selected archive identity and timestamp as an opaque freshness
+  marker.
+- Feed changed images through the shared validation, T0V0, S3, and N0V0 MQTT
+  pipeline.
+- Keep any resolved-latest-media experiment behind a disabled configuration
+  option until its behavior is measured and validated.
+
+Expected validation:
+
+    uv run pytest tests/ingestion/skaping -v
+    uv run python -m ingestion.skaping.skaping_ingestion_workflow --once --dry-run
+    uv run python -m ingestion.skaping.skaping_ingestion_workflow --once
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'ska' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 20;"
+
+Stop after validation and wait for approval.
+
+Checkpoint 12 - Pilot orchestration, backup, cleanup, and recovery
+-----------------------------------------------------------------
+
+Objectives:
+
+- Run discovery sequentially in the order Windy, Fintraffic, Skaping.
+- Run separate long-lived ingestion workers per provider.
+- Add scheduled S3 spool cleanup.
+- Add timestamped PostgreSQL backup commands and metrics.
+- Add production secret-file paths and deployment documentation.
+- Add systemd services and timers only after the underlying commands have
+  stable interfaces.
+- Add restart, failure, backup, and recovery drills.
+- Document restoration as an explicitly approved maintenance operation.
+- Never automate destructive database restoration or volume deletion.
+
+Expected validation:
+
+    docker compose --env-file .env config
+    uv run pytest
+    uv run python -m database.database_backup --help
+    systemd-analyze verify deployment/systemd/*.service deployment/systemd/*.timer
+    git diff --check
+    git status --short
+
+Final pilot acceptance criteria
+-------------------------------
+
+- All three providers maintain a stable, persistent registry.
+- Providers operate in the required Windy, Fintraffic, Skaping implementation
+  order and can run independently.
+- Unchanged provider images do not create duplicate derived images.
+- Accepted images are validated, transformed, stored, and notified using
+  versioned contracts.
+- MQTT publication occurs only after successful S3 storage.
+- PostgreSQL remains the authoritative registry and ingestion-state store.
+- Credentials remain outside Git and are not written to logs.
+- Discovery, ingestion, cleanup, and backup are observable and recoverable.
+- Every checkpoint has a recorded synthesis and owner-executed validation.

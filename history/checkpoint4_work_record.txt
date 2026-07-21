@@ -1,0 +1,87 @@
+Checkpoint 4 work record - shared altitude enrichment
+=====================================================
+
+Status
+------
+
+Checkpoint 4 is planned and has not yet been implemented. This record defines
+the accepted standalone-first implementation boundary and will be completed
+with actual test and live-validation evidence.
+
+Preparation completed
+---------------------
+
+- The private architecture altitude requirements were reviewed as read-only
+  background.
+- Windy webcam coordinates were confirmed to remain available in each
+  source_stream.provider_metadata JSONB object.
+- The Windy inferred-site colocation threshold was reduced from 100 metres to
+  10 metres so one site-level terrain altitude remains a reasonable
+  approximation for grouped cameras.
+- Only the Windy registry was cleared, preserving other networks, and a fresh
+  discovery was applied with the 10-metre threshold.
+- That discovery registered 25,055 streams in 21,823 sites. Of those sites,
+  2,112 contain more than one stream; the largest contains 14 streams.
+
+Scope
+-----
+
+Checkpoint 4 will add reusable site-altitude enrichment. It will first be
+implemented and validated as an independent database command, then the same
+function will be invoked automatically after a successful provider discovery.
+It will not acquire webcam images, transform images, use S3, or publish MQTT.
+
+Planned command
+---------------
+
+The standalone interface will follow this form:
+
+    uv run --env-file .env python -m discovery.shared.add_altitude --network win
+
+It will support --dry-run, --limit, and --batch-size options. Dry-run will
+perform real elevation lookups and validation but will not modify PostgreSQL.
+
+Planned implementation
+----------------------
+
+- Select only sites in the requested network whose altitude is null and whose
+  latitude and longitude are valid.
+- Query the Open-Meteo Elevation API using WGS84 coordinate batches of no more
+  than 100 sites and interpret results as approximate GLO-90 terrain height.
+- Validate HTTP responses, JSON structure, result cardinality, and finite
+  numeric altitude values while accepting zero and negative elevations.
+- Update only successfully resolved sites and leave unresolved values null so
+  a later discovery or standalone run retries them.
+- Guard each database update with site_id, the original coordinates, and
+  altitude IS NULL so an altitude calculated from stale coordinates cannot be
+  written.
+- Never overwrite a non-null provider or previously derived altitude.
+- Preserve a derived Windy altitude when site coordinates are unchanged.
+- Reset altitude to null when provider coordinates change so it can be
+  recomputed from the new location.
+- Treat elevation-service timeout, throttling, malformed data, and missing
+  values as non-fatal enrichment failures.
+- Keep the shared lookup and database enrichment logic reusable by later
+  Fintraffic and Skaping discovery workflows.
+- Retain corrected_altitude as a separate concern based on corrected
+  coordinates; when supported, it follows the same missing-value and
+  coordinate-change rules.
+
+Integration sequence
+--------------------
+
+1. Implement and test the shared elevation client and standalone database
+   command.
+2. Run bounded dry-run and write-enabled live checks against Windy sites.
+3. Backfill the complete Windy registry and verify idempotency.
+4. Correct Windy site reconstruction so unchanged coordinates preserve
+   altitude and changed coordinates clear it.
+5. Invoke the same enrichment function after successful discovery
+   reconciliation. Discovery --dry-run remains entirely read-only.
+
+Checkpoint decision
+-------------------
+
+Do not mark checkpoint 4 complete until the standalone command, full Windy
+backfill, repeated idempotency check, coordinate lifecycle, failure behavior,
+and integrated discovery path pass the checkpoint 4 validation runbook.

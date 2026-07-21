@@ -1,0 +1,62 @@
+Checkpoint 5 work record - Windy image acquisition and ingestion state
+========================================================================
+
+Status
+------
+
+Checkpoint 5 is planned and has not yet been implemented. This file defines
+the intended boundary and will be rewritten with actual implementation and
+validation evidence when the checkpoint is complete.
+
+Scope
+-----
+
+Checkpoint 5 will acquire and validate images for due active Windy streams and
+update the existing ingestion-state columns. It will not transform images for
+delivery, upload objects to S3, publish MQTT notifications, or add a continuous
+worker loop.
+
+Planned implementation
+----------------------
+
+- Select due active Windy streams through the shared registry access layer.
+- Refresh one known webcam by Windy provider ID and request image metadata.
+- Treat lastUpdatedOn as an opaque provider marker rather than a guaranteed
+  physical acquisition timestamp.
+- Skip image download when the provider marker is unchanged.
+- Select the preview rendition explicitly and download its tokenized URL
+  immediately.
+- Apply explicit request timeouts, maximum byte limits, content validation,
+  and complete image decoding.
+- Bound retries and backoff for throttling and transient failures.
+- Distinguish missing cameras, missing renditions, expired URLs, invalid image
+  bodies, unchanged markers, and successful downloads.
+- Record a handled provider marker at the correct stage for invalid images.
+- Update last_download_timestamp and ema_download_period only after the
+  checkpoint-defined successful image acquisition stage.
+- Keep credentials in ignored secret files and avoid provider URLs or tokens
+  in persistent logs.
+
+Provider-listing consideration
+------------------------------
+
+Checkpoint 3 showed that Windy cameras may disappear from discovery listings
+and later return. Checkpoint 5 will query only registry streams whose
+operational status makes them eligible. A Windy-specific grace or unavailable
+status should be added only if its semantics and transition threshold are
+decided explicitly; it is not assumed by this checkpoint plan.
+
+Required tests
+--------------
+
+Fixture-based tests should cover changed and unchanged markers, rendition
+selection, successful download, byte and content limits, corrupt images,
+missing webcams, missing preview images, expired URLs, throttling, transient
+errors, retry exhaustion, and database state transitions.
+
+Checkpoint decision
+-------------------
+
+Do not mark checkpoint 5 complete until its focused automated tests and the
+manual validation runbook pass and the resulting state transitions have been
+reviewed.

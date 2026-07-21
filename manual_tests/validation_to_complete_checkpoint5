@@ -1,0 +1,78 @@
+Checkpoint 5 validation runbook - Windy image acquisition
+==========================================================
+
+Checkpoint outcome to validate
+------------------------------
+
+Checkpoint 5 must retrieve due active Windy streams, refresh provider image
+metadata, skip unchanged markers, download and fully validate changed preview
+images, and update ingestion state at the correct stages. It must not upload
+to S3 or publish MQTT notifications.
+
+This runbook is prepared in advance. Commands and expected outputs must be
+updated to match the implemented command-line interface before checkpoint 5
+is submitted for acceptance.
+
+1. Confirm branch and protected configuration
+---------------------------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git status --short
+    git diff --check
+    git check-ignore -v .env .secrets/windy_api_key .secrets/database_password
+
+The branch must be codex. Do not print secret values or discard unrelated
+working-tree changes.
+
+2. Start and verify PostgreSQL
+------------------------------
+
+    docker compose --env-file .env up -d postgres
+    docker compose exec postgres pg_isready
+    uv run --env-file .env python -m database.healthcheck
+
+Do not delete or recreate the PostgreSQL volume.
+
+3. Run focused automated tests
+------------------------------
+
+    uv run --env-file .env pytest tests/ingestion/windy -v
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database/test_registry_queries.py -v
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --help
+
+Tests must cover unchanged markers, valid changed images, invalid or oversized
+bodies, missing webcams and renditions, expired URLs, throttling, bounded
+retries, and database state transitions.
+
+4. Run bounded dry-run and acquisition checks
+---------------------------------------------
+
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --dry-run --limit 5
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --limit 5
+
+The dry run must not update PostgreSQL. The applied run must not print
+tokenized image URLs or credentials and must not contact S3 or MQTT.
+
+5. Inspect and repeat state transitions
+---------------------------------------
+
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT source_stream_id, status, last_provider_image_marker, last_download_timestamp, ema_download_period FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 20;"
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --limit 5
+
+Confirm successful downloads update marker, timestamp, and EMA; unchanged
+markers skip image bodies and do not advance the successful timestamp; failed
+requests do not claim success; and inactive or blacklisted streams are not
+queried.
+
+6. Final review and decision
+----------------------------
+
+    git diff --check
+    git status --short
+    git diff
+
+Checkpoint 5 is accepted only after focused tests, bounded live acquisition,
+unchanged-marker behavior, database state transitions, and secret review pass.
+Stop before checkpoint 6.

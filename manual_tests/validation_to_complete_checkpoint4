@@ -1,0 +1,129 @@
+Checkpoint 4 validation runbook - shared altitude enrichment
+============================================================
+
+Checkpoint outcome to validate
+------------------------------
+
+Checkpoint 4 must enrich missing site altitudes through a standalone command,
+then reuse the same function after successful discovery. Elevation-service
+failure must leave affected values null for retry and must not invalidate an
+otherwise successful provider discovery.
+
+This runbook is prepared before implementation. Exact output fields may be
+refined with the command-line interface, but the safety properties and
+validation sequence are required.
+
+1. Confirm branch and configuration safety
+------------------------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git status --short
+    git diff --check
+    git check-ignore -v .env .secrets/database_password
+
+The branch must be codex. Do not print secrets or discard unrelated changes.
+Confirm that the public and local Windy site-distance threshold is 10 metres.
+
+2. Start PostgreSQL and inspect preconditions
+---------------------------------------------
+
+    docker compose --env-file .env up -d postgres
+    docker compose exec postgres pg_isready
+    uv run --env-file .env python -m database.healthcheck
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) AS sites, count(*) FILTER (WHERE latitude IS NULL OR longitude IS NULL) AS missing_coordinates, count(*) FILTER (WHERE altitude IS NULL) AS missing_altitude FROM site WHERE network_id = 'win';"
+
+The Windy registry must be present. No Windy site should lack latitude or
+longitude. Do not clear the registry during routine checkpoint 4 validation.
+
+3. Run focused automated tests
+------------------------------
+
+    uv run --env-file .env pytest tests/discovery/shared tests/discovery/windy -v
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database -v
+    uv run --env-file .env python -m discovery.shared.add_altitude --help
+
+Tests must cover network filtering, missing-altitude selection, batches of at
+most 100 coordinate pairs, response/result ordering, zero and negative
+elevations, invalid numeric values, malformed and cardinality-mismatched JSON,
+timeouts, throttling, dry-run, idempotency, non-overwrite behavior, and the
+stale-coordinate update guard.
+
+4. Run a bounded standalone dry run
+-----------------------------------
+
+Capture the selected rows and their altitude values, then run:
+
+    uv run --env-file .env python -m discovery.shared.add_altitude --network win --dry-run --limit 10
+
+The command may call Open-Meteo and report resolved values, but its updated
+count must be zero. Query the selected rows again and confirm PostgreSQL is
+unchanged.
+
+5. Run a bounded standalone update
+----------------------------------
+
+    uv run --env-file .env python -m discovery.shared.add_altitude --network win --limit 10
+
+Inspect the affected rows. Resolved finite values, including zero or negative
+terrain elevations, may be stored. Missing or failed values must remain null.
+No non-null altitude may be overwritten.
+
+6. Verify bounded idempotency and isolation
+-------------------------------------------
+
+Repeat the same bounded command. Already populated sites must not be selected
+again. Confirm that no Fintraffic or Skaping site changed and that changing a
+selected site's coordinates before its guarded update prevents a stale
+altitude write in the corresponding integration test.
+
+7. Backfill the complete Windy registry
+---------------------------------------
+
+    uv run --env-file .env python -m discovery.shared.add_altitude --network win
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) AS sites, count(altitude) AS sites_with_altitude, count(*) FILTER (WHERE altitude IS NULL) AS unresolved FROM site WHERE network_id = 'win';"
+
+The command must report eligible, resolved, unresolved, and updated counts.
+Unresolved sites are acceptable after a provider failure and must remain
+eligible for a later retry.
+
+8. Verify the integrated discovery lifecycle
+---------------------------------------------
+
+Run the focused coordinate-lifecycle tests, then perform a Windy dry run:
+
+    uv run --env-file .env python -m discovery.windy.windy_discovery_workflow --dry-run
+
+It must perform no discovery or altitude database write. Then run one applied
+discovery using the normal operational command. Confirm that unchanged site
+coordinates preserve altitude and changed coordinates clear and recompute it.
+An Open-Meteo failure must not roll back successful Windy reconciliation.
+
+9. Exercise elevation-service failure
+--------------------------------------
+
+Using the test fixture or a deliberately non-serving local test endpoint,
+exercise timeout, HTTP error, throttling, malformed JSON, and missing-result
+paths. Do not direct a destructive experiment at the production endpoint.
+Affected altitude values must stay null and succeed on a later healthy retry.
+
+10. Final review
+----------------
+
+    git diff --check
+    git status --short
+    git diff
+
+Confirm that no secrets, copied private architecture text, downloaded data, or
+unexpected database migration appears. Record actual counts and test results
+in history/checkpoint4_work_record.txt before accepting the checkpoint.
+
+Checkpoint decision
+-------------------
+
+Checkpoint 4 is accepted only after standalone and integrated paths pass,
+Windy altitude backfill is measured, repeated execution is idempotent,
+coordinate changes cannot write stale altitude, failures remain retryable, and
+the final review is clean. Stop before checkpoint 5 image acquisition.
