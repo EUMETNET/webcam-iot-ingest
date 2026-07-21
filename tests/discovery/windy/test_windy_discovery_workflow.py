@@ -111,6 +111,45 @@ def test_preserves_existing_stream_and_site_identifier_assignment() -> None:
     assert streams["new"].site_id == "winoriginal"
 
 
+def test_preserves_altitude_until_anchor_coordinates_change() -> None:
+    stored = RegistrySnapshot(
+        sites={
+            "winanchor": {
+                "site_id": "winanchor",
+                "provider_site_id": "anchor",
+                "latitude": 60.0,
+                "longitude": 25.0,
+                "altitude": 42.0,
+                "country": "FI",
+                "provider_metadata": {},
+            }
+        },
+        source_streams={
+            "winanchor": {
+                "source_stream_id": "winanchor",
+                "site_id": "winanchor",
+                "provider_source_stream_id": "anchor",
+            }
+        },
+    )
+
+    unchanged = build_discovery_snapshot(
+        [webcam("anchor")],
+        stored,
+        allowed_countries={"FI"},
+        site_distance_threshold_m=10,
+    )
+    moved = build_discovery_snapshot(
+        [webcam("anchor", latitude=60.001)],
+        stored,
+        allowed_countries={"FI"},
+        site_distance_threshold_m=10,
+    )
+
+    assert unchanged.sites[0].altitude == 42.0
+    assert moved.sites[0].altitude is None
+
+
 def test_identifier_collision_gets_deterministic_alphanumeric_suffix() -> None:
     result = build_discovery_snapshot(
         [webcam("a-b"), webcam("ab", longitude=26.0)],

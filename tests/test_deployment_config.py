@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment_config import DatabaseConfig, WindyConfig
+from config.deployment_config import AltitudeConfig, DatabaseConfig, WindyConfig
 
 
 def test_database_config_reads_password_from_file(tmp_path: Path) -> None:
@@ -34,6 +34,15 @@ def test_database_config_rejects_empty_password_file(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="password file is empty"):
         config.read_password()
+
+
+def test_altitude_config_defaults_to_open_meteo() -> None:
+    config = AltitudeConfig.from_environment()
+
+    assert config.enabled is True
+    assert config.provider_url == "https://api.open-meteo.com/v1/elevation"
+    assert config.batch_size == 100
+    assert config.max_sites_per_run == 5000
 
 
 def test_windy_config_loads_query_discs(monkeypatch, tmp_path: Path) -> None:

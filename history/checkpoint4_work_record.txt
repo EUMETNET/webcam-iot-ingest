@@ -4,9 +4,10 @@ Checkpoint 4 work record - shared altitude enrichment
 Status
 ------
 
-Checkpoint 4 is planned and has not yet been implemented. This record defines
-the accepted standalone-first implementation boundary and will be completed
-with actual test and live-validation evidence.
+Checkpoint 4 implementation is complete. Automated and bounded live
+validation pass. The initial full live backfill is partially complete because
+the public elevation service stopped resolving batches after exactly 5,000
+sites; the remaining null values are deliberately retained for later retry.
 
 Preparation completed
 ---------------------
@@ -23,65 +24,70 @@ Preparation completed
 - That discovery registered 25,055 streams in 21,823 sites. Of those sites,
   2,112 contain more than one stream; the largest contains 14 streams.
 
-Scope
------
+Implementation
+--------------
 
-Checkpoint 4 will add reusable site-altitude enrichment. It will first be
-implemented and validated as an independent database command, then the same
-function will be invoked automatically after a successful provider discovery.
-It will not acquire webcam images, transform images, use S3, or publish MQTT.
+- discovery/shared/altitude_lookup.py implements bounded, paced Open-Meteo
+  requests for at most 100 coordinate pairs, strict result validation, and
+  retry handling for throttling and transient server failures.
+- discovery/shared/add_altitude.py provides the standalone --network command
+  with --dry-run, --limit, and --batch-size controls.
+- Missing sites are selected deterministically by network. Existing altitude
+  values are never queried or overwritten.
+- Updates are guarded by site identifier, network, null altitude, and the
+  original latitude/longitude, preventing stale-coordinate writes.
+- Failed batches and null elevation values remain unresolved and eligible for
+  later runs.
+- Windy discovery preserves altitude while anchor coordinates are unchanged,
+  clears it after coordinate movement, and invokes the same shared enrichment
+  function after successful registry reconciliation.
+- Windy discovery --dry-run performs no registry or altitude write.
+- Configuration controls enablement, provider URL, timeout, batch size,
+  request delay, bounded attempts, and a 5,000-site maximum per run.
+- README records the required Open-Meteo and Copernicus DEM attribution.
 
-Planned command
----------------
+Standalone command
+------------------
 
-The standalone interface will follow this form:
+The implemented interface is:
 
     uv run --env-file .env python -m discovery.shared.add_altitude --network win
 
-It will support --dry-run, --limit, and --batch-size options. Dry-run will
+It supports --dry-run, --limit, and --batch-size options. Dry-run does
 perform real elevation lookups and validation but will not modify PostgreSQL.
 
-Planned implementation
-----------------------
-
-- Select only sites in the requested network whose altitude is null and whose
-  latitude and longitude are valid.
-- Query the Open-Meteo Elevation API using WGS84 coordinate batches of no more
-  than 100 sites and interpret results as approximate GLO-90 terrain height.
-- Validate HTTP responses, JSON structure, result cardinality, and finite
-  numeric altitude values while accepting zero and negative elevations.
-- Update only successfully resolved sites and leave unresolved values null so
-  a later discovery or standalone run retries them.
-- Guard each database update with site_id, the original coordinates, and
-  altitude IS NULL so an altitude calculated from stale coordinates cannot be
-  written.
-- Never overwrite a non-null provider or previously derived altitude.
-- Preserve a derived Windy altitude when site coordinates are unchanged.
-- Reset altitude to null when provider coordinates change so it can be
-  recomputed from the new location.
-- Treat elevation-service timeout, throttling, malformed data, and missing
-  values as non-fatal enrichment failures.
-- Keep the shared lookup and database enrichment logic reusable by later
-  Fintraffic and Skaping discovery workflows.
-- Retain corrected_altitude as a separate concern based on corrected
-  coordinates; when supported, it follows the same missing-value and
-  coordinate-change rules.
-
-Integration sequence
+Validation performed
 --------------------
 
-1. Implement and test the shared elevation client and standalone database
-   command.
-2. Run bounded dry-run and write-enabled live checks against Windy sites.
-3. Backfill the complete Windy registry and verify idempotency.
-4. Correct Windy site reconstruction so unchanged coordinates preserve
-   altitude and changed coordinates clear it.
-5. Invoke the same enrichment function after successful discovery
-   reconciliation. Discovery --dry-run remains entirely read-only.
+- 31 focused configuration, shared-discovery, and Windy unit tests passed.
+- 15 live PostgreSQL integration tests passed.
+- The exact bounded dry-run command selected and resolved 10 sites and updated
+  zero rows.
+- Two bounded applied runs resolved and updated 10 sites each. The second run
+  correctly selected the next ten still-missing sites.
+- The full pass saw 21,803 remaining eligible sites, resolved and updated
+  5,000, and left 16,803 unresolved for retry.
+- The registry now contains 21,823 Windy sites: 5,020 with altitude and 16,803
+  without altitude. No site lacks latitude or longitude.
+- Stored altitude values currently range from -2 m to 4,493 m.
+- Python compilation and diff whitespace checks passed.
+
+Operational finding
+-------------------
+
+The exact 5,000-result boundary is consistent with public-service rate or
+quota enforcement. The free endpoint documents rate limits and no uptime
+guarantee. The workflow behaved as designed: successful results were guarded
+and stored, failed batches remained null, and a later run can resume solely
+from the missing set. Normal standalone and integrated runs are now capped at
+5,000 sites. One daily integrated attempt plus an optional second run at least
+one hour later can use the documented hourly and daily allowances without
+re-querying already populated sites.
 
 Checkpoint decision
 -------------------
 
-Do not mark checkpoint 4 complete until the standalone command, full Windy
-backfill, repeated idempotency check, coordinate lifecycle, failure behavior,
-and integrated discovery path pass the checkpoint 4 validation runbook.
+The code and automated validation for checkpoint 4 are complete. Final live
+acceptance requires retrying the remaining 16,803 sites after the public API
+quota window permits it, then confirming a repeated full run has zero eligible
+sites. Image acquisition remains checkpoint 5.

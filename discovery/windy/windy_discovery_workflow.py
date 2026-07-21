@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import math
@@ -12,7 +12,7 @@ from typing import Any, Mapping, Sequence
 
 import psycopg
 
-from config.deployment_config import DatabaseConfig, WindyConfig
+from config.deployment_config import AltitudeConfig, DatabaseConfig, WindyConfig
 from database.registry_queries import (
     DiscoveredSite,
     DiscoveredSourceStream,
@@ -21,6 +21,8 @@ from database.registry_queries import (
     apply_discovery_update,
     get_network_registry,
 )
+from discovery.shared.add_altitude import enrich_missing_altitudes
+from discovery.shared.altitude_lookup import AltitudeClient
 from discovery.windy.windy_source_access import WindyClient, WindyDiscoveryError
 
 
@@ -162,7 +164,7 @@ def build_discovery_snapshot(
         row = site_rows[site_id]
         anchor = normalized_by_id.get(str(row.get("provider_site_id")))
         if anchor is not None:
-            sites.append(_site_from_webcam(site_id, anchor))
+            sites.append(_site_from_webcam(site_id, anchor, previous=row))
         else:
             sites.append(_site_from_stored(row))
 
@@ -219,8 +221,31 @@ def run_discovery(*, dry_run: bool = False) -> WindyDiscoverySnapshot | Discover
         )
         if dry_run:
             return snapshot
-        return apply_discovery_update(
+        update = apply_discovery_update(
             connection, NETWORK_ID, snapshot.sites, snapshot.source_streams
+        )
+        altitude = AltitudeConfig.from_environment()
+        if not altitude.enabled:
+            return update
+        with AltitudeClient(
+            altitude.provider_url,
+            timeout_s=altitude.request_timeout_s,
+            request_delay_s=altitude.request_delay_s,
+            max_attempts=altitude.max_attempts,
+        ) as altitude_client:
+            enrichment = enrich_missing_altitudes(
+                connection,
+                NETWORK_ID,
+                altitude_client,
+                limit=altitude.max_sites_per_run,
+                batch_size=altitude.batch_size,
+            )
+        return replace(
+            update,
+            altitudes_eligible=enrichment.eligible,
+            altitudes_resolved=enrichment.resolved,
+            altitudes_unresolved=enrichment.unresolved,
+            altitudes_updated=enrichment.updated,
         )
 
 
@@ -284,12 +309,26 @@ def _new_identifier(prefix: str, provider_id: str, used: Mapping[str, Any] | set
     return candidate
 
 
-def _site_from_webcam(site_id: str, webcam: WindyWebcam) -> DiscoveredSite:
+def _site_from_webcam(
+    site_id: str,
+    webcam: WindyWebcam,
+    *,
+    previous: Mapping[str, Any] | None = None,
+) -> DiscoveredSite:
+    altitude = None
+    if (
+        previous is not None
+        and float(previous["latitude"]) == webcam.latitude
+        and float(previous["longitude"]) == webcam.longitude
+        and previous.get("altitude") is not None
+    ):
+        altitude = float(previous["altitude"])
     return DiscoveredSite(
         site_id=site_id,
         provider_site_id=webcam.provider_id,
         latitude=webcam.latitude,
         longitude=webcam.longitude,
+        altitude=altitude,
         country=webcam.country,
         provider_metadata=webcam.provider_metadata,
     )

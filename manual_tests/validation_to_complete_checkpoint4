@@ -9,9 +9,13 @@ then reuse the same function after successful discovery. Elevation-service
 failure must leave affected values null for retry and must not invalidate an
 otherwise successful provider discovery.
 
-This runbook is prepared before implementation. Exact output fields may be
-refined with the command-line interface, but the safety properties and
-validation sequence are required.
+The command and test paths below are implemented. Public Open-Meteo quota or
+rate limits may require the full backfill step to be repeated in a later quota
+window; unresolved values safely remain null between attempts.
+
+Normal runs are capped at 5,000 missing sites. To use a second portion of the
+documented daily allowance, wait at least one hour before another run. Never
+exceed the configured cap to evade provider limits.
 
 1. Confirm branch and configuration safety
 ------------------------------------------
@@ -70,13 +74,15 @@ Inspect the affected rows. Resolved finite values, including zero or negative
 terrain elevations, may be stored. Missing or failed values must remain null.
 No non-null altitude may be overwritten.
 
-6. Verify bounded idempotency and isolation
+6. Verify bounded progression and isolation
 -------------------------------------------
 
 Repeat the same bounded command. Already populated sites must not be selected
-again. Confirm that no Fintraffic or Skaping site changed and that changing a
-selected site's coordinates before its guarded update prevents a stale
-altitude write in the corresponding integration test.
+again; while other missing sites remain, the command should select the next
+bounded group. Confirm that no Fintraffic or Skaping site changed and that
+changing a selected site's coordinates before its guarded update prevents a
+stale altitude write in the corresponding integration test. Full idempotency
+is checked after all missing sites have been resolved.
 
 7. Backfill the complete Windy registry
 ---------------------------------------
@@ -87,7 +93,9 @@ altitude write in the corresponding integration test.
 
 The command must report eligible, resolved, unresolved, and updated counts.
 Unresolved sites are acceptable after a provider failure and must remain
-eligible for a later retry.
+eligible for a later retry. Repeat this step in a later quota window until the
+unresolved count reaches zero; do not increase request concurrency to evade
+the public-service limits.
 
 8. Verify the integrated discovery lifecycle
 ---------------------------------------------

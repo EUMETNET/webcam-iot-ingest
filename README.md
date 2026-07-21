@@ -7,6 +7,11 @@ FastAPI service that ingests webcam images, stores them in S3-compatible object 
 A presentation describing the repository and the current Windy discovery
 statistics is available on [GitHub Pages](https://nanopiero.github.io/webcam-iot-ingest/).
 
+Missing site altitudes may be enriched with the
+[Open-Meteo Elevation API](https://open-meteo.com/en/docs/elevation-api),
+using elevation data from the Copernicus DEM GLO-90 dataset. Open-Meteo and
+Copernicus attribution applies to those derived values.
+
 ## What it does
 
 1. Accepts a `POST /upload` payload with a base64-encoded image

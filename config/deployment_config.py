@@ -44,6 +44,54 @@ class DatabaseConfig:
 
 
 @dataclass(frozen=True)
+class AltitudeConfig:
+    enabled: bool
+    provider_url: str
+    request_timeout_s: float
+    batch_size: int = 100
+    request_delay_s: float = 0.1
+    max_attempts: int = 3
+    max_sites_per_run: int = 5000
+
+    @classmethod
+    def from_environment(cls) -> "AltitudeConfig":
+        enabled_value = os.getenv("ALTITUDE_PROVIDER_ENABLED", "true").lower()
+        if enabled_value not in {"true", "false"}:
+            raise ValueError("ALTITUDE_PROVIDER_ENABLED must be true or false")
+        config = cls(
+            enabled=enabled_value == "true",
+            provider_url=os.getenv(
+                "ALTITUDE_PROVIDER_URL", "https://api.open-meteo.com/v1/elevation"
+            ),
+            request_timeout_s=float(
+                os.getenv("ALTITUDE_REQUEST_TIMEOUT_S", "15")
+            ),
+            batch_size=int(os.getenv("ALTITUDE_BATCH_SIZE", "100")),
+            request_delay_s=float(os.getenv("ALTITUDE_REQUEST_DELAY_S", "0.1")),
+            max_attempts=int(os.getenv("ALTITUDE_MAX_ATTEMPTS", "3")),
+            max_sites_per_run=int(
+                os.getenv("ALTITUDE_MAX_SITES_PER_RUN", "5000")
+            ),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.provider_url.startswith(("http://", "https://")):
+            raise ValueError("altitude provider URL must use HTTP or HTTPS")
+        if self.request_timeout_s <= 0:
+            raise ValueError("altitude request timeout must be positive")
+        if not 1 <= self.batch_size <= 100:
+            raise ValueError("altitude batch size must be between 1 and 100")
+        if self.request_delay_s < 0:
+            raise ValueError("altitude request delay cannot be negative")
+        if self.max_attempts < 1:
+            raise ValueError("altitude maximum attempts must be positive")
+        if self.max_sites_per_run < 1:
+            raise ValueError("altitude sites per run must be positive")
+
+
+@dataclass(frozen=True)
 class WindyDiscoveryArea:
     latitude: float
     longitude: float

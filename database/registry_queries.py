@@ -62,6 +62,10 @@ class DiscoveryUpdateResult:
     streams_activated: int
     streams_inactivated: int
     blacklisted_preserved: int
+    altitudes_eligible: int = 0
+    altitudes_resolved: int = 0
+    altitudes_unresolved: int = 0
+    altitudes_updated: int = 0
 
 
 @dataclass(frozen=True)
