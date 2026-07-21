@@ -13,9 +13,10 @@ The command and test paths below are implemented. Public Open-Meteo quota or
 rate limits may require the full backfill step to be repeated in a later quota
 window; unresolved values safely remain null between attempts.
 
-Normal runs are capped at 5,000 missing sites. To use a second portion of the
-documented daily allowance, wait at least one hour before another run. Never
-exceed the configured cap to evade provider limits.
+Normal runs are capped at 5,000 missing sites. The intended workflow performs
+one altitude attempt as part of each daily discovery and lets the backlog
+drain over several days. Do not add extra daily runs merely to consume the
+remaining provider allowance.
 
 1. Confirm branch and configuration safety
 ------------------------------------------
@@ -44,15 +45,28 @@ longitude. Do not clear the registry during routine checkpoint 4 validation.
 3. Run focused automated tests
 ------------------------------
 
-    uv run --env-file .env pytest tests/discovery/shared tests/discovery/windy -v
-    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database -v
+    uv run --env-file .env pytest \
+      tests/test_deployment_config.py::test_altitude_config_defaults_to_open_meteo \
+      tests/discovery/shared/test_altitude_lookup.py \
+      tests/discovery/windy/test_windy_discovery_workflow.py::test_preserves_altitude_until_anchor_coordinates_change \
+      -v
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest \
+      tests/database/test_altitude_enrichment.py -v
     uv run --env-file .env python -m discovery.shared.add_altitude --help
 
-Tests must cover network filtering, missing-altitude selection, batches of at
-most 100 coordinate pairs, response/result ordering, zero and negative
-elevations, invalid numeric values, malformed and cardinality-mismatched JSON,
+This routine checkpoint selection runs 11 tests: nine focused unit cases and
+two database integration cases. They cover missing-altitude selection,
+batches of at most 100 coordinate pairs, response/result ordering, zero and
+negative elevations, invalid numeric values, malformed and cardinality-mismatched JSON,
 timeouts, throttling, dry-run, idempotency, non-overwrite behavior, and the
 stale-coordinate update guard.
+
+The broader regression commands remain available when shared registry or
+Windy discovery behavior changes, but are not required for every checkpoint 4
+revalidation:
+
+    uv run --env-file .env pytest tests/test_deployment_config.py tests/discovery/windy -q
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database -q
 
 4. Run a bounded standalone dry run
 -----------------------------------

@@ -80,9 +80,10 @@ quota enforcement. The free endpoint documents rate limits and no uptime
 guarantee. The workflow behaved as designed: successful results were guarded
 and stored, failed batches remained null, and a later run can resume solely
 from the missing set. Normal standalone and integrated runs are now capped at
-5,000 sites. One daily integrated attempt plus an optional second run at least
-one hour later can use the documented hourly and daily allowances without
-re-querying already populated sites.
+5,000 sites. The operational workflow intentionally uses one integrated
+attempt per daily discovery. Already populated sites are not queried again, so
+the current backlog is expected to drain over several days without consuming
+the second half of the documented daily allowance.
 
 Checkpoint decision
 -------------------
