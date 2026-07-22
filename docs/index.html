@@ -32,6 +32,9 @@
     .benchmark span { color: #9fb2c8; font-size: .78rem; }
     .detail { margin-top: .9rem; padding: .7rem .8rem; border-left: 3px solid #70d7ff; background: #0a2137; color: #b8cbe0; font-size: .78rem; line-height: 1.4; }
     footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    nav { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; gap: .45rem; }
+    nav a { padding: .42rem .72rem; border: 1px solid #294059; border-radius: 999px; background: #0c1a2b; color: #9fb2c8; text-decoration: none; font-size: .76rem; }
+    nav a[aria-current="page"], nav a:hover { color: #70d7ff; border-color: #70d7ff; }
     @media (max-width: 800px) {
       header { align-items: start; flex-direction: column; gap: .3rem; }
       .layout { grid-template-columns: 1fr; }
@@ -40,6 +43,7 @@
   </style>
 </head>
 <body>
+  <nav aria-label="Slides"><a href="./" aria-current="page">Discovery</a><a href="ingestion.html">Ingestion</a></nav>
   <main>
     <header>
       <div>
@@ -52,19 +56,19 @@
       <section>
         <h2>Active cameras by country</h2>
         <table class="countries" aria-label="Active Windy cameras by country">
-          <thead><tr><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th><th>State</th><th>Cameras</th></tr></thead>
+          <thead><tr><th>Country</th><th>Cameras</th><th>Country</th><th>Cameras</th><th>Country</th><th>Cameras</th></tr></thead>
           <tbody>
-            <tr><td>AT</td><td>2,829</td><td>IE</td><td>34</td><td>NL</td><td>148</td></tr>
-            <tr><td>BE</td><td>123</td><td>IS</td><td>153</td><td>NO</td><td>1,450</td></tr>
-            <tr><td>CH</td><td>1,470</td><td>IT</td><td>3,094</td><td>PL</td><td>725</td></tr>
-            <tr><td>CY</td><td>11</td><td>LT</td><td>26</td><td>PT</td><td>173</td></tr>
-            <tr><td>CZ</td><td>1,487</td><td>LU</td><td>38</td><td>RO</td><td>141</td></tr>
-            <tr><td>DE</td><td>2,793</td><td>LV</td><td>37</td><td>RS</td><td>62</td></tr>
-            <tr><td>DK</td><td>43</td><td>ME</td><td>12</td><td>SE</td><td>971</td></tr>
-            <tr><td>EE</td><td>25</td><td>MK</td><td>15</td><td>SI</td><td>787</td></tr>
-            <tr><td>ES</td><td>1,468</td><td>MT</td><td>1</td><td>SK</td><td>314</td></tr>
-            <tr><td>FI</td><td>1,676</td><td>FR</td><td>2,056</td><td>GB</td><td>1,351</td></tr>
-            <tr><td>GR</td><td>508</td><td>HR</td><td>309</td><td>HU</td><td>725</td></tr>
+            <tr><td>Austria</td><td>2,829</td><td>Belgium</td><td>123</td><td>Croatia</td><td>309</td></tr>
+            <tr><td>Cyprus</td><td>11</td><td>Czechia</td><td>1,487</td><td>Denmark</td><td>43</td></tr>
+            <tr><td>Estonia</td><td>25</td><td>Finland</td><td>1,676</td><td>France</td><td>2,056</td></tr>
+            <tr><td>Germany</td><td>2,793</td><td>Greece</td><td>508</td><td>Hungary</td><td>725</td></tr>
+            <tr><td>Iceland</td><td>153</td><td>Ireland</td><td>34</td><td>Italy</td><td>3,094</td></tr>
+            <tr><td>Latvia</td><td>37</td><td>Lithuania</td><td>26</td><td>Luxembourg</td><td>38</td></tr>
+            <tr><td>Malta</td><td>1</td><td>Montenegro</td><td>12</td><td>Netherlands</td><td>148</td></tr>
+            <tr><td>North Macedonia</td><td>15</td><td>Norway</td><td>1,450</td><td>Poland</td><td>725</td></tr>
+            <tr><td>Portugal</td><td>173</td><td>Romania</td><td>141</td><td>Serbia</td><td>62</td></tr>
+            <tr><td>Slovakia</td><td>314</td><td>Slovenia</td><td>787</td><td>Spain</td><td>1,468</td></tr>
+            <tr><td>Sweden</td><td>971</td><td>Switzerland</td><td>1,470</td><td>United Kingdom</td><td>1,351</td></tr>
           </tbody>
         </table>
         <div class="site-total"><strong>21,823 sites</strong><span>10 m maximum colocation distance · 2,112 multi-camera sites</span></div>

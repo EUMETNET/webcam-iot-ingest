@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Windy ingestion benchmark</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #edf5ff; }
+    main { width: min(1500px, 100%); min-height: 100vh; margin: auto; padding: 3vh 3vw; display: flex; flex-direction: column; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin-bottom: 2vh; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 4.5rem); letter-spacing: -.045em; }
+    h2 { margin: 0 0 .7rem; color: #70d7ff; font-size: clamp(1rem, 1.4vw, 1.4rem); }
+    .headline { color: #70d7ff; font-size: clamp(1.1rem, 2vw, 2rem); font-weight: 750; white-space: nowrap; }
+    .subtitle { margin: .45rem 0 0; color: #9fb2c8; font-size: clamp(.8rem, 1.15vw, 1.15rem); }
+    .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.6rem; }
+    section { border: 1px solid #294059; border-radius: 16px; background: #0c1a2b; padding: 1rem 1.2rem; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; margin-bottom: 1rem; }
+    .card { padding: .8rem; border-radius: 12px; background: #10263d; }
+    .card strong { display: block; color: #70d7ff; font-size: clamp(1.25rem, 2vw, 2rem); font-variant-numeric: tabular-nums; }
+    .card span { color: #9fb2c8; font-size: .76rem; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: clamp(.72rem, .92vw, .94rem); }
+    th { color: #91a8bf; text-align: left; font-weight: 600; }
+    th, td { padding: .45rem .4rem; border-bottom: 1px solid #1d3045; }
+    td:not(:first-child), th:not(:first-child) { text-align: right; }
+    tr:last-child td { border-bottom: 0; }
+    .accent { color: #70d7ff; font-weight: 700; }
+    .note { margin: .8rem 0 0; color: #91a8bf; font-size: clamp(.7rem, .86vw, .86rem); line-height: 1.45; }
+    .detail { margin-top: .9rem; padding: .72rem .82rem; border-left: 3px solid #70d7ff; background: #0a2137; color: #b8cbe0; font-size: .8rem; line-height: 1.45; }
+    nav { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; gap: .45rem; }
+    nav a { padding: .42rem .72rem; border: 1px solid #294059; border-radius: 999px; background: #0c1a2b; color: #9fb2c8; text-decoration: none; font-size: .76rem; }
+    nav a[aria-current="page"], nav a:hover { color: #70d7ff; border-color: #70d7ff; }
+    footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; gap: .3rem; }
+      .layout { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav aria-label="Slides"><a href="./">Discovery</a><a href="ingestion.html" aria-current="page">Ingestion</a></nav>
+  <main>
+    <header>
+      <div>
+        <h1>Windy webcam ingestion</h1>
+        <p class="subtitle">20 epochs · France and Germany · five-minute start cadence · complete S3 and MQTT pipeline</p>
+      </div>
+      <div class="headline">40.49 s mean epoch</div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2>Observed workload</h2>
+        <div class="cards">
+          <div class="card"><strong>61,526</strong><span>camera checks</span></div>
+          <div class="card"><strong>53.87%</strong><span>new images published</span></div>
+          <div class="card"><strong>0</strong><span>Windy throttling responses</span></div>
+        </div>
+        <table aria-label="Ingestion benchmark outcomes">
+          <thead><tr><th>Outcome</th><th>Count</th><th>Share</th></tr></thead>
+          <tbody>
+            <tr><td>New image → S3 + MQTT</td><td>33,142</td><td class="accent">53.87%</td></tr>
+            <tr><td>Provider marker unchanged</td><td>27,763</td><td>45.12%</td></tr>
+            <tr><td>Provider error</td><td>621</td><td>1.01%</td></tr>
+          </tbody>
+        </table>
+        <div class="detail"><strong>Epoch timing.</strong> Mean 40.49 s · minimum 14.10 s · maximum 65.35 s · about 3,076 selected streams per epoch. The durable publication outbox was empty after the run.</div>
+        <p class="note">Configuration: 100 worker threads, 64 pooled PostgreSQL connections, 0.01 s Windy request-start pacing, 300 s minimum epoch start-to-start period, JPEG transformation, EWC S3 upload and MQTT QoS 1 acknowledgement.</p>
+      </section>
+      <section>
+        <h2>Observed image-availability EMA</h2>
+        <table aria-label="EMA image availability by country">
+          <thead><tr><th>Country</th><th>Cameras</th><th>Coverage</th><th>Mean</th><th>Median</th><th>p90</th></tr></thead>
+          <tbody>
+            <tr><td>Germany</td><td>2,793</td><td>99.43%</td><td>14.1 min</td><td class="accent">11.4 min</td><td>22.7 min</td></tr>
+            <tr><td>France</td><td>2,056</td><td>99.27%</td><td>17.7 min</td><td class="accent">14.2 min</td><td>28.0 min</td></tr>
+          </tbody>
+        </table>
+        <h2 style="margin-top:1.2rem">EMA distribution</h2>
+        <table aria-label="EMA availability bands">
+          <thead><tr><th>Country</th><th>&lt; 10 min</th><th>10–30 min</th><th>≥ 30 min</th></tr></thead>
+          <tbody>
+            <tr><td>Germany</td><td>81 · 2.9%</td><td class="accent">2,626 · 94.6%</td><td>70 · 2.5%</td></tr>
+            <tr><td>France</td><td>29 · 1.4%</td><td class="accent">1,923 · 94.2%</td><td>89 · 4.4%</td></tr>
+          </tbody>
+        </table>
+        <div class="detail"><strong>Interpretation.</strong> Most observed update periods fall between 10 and 30 minutes, and 45% of freshness checks found no new image. Batch metadata lookup would reduce refresh traffic, while EMA-aware scheduling could also reduce unnecessary checks. EMA describes observed successful-ingestion intervals and will continue to stabilize with longer operation.</div>
+        <p class="note">Stage timing from the preceding live FR+DE sample: provider metadata 0.67 s, source download 0.68 s, S3 0.18 s, database enqueue 0.15 s, MQTT 0.037 s and transformation 0.018 s on average.</p>
+      </section>
+    </div>
+    <footer>Windy ingestion benchmark · 20 epochs completed 21 July 2026</footer>
+  </main>
+</body>
+</html>
