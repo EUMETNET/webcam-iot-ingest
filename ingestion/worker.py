@@ -134,6 +134,7 @@ def run_worker(
     countries: tuple[str, ...],
     max_jobs: int | None = None,
     epochs: int | None = None,
+    run_for_seconds: float | None = None,
     dry_run: bool = False,
     stop_event: threading.Event | None = None,
     verbose: bool = False,
@@ -142,6 +143,10 @@ def run_worker(
         raise ValueError("checkpoint 7 supports only network 'win'")
     if epochs is not None and epochs < 1:
         raise ValueError("epochs must be positive")
+    if run_for_seconds is not None and run_for_seconds <= 0:
+        raise ValueError("run_for_seconds must be positive")
+    if epochs is not None and run_for_seconds is not None:
+        raise ValueError("epochs and run_for_seconds are mutually exclusive")
     normalized = _validate_countries(countries)
     worker = WorkerConfig.from_environment()
     windy = WindyIngestionConfig.from_environment()
@@ -154,8 +159,17 @@ def run_worker(
     gate = RateGate(windy.request_delay_s)
     summaries: list[dict[str, object]] = []
     epoch_index = 0
+    deadline = (
+        time.monotonic() + run_for_seconds
+        if run_for_seconds is not None
+        else None
+    )
     try:
-        while not stop.is_set() and (epochs is None or epoch_index < epochs):
+        while (
+            not stop.is_set()
+            and (epochs is None or epoch_index < epochs)
+            and (deadline is None or time.monotonic() < deadline)
+        ):
             started = time.monotonic()
             try:
                 summary = _run_epoch(
@@ -178,13 +192,14 @@ def run_worker(
                 epoch_index += 1
                 metrics.epoch_duration.labels("win").observe(duration_s)
                 if epochs is None or epoch_index < epochs:
-                    stop.wait(
-                        _epoch_wait_s(
-                            time.monotonic() - started,
-                            worker.minimum_epoch_period_s,
-                            worker.idle_delay_s,
-                        )
+                    wait_s = _epoch_wait_s(
+                        time.monotonic() - started,
+                        worker.minimum_epoch_period_s,
+                        worker.idle_delay_s,
                     )
+                    if deadline is not None:
+                        wait_s = min(wait_s, max(0.0, deadline - time.monotonic()))
+                    stop.wait(wait_s)
             except Exception as error:
                 logger.error("Windy ingestion epoch failed: %s", type(error).__name__)
                 metrics.epochs.labels("win", "failure").inc()
@@ -402,7 +417,13 @@ def main() -> None:
         "--countries", default=",".join(EUMETNET_MEMBER_COUNTRIES)
     )
     parser.add_argument("--max-jobs", type=int)
-    parser.add_argument("--epochs", type=int)
+    limit = parser.add_mutually_exclusive_group()
+    limit.add_argument("--epochs", type=int)
+    limit.add_argument(
+        "--run-for-seconds",
+        type=float,
+        help="stop starting epochs after this duration; finish an active epoch",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--verbose", action="store_true", help="print epoch progress once per second"
@@ -420,6 +441,7 @@ def main() -> None:
         countries=tuple(args.countries.split(",")),
         max_jobs=args.max_jobs,
         epochs=args.epochs,
+        run_for_seconds=args.run_for_seconds,
         dry_run=args.dry_run,
         stop_event=stop,
         verbose=args.verbose,

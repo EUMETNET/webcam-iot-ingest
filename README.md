@@ -21,9 +21,10 @@ Copernicus attribution applies to those derived values.
 
 ## Quick start
 
-Install just
+Install the repository-pinned `just` version without root privileges:
+
 ```bash
-install-just.sh
+./install-just.sh
 ```
 
 Adjust env variables and run
@@ -91,6 +92,39 @@ just local
 
 - Prometheus: http://localhost:9090
 - Grafana: http://localhost:3000
+
+Run a detached, monitored Windy benchmark with
+[just](https://github.com/casey/just):
+
+```bash
+just ingestion-test all_windy 20m
+```
+
+`all_windy` selects every configured EUMETNET country and `20m` runs for 20
+minutes. A country subset can be supplied as `FR,DE`; durations accept `s`,
+`m`, or `h`. Once the deadline is reached, no new epoch starts, but an active
+epoch finishes normally. Every invocation creates a uniquely hashed `screen`
+session and a timestamped `/tmp` log; the recipe prints both names when it
+starts.
+
+The benchmark keeps two independent timing controls explicit:
+
+- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam polling floor;
+- `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
+- `INGESTION_IDLE_DELAY_S=0` adds no post-epoch pause; the 15-second minimum
+  epoch period still prevents a tight loop for short or empty epochs.
+
+### Reproducible monitoring versions
+
+| Component | Version | Pin location |
+|---|---:|---|
+| Prometheus | 3.13.1 | `docker-compose.yml` image tag |
+| Grafana OSS | 11.2.0 | `docker-compose.yml` image tag |
+| just | 1.57.0 | `justfile` and `install-just.sh` |
+
+The Compose image tags make monitoring recreation deterministic at the release
+version level. For byte-identical container images, deployments may additionally
+lock the resolved image digests in their deployment manifest.
 
 Pre-built dashboards for FastAPI and MQTT are provisioned automatically.
 

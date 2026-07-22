@@ -1,6 +1,8 @@
 from threading import Event
 from unittest.mock import Mock
 
+import pytest
+
 from config.deployment_config import WindyIngestionConfig, WorkerConfig
 from ingestion.worker import (
     DatabaseConnectionPool,
@@ -8,6 +10,7 @@ from ingestion.worker import (
     _epoch_wait_s,
     _progress,
     _run_epoch,
+    run_worker,
 )
 from ingestion.worker_metrics import WorkerMetrics
 from tests.ingestion.windy.test_windy_ingestion_workflow import job
@@ -102,3 +105,10 @@ def test_epoch_wait_enforces_period_and_idle_floor() -> None:
     assert _epoch_wait_s(4, 15, 5) == 11
     assert _epoch_wait_s(14, 15, 5) == 5
     assert _epoch_wait_s(20, 15, 5) == 5
+
+
+def test_worker_rejects_conflicting_or_invalid_time_limits() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        run_worker(network="win", countries=("DK",), epochs=1, run_for_seconds=60)
+    with pytest.raises(ValueError, match="run_for_seconds must be positive"):
+        run_worker(network="win", countries=("DK",), run_for_seconds=0)
