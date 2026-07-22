@@ -11,9 +11,16 @@ from database.registry_queries import (
     DiscoveredSourceStream,
     RegistryCollisionError,
     apply_discovery_update,
+    apply_ema_update_candidates,
     get_due_source_streams,
+    get_pending_publications,
     get_network_registry,
+    record_freshness_query,
     record_provider_image_marker,
+    record_download_and_enqueue_publication,
+    mark_publication_uploaded,
+    record_publication_failure,
+    complete_publication,
     record_successful_download,
     set_source_stream_status,
 )
@@ -208,6 +215,7 @@ def test_due_stream_selection_filters_status_network_and_recent_downloads(
         now - timedelta(minutes=2),
         ema_alpha=0.5,
     )
+    record_freshness_query(connection, recent_stream, now - timedelta(minutes=2))
 
     due = get_due_source_streams(
         connection, "win", timedelta(minutes=5), now=now
@@ -221,6 +229,84 @@ def test_due_stream_selection_filters_status_network_and_recent_downloads(
         )
         == []
     )
+
+
+def test_due_stream_selection_filters_country_and_applies_limit(
+    connection, identifiers
+) -> None:
+    site_id, stream_a, stream_b = identifiers
+    second_site_id = f"{site_id}c"
+    apply_discovery_update(
+        connection,
+        "win",
+        [site(site_id), site(second_site_id)],
+        [stream(stream_a, site_id), stream(stream_b, second_site_id)],
+    )
+    connection.execute(
+        "UPDATE site SET country = 'DK' WHERE site_id = %s", (site_id,)
+    )
+    connection.execute(
+        "UPDATE site SET country = 'MT' WHERE site_id = %s", (second_site_id,)
+    )
+
+    selected = get_due_source_streams(
+        connection, "win", timedelta(0), countries=("DK",), limit=1
+    )
+
+    assert [item.source_stream_id for item in selected] == [stream_a]
+
+
+def test_due_stream_selection_uses_ema_factor_and_maximum_cap(
+    connection, identifiers
+) -> None:
+    site_id, short_ema_stream, capped_stream = identifiers
+    now = datetime(2026, 7, 14, 12, 0, tzinfo=timezone.utc)
+    apply_discovery_update(
+        connection,
+        "win",
+        [site(site_id)],
+        [stream(short_ema_stream, site_id), stream(capped_stream, site_id)],
+    )
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_freshness_query_timestamp = %s,
+            ema_download_period = CASE source_stream_id WHEN %s THEN 600 ELSE 10000 END
+        WHERE source_stream_id IN (%s, %s)
+        """,
+        (
+            now - timedelta(minutes=10),
+            short_ema_stream,
+            short_ema_stream,
+            capped_stream,
+        ),
+    )
+
+    due = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        maximum_poll_interval=timedelta(minutes=30),
+        now=now,
+    )
+    assert [item.source_stream_id for item in due] == [short_ema_stream]
+
+    record_freshness_query(
+        connection, capped_stream, now - timedelta(minutes=31)
+    )
+    due = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        maximum_poll_interval=timedelta(minutes=30),
+        now=now,
+    )
+    assert {item.source_stream_id for item in due} == {
+        short_ema_stream,
+        capped_stream,
+    }
 
 
 def test_ingestion_state_updates_respect_workflow_stages(
@@ -261,3 +347,73 @@ def test_ingestion_state_updates_respect_workflow_stages(
         seconds=500
     )
     assert stored["ema_download_period"] == 350.0
+
+
+def test_publication_outbox_lifecycle_is_durable(connection, identifiers) -> None:
+    site_id, stream_id, _ = identifiers
+    timestamp = datetime(2026, 7, 21, 13, 0, tzinfo=timezone.utc)
+    apply_discovery_update(
+        connection, "win", [site(site_id)], [stream(stream_id, site_id)]
+    )
+
+    ema = record_download_and_enqueue_publication(
+        connection,
+        stream_id,
+        "marker",
+        timestamp,
+        ema_alpha=0.2,
+        image_id=f"image{stream_id}.jpg",
+        object_key=f"T0V0/win/{stream_id}.jpg",
+        derived_content=b"jpeg",
+        notification={"derived_stream": {"transformation_version": "T0V0"}},
+    )
+    pending = get_pending_publications(connection, limit=10)
+
+    assert ema == 300.0
+    assert len(pending) == 1
+    assert pending[0].stage == "pending_s3"
+    assert pending[0].derived_content == b"jpeg"
+
+    mark_publication_uploaded(connection, pending[0].image_id)
+    record_publication_failure(connection, pending[0].image_id, "mqtt_publish")
+    replay = get_pending_publications(connection, limit=10)[0]
+    assert replay.stage == "pending_mqtt"
+    assert replay.attempt_count == 1
+    assert replay.last_error_code == "mqtt_publish"
+
+    complete_publication(connection, replay.image_id)
+    assert get_pending_publications(connection, limit=10) == []
+
+
+def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
+    site_id, stream_id, _ = identifiers
+    timestamp = datetime(2026, 7, 21, 13, 0, tzinfo=timezone.utc)
+    apply_discovery_update(
+        connection, "win", [site(site_id)], [stream(stream_id, site_id)]
+    )
+
+    candidate = record_successful_download(
+        connection,
+        stream_id,
+        "marker",
+        timestamp,
+        ema_alpha=0.2,
+        defer_ema_update=True,
+    )
+    stored = get_network_registry(connection, "win").source_streams[stream_id]
+    assert stored["last_download_timestamp"] == timestamp
+    assert stored["ema_download_period"] is None
+
+    assert apply_ema_update_candidates(connection, [candidate]) == 1
+    stored = get_network_registry(connection, "win").source_streams[stream_id]
+    assert stored["ema_download_period"] == 300.0
+
+    record_successful_download(
+        connection,
+        stream_id,
+        "newer-marker",
+        timestamp + timedelta(minutes=5),
+        ema_alpha=0.2,
+        defer_ema_update=True,
+    )
+    assert apply_ema_update_candidates(connection, [candidate]) == 0

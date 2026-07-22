@@ -2,7 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from config.deployment_config import AltitudeConfig, DatabaseConfig, WindyConfig
+from config.deployment_config import (
+    AltitudeConfig,
+    DatabaseConfig,
+    WindyConfig,
+    WindyIngestionConfig,
+    TransformationConfig,
+    MqttConfig,
+)
 
 
 def test_database_config_reads_password_from_file(tmp_path: Path) -> None:
@@ -113,3 +120,27 @@ def test_windy_config_reads_api_key_from_file(tmp_path: Path) -> None:
         request_timeout_s=15,
     )
     assert config.read_api_key() == "windy-test-key"
+
+
+def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
+    config = WindyIngestionConfig.from_environment()
+
+    assert config.default_limit == 10
+    assert config.download_retry_count == 0
+    assert config.image_max_bytes == 10_000_000
+    assert config.minimum_ingestion_interval_s == 300
+    assert config.polling_interval_factor == 0.7
+    assert config.maximum_poll_interval_s == 1800
+
+
+def test_checkpoint6_configuration_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("MQTT_HOST", raising=False)
+    transformation = TransformationConfig.from_environment()
+    mqtt = MqttConfig.from_environment()
+
+    assert transformation.version == "T0V0"
+    assert transformation.max_height_px == 288
+    assert transformation.target_size_bytes == 50_000
+    assert transformation.panoramic_target_size_bytes == 200_000
+    assert mqtt.host == "localhost"
+    assert mqtt.qos == 1

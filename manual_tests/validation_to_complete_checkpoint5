@@ -1,17 +1,13 @@
 Checkpoint 5 validation runbook - Windy image acquisition
 ==========================================================
 
-Checkpoint outcome to validate
-------------------------------
+Checkpoint outcome
+------------------
 
-Checkpoint 5 must retrieve due active Windy streams, refresh provider image
-metadata, skip unchanged markers, download and fully validate changed preview
-images, and update ingestion state at the correct stages. It must not upload
-to S3 or publish MQTT notifications.
-
-This runbook is prepared in advance. Commands and expected outputs must be
-updated to match the implemented command-line interface before checkpoint 5
-is submitted for acceptance.
+Checkpoint 5 retrieves due active Windy streams, compares the current
+`lastUpdatedOn` marker with stored state, skips unchanged images, downloads and
+fully decodes changed `preview` images, and updates ingestion state only at the
+correct stage. It does not transform images, use S3, or publish MQTT messages.
 
 1. Confirm branch and protected configuration
 ---------------------------------------------
@@ -22,11 +18,10 @@ is submitted for acceptance.
     git diff --check
     git check-ignore -v .env .secrets/windy_api_key .secrets/database_password
 
-The branch must be codex. Do not print secret values or discard unrelated
-working-tree changes.
+The branch must be `codex`. Do not print secrets or discard unrelated changes.
 
-2. Start and verify PostgreSQL
-------------------------------
+2. Verify PostgreSQL
+--------------------
 
     docker compose --env-file .env up -d postgres
     docker compose exec postgres pg_isready
@@ -34,45 +29,55 @@ working-tree changes.
 
 Do not delete or recreate the PostgreSQL volume.
 
-3. Run focused automated tests
-------------------------------
+3. Run the focused automated checks
+-----------------------------------
 
-    uv run --env-file .env pytest tests/ingestion/windy -v
-    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database/test_registry_queries.py -v
+    uv run --env-file .env pytest tests/ingestion tests/test_deployment_config.py -q
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest tests/database/test_registry_queries.py -q
     uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --help
 
-Tests must cover unchanged markers, valid changed images, invalid or oversized
-bodies, missing webcams and renditions, expired URLs, throttling, bounded
-retries, and database state transitions.
+These checks cover marker equality, rendition selection, bounded streaming,
+complete decoding, invalid and oversized bodies, throttling/retry behaviour,
+country selection, due-state filtering, and database state transitions.
 
-4. Run bounded dry-run and acquisition checks
----------------------------------------------
+4. Run bounded memory-only samples
+----------------------------------
 
-    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --dry-run --limit 5
-    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --limit 5
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK --limit 3 --dry-run
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK,MT --limit 4 --dry-run
 
-The dry run must not update PostgreSQL. The applied run must not print
-tokenized image URLs or credentials and must not contact S3 or MQTT.
+The JSON output must contain names, countries, dimensions, formats, and outcome
+counts, but no tokenized image URLs or credentials. `--dry-run` must not change
+markers, timestamps, or EMA values. When several countries are requested, the
+limit is divided between them; a country with fewer due streams may leave some
+of the global limit unused.
 
-5. Inspect and repeat state transitions
----------------------------------------
+5. Validate the real freshness transition on a tiny sample
+----------------------------------------------------------
+
+Run one applied camera, then repeat the same command:
+
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK --limit 1
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK --limit 1
+
+Inspect the affected state:
 
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
-      "SELECT source_stream_id, status, last_provider_image_marker, last_download_timestamp, ema_download_period FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 20;"
-    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --once --limit 5
+      "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp, ema_download_period FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' AND s.country = 'DK' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 5;"
 
-Confirm successful downloads update marker, timestamp, and EMA; unchanged
-markers skip image bodies and do not advance the successful timestamp; failed
-requests do not claim success; and inactive or blacklisted streams are not
-queried.
+The first successful changed image records its marker, UTC timestamp, and EMA.
+If the same stream is selected and its Windy marker has not changed, its outcome
+is `unchanged` and its image body is not downloaded. The minimum interval can
+make another never-downloaded due stream sort first; the automated test is the
+deterministic assertion of the exact same-stream unchanged case.
 
-6. Final review and decision
-----------------------------
+6. Final review
+---------------
 
     git diff --check
     git status --short
-    git diff
+    git diff -- .env.example config/deployment_config.py database/registry_queries.py ingestion tests history/checkpoint4_work_record.txt history/checkpoint5_work_record.txt manual_tests/validation_to_complete_checkpoint4 manual_tests/validation_to_complete_checkpoint5
 
-Checkpoint 5 is accepted only after focused tests, bounded live acquisition,
-unchanged-marker behavior, database state transitions, and secret review pass.
-Stop before checkpoint 6.
+Checkpoint 5 is accepted. The focused tests, bounded live acquisition,
+freshness logic, database transitions, and secret review passed. Proceed to
+checkpoint 6; continuous workers remain later work.

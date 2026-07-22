@@ -1,1 +1,1 @@
-
+"""Provider image-acquisition workflows."""

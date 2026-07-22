@@ -1,0 +1,74 @@
+Checkpoint 6 work record - transformation, S3, and MQTT
+=======================================================
+
+Status
+------
+
+Checkpoint 6 is accepted. Transformation, target S3 storage, and local MQTT
+notification were validated separately and through one bounded end-to-end
+Windy publication.
+
+Implementation
+--------------
+
+- T0V0 fully decodes the source, applies EXIF orientation, uses the first
+  frame, converts to RGB, caps height at 288 pixels proportionally, and emits
+  progressive optimized JPEG.
+- Standard images target at most 50,000 encoded bytes; images with aspect ratio
+  at least 2.0 use the 200,000-byte panoramic target. Quality is reduced first,
+  then dimensions only when needed to meet the configured target.
+- The scalar image signature is deterministic mean luminance over transformed
+  pixels before lossy encoding.
+- Derived stream, image, and immutable S3 object keys follow the architecture:
+  `{source_stream_id}T0V0`, `YYYYMMDDTHHMMSSZ_{derived_stream_id}.jpg`, and
+  `T0V0/{network}/{YYYY}/{MM}/{DD}/{HH}/{image_id}`.
+- S3 credentials are read from ignored files. Uploads use `image/jpeg`, an
+  immutable create precondition, one configured retry, and sanitized errors.
+- N0V0 contains storage, network, site, source-stream, derived-stream,
+  timestamps, source-image, and derived-image metadata.
+- MQTT uses the local anonymous broker, topic `webcam/T0V0`, QoS 1, no retain,
+  and one configured retry. Publication happens only after successful upload.
+- Windy `--dry-run` now transforms in memory and reports derived metadata but
+  still writes neither PostgreSQL, S3, nor MQTT. `--publish` explicitly enables
+  the complete S3-then-MQTT path and cannot be combined with `--dry-run`.
+
+Validation performed
+--------------------
+
+- 40 focused ingestion, transformation, storage, notification, and
+  configuration tests pass.
+- A live Windy memory-only run transformed one Danish and one Maltese 400 x 224
+  JPEG. T0V0 retained their dimensions and produced 19,811-byte and
+  21,631-byte normalized JPEGs with scalar signatures and deterministic IDs.
+- The repository Mosquitto 2.0.21 container received a real QoS 1 message on
+  `webcam/T0V0`: `{"schema_version":"N0V0","smoke_test":true}`.
+- S3 upload ordering and failure isolation are fixture-tested. No target S3
+  object had yet been retained by an end-to-end publication run.
+- A live 16 MiB EWC S3 smoke test uploaded at 23.44 MB/s and downloaded at
+  73.06 MB/s. The downloaded checksum matched and the unique temporary object
+  was deleted successfully. This single-stream test is below the architecture's
+  favourable 90--100 MB/s bulk figure, above its approximate 10 MB/s external
+  network observation, and has an upload rate slightly above the cited
+  15--20 MB/s multithreaded small-object range. It is a connectivity-scale
+  measurement, not a statistically stable infrastructure benchmark.
+- The final bounded publication processed `win1326378277`: its 17,328-byte
+  Windy JPEG became a 20,224-byte 400 x 224 T0V0 JPEG, was uploaded under the
+  architecture key, and produced one QoS 1 N0V0 message on `webcam/T0V0`.
+  The captured payload's bucket, key, byte size, image ID, timestamps, and
+  derived metadata matched the workflow output. An independent authenticated
+  S3 HEAD confirmed the object exists with 20,224 bytes and `image/jpeg`.
+
+Configuration
+-------------
+
+The EWC endpoint, bucket, path-style addressing, and bucket URL are configured
+in the ignored `.env`. Credentials are stored only in the ignored files
+selected by `S3_ACCESS_KEY_FILE` and `S3_SECRET_KEY_FILE`, both mode 0600.
+
+Checkpoint decision
+-------------------
+
+Checkpoint 6 is accepted by the repository owner. One bounded `--publish` run
+uploaded the derived object, the local subscriber received its N0V0
+notification, and an authenticated lookup confirmed the referenced object.
+Proceed to checkpoint 7 only on explicit instruction.

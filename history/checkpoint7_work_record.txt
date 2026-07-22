@@ -1,0 +1,171 @@
+Checkpoint 7 work record - operational Windy worker
+===================================================
+
+Status
+------
+
+Nearly finished and undergoing repository-owner performance validation on
+2026-07-22. Checkpoint 7 is not yet marked accepted; do not begin Fintraffic
+until the owner accepts the validation described below.
+
+Current differences from the architecture background
+----------------------------------------------------
+
+Checkpoint 7 currently has three deliberate implementation refinements with
+respect to the architecture background used to guide the repository:
+
+1. The polling interval is not always the minimum ingestion interval. It is
+   adaptive per stream:
+   `min(max(minimum_ingestion_interval, 0.7 * ema_download_period), 30 min)`.
+2. EMA updates are deferred until the end of the epoch and applied as one
+   conditional database batch only when the epoch is not the first epoch and
+   its duration is below the minimum ingestion interval. Other epochs discard
+   their candidates, while download and durable publication state remain
+   immediate.
+3. Observability adds three latency measures derived from the provider update
+   timestamp: provider update to successful download, successful download to
+   completed MQTT job, and their sum. For Windy, the provider timestamp is the
+   provider's image-availability timestamp, so these measures estimate actual
+   availability-to-ingestion latency rather than only internal stage time.
+
+Implemented scope
+-----------------
+
+- `python -m ingestion.worker --network win` provides a continuous foreground
+  worker with finite epochs, a bounded thread pool, configurable idle/failure
+  delays, country and job limits, and bounded `--epochs` validation runs.
+- Epoch starts are separated by at least 15 seconds by default. Per-stream
+  repeat requests are independently bounded by adaptive due-stream selection.
+- Migration `003_adaptive_polling.sql` adds
+  `last_freshness_query_timestamp`. A stream is due after
+  `min(max(minimum_ingestion_interval, 0.7 * ema_download_period), 30 min)`;
+  a missing EMA uses the minimum. Every applied Windy freshness attempt is
+  recorded, including provider errors, while dry runs remain non-mutating.
+- Windy metadata request starts remain serialized through a shared rate gate
+  even when image jobs use multiple worker threads.
+- `last_download_timestamp`, the provider marker, and durable publication
+  outbox state remain immediate and atomic. EMA is the only deferred field:
+  worker threads return candidates to the epoch coordinator, which applies
+  them in one database transaction only when the epoch is not epoch 1 and its
+  duration is below `MINIMUM_INGESTION_INTERVAL_S`. Long epochs discard all
+  their candidates. Conditional updates require the candidate download
+  timestamp still to be current, preventing a stale epoch from overwriting a
+  newer worker update. This deliberately preserves restart/outbox consistency
+  instead of deferring the authoritative download timestamp for a negligible
+  reduction in the existing publication transaction.
+- SIGINT and SIGTERM stop new epoch intake and allow orderly worker shutdown.
+- `/livez`, `/readyz`, and `/metrics` are served on the configured health
+  address. Metrics use controlled network, stage, and outcome labels rather
+  than camera or image identifiers.
+- Per-job observability includes source-job duration and outcome; controlled
+  stage failure reasons; transformation version, outcome, duration, derived
+  image count, byte size, width, and height; S3 and MQTT outcomes and
+  durations; and built MQTT payload size. Successful complete publications
+  emit `provider_to_download`, `download_to_job_end`, and their sum
+  `provider_to_job_end`. Histograms and counters use only bounded labels, and
+  the Grafana worker dashboard exposes the latency and job-duration series.
+- Windy metadata timing is split into `provider_rate_gate_wait` (controlled
+  local request-start pacing), `provider_http` (HTTP operation including its
+  configured retries), and `provider_refresh` (the compatible end-to-end sum,
+  including response parsing). This prevents a queue of quickly completing
+  unchanged jobs from being misread as increased Windy API response latency.
+- Docker Compose includes the optional `worker` profile and Prometheus scrapes
+  the worker metrics endpoint.
+
+Retry and publication recovery
+------------------------------
+
+The configured defaults are zero transformation retries, one S3 upload retry,
+and one MQTT publication retry. Windy image download still has zero retries.
+Retries reuse the same transformed bytes, image identifier, immutable object
+key, and notification payload.
+
+Checkpoint 7 adds `publication_outbox` as an explicitly documented operational
+extension to the original three-table pilot registry. Successful image download
+state and the pending publication are recorded atomically. The worker drains
+pending publications before selecting new images. Its durable stages are:
+
+- `pending_s3`: transformed bytes and the notification are retained until the
+  immutable S3 object is confirmed;
+- `pending_mqtt`: S3 has succeeded and only MQTT publication remains;
+- completion: the MQTT QoS 1 publish is acknowledged and the outbox row is
+  removed.
+
+S3 replay does not rely on `IfNoneMatch`, whose support was uncertain on the
+EWC S3-compatible service. It performs `HEAD` before `PUT`, stores a SHA-256
+digest as object metadata, accepts an existing object only when size and digest
+match, and refuses to overwrite different content. Database outbox ownership
+is the normal concurrency guard; the S3 comparison is the restart safeguard.
+
+Implemented configuration
+-------------------------
+
+    INGESTION_WORKER_THREADS=4
+    INGESTION_MAX_JOBS_PER_EPOCH=100
+    INGESTION_IDLE_DELAY_S=5
+    INGESTION_FAILURE_BACKOFF_S=10
+    INGESTION_SHUTDOWN_GRACE_S=30
+    INGESTION_HEALTH_HOST=127.0.0.1
+    INGESTION_HEALTH_PORT=8002
+    INGESTION_OUTBOX_BATCH_SIZE=100
+    INGESTION_DATABASE_POOL_SIZE=16
+    INGESTION_MIN_EPOCH_PERIOD_S=15
+    MINIMUM_INGESTION_INTERVAL_S=300
+    POLLING_INTERVAL_FACTOR=0.7
+    MAXIMUM_POLL_INTERVAL_S=1800
+    S3_UPLOAD_RETRY_COUNT=1
+    MQTT_PUBLICATION_RETRY_COUNT=1
+
+Validation evidence
+-------------------
+
+The focused offline suite was rerun on 2026-07-21:
+
+    env UV_CACHE_DIR=/tmp/webcam-uv-cache uv run --env-file .env pytest -q \
+      tests/ingestion tests/transformation tests/storage tests/notification \
+      tests/worker tests/metrics tests/test_deployment_config.py
+
+Result: 48 passed and 1 skipped in 0.69 seconds. The skipped health socket test
+is conditional for restricted sandboxes; it had previously passed when run
+with local socket permission.
+
+Database schema and registry integration tests completed with 16 passing tests
+in 25.22 seconds after applying migrations `002_publication_outbox.sql` and
+`003_adaptive_polling.sql` to the existing PostgreSQL volume. The adaptive
+selection tests cover the EMA factor and 30-minute cap.
+
+A bounded live dry run used DK, two jobs per epoch, and two epochs. Both epochs
+selected and downloaded exactly two images. A live health exercise reported
+`live` and `ready`, exposed the expected epoch/job metrics, and exited cleanly
+after SIGINT.
+
+Durable replay was tested with one DK image by deliberately pointing S3 at a
+closed local endpoint. The first delivery ended in `storage_error` and left one
+`pending_s3` row containing 16,374 derived bytes with one recorded failed
+delivery cycle. Running `python -m ingestion.replay_publications --limit 1`
+against EWC then uploaded the exact object, published N0V0 to the local MQTT
+broker, and removed the outbox row. S3 `HEAD` confirmed a 16,374-byte JPEG with
+the SHA-256 metadata. MQTT received the expected N0V0 payload.
+
+A full France exercise subsequently covered all 2,056 registered streams:
+2,038 (99.12%) completed successfully and 18 (0.88%) persistently returned
+provider errors. No HTTP 429 throttling occurred with 100 threads and a
+0.01-second Windy request-start interval. At the new 15-second minimum epoch
+period, those 18 failures cause at most 1.2 freshness requests per second when
+no immediate provider retry is configured. A five-minute revisit also found
+72 new images among the earlier 198-camera sample and published all of them.
+
+A three-epoch France+Germany adaptive-polling run on 2026-07-22 selected 4,849,
+4,849, and 4,847 streams. Epoch durations were 95.43, 65.57, and 55.49
+seconds. Published outcomes were 4,710, 2,322, and 1,485; no throttling was
+observed. Epoch 1 discarded its 4,710 EMA candidates as designed, while epochs
+2 and 3 conditionally applied 2,322 and 1,485 candidates. The run also exposed
+that the original `provider_refresh` duration combined local rate-gate waiting
+with HTTP latency, leading to the explicit timing split documented above.
+
+Remaining owner validation
+--------------------------
+
+Use `manual_tests/validation_to_complete_checkpoint7`. The remaining decision
+is checkpoint acceptance, not missing checkpoint-7 implementation. Stop before
+Checkpoint 8 (Fintraffic discovery).

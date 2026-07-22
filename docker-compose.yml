@@ -15,6 +15,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./database/schema/001_pilot_schema.sql:/docker-entrypoint-initdb.d/001_pilot_schema.sql:ro
+      - ./database/schema/002_publication_outbox.sql:/docker-entrypoint-initdb.d/002_publication_outbox.sql:ro
+      - ./database/schema/003_adaptive_polling.sql:/docker-entrypoint-initdb.d/003_adaptive_polling.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -45,6 +47,50 @@ services:
       - BUCKET_OBJECT_URL=${BUCKET_OBJECT_URL}
       - GUNICORN_CMD_ARGS=--bind 0.0.0.0:8001 --workers=4 --access-logfile -
     depends_on:
+      mqtt:
+        condition: service_healthy
+
+  windy-worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "ingestion.worker", "--network", "win"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8002:8002"
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-webcam_ingestion}
+      DATABASE_USER: ${DATABASE_USER:-webcam_ingestion}
+      DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      WINDY_API_KEY_FILE: /run/secrets/windy_api_key
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-webcam}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE}
+      S3_REGION: ${S3_REGION:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+      S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+      INGESTION_HEALTH_HOST: 0.0.0.0
+      INGESTION_HEALTH_PORT: 8002
+      MINIMUM_INGESTION_INTERVAL_S: ${MINIMUM_INGESTION_INTERVAL_S:-300}
+      POLLING_INTERVAL_FACTOR: ${POLLING_INTERVAL_FACTOR:-0.7}
+      MAXIMUM_POLL_INTERVAL_S: ${MAXIMUM_POLL_INTERVAL_S:-1800}
+    secrets:
+      - database_password
+      - windy_api_key
+      - s3_access_key
+      - s3_secret_key
+    depends_on:
+      postgres:
+        condition: service_healthy
       mqtt:
         condition: service_healthy
 
@@ -82,6 +128,8 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   grafana:
     profiles: ["monitoring"]
@@ -103,3 +151,9 @@ volumes:
 secrets:
   database_password:
     file: ./.secrets/database_password
+  windy_api_key:
+    file: ./.secrets/windy_api_key
+  s3_access_key:
+    file: ./.secrets/s3_access_key
+  s3_secret_key:
+    file: ./.secrets/s3_secret_key

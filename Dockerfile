@@ -6,7 +6,13 @@ ENV DOCKER_PATH="/app"
 
 
 COPY "./api" "${DOCKER_PATH}/api/"
+COPY "./config" "${DOCKER_PATH}/config/"
+COPY "./database" "${DOCKER_PATH}/database/"
+COPY "./discovery" "${DOCKER_PATH}/discovery/"
+COPY "./ingestion" "${DOCKER_PATH}/ingestion/"
+COPY "./storage" "${DOCKER_PATH}/storage/"
 COPY "pyproject.toml" "${DOCKER_PATH}/"
+COPY "README.md" "${DOCKER_PATH}/"
 
 WORKDIR "${DOCKER_PATH}"
 

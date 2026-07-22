@@ -1,1 +1,1 @@
-
+"""Windy image acquisition."""

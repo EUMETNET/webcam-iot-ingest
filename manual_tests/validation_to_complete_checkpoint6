@@ -1,0 +1,63 @@
+Checkpoint 6 validation runbook - T0V0, S3, and N0V0/MQTT
+==========================================================
+
+1. Safety and focused tests
+---------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git diff --check
+    uv run --env-file .env pytest -q tests/ingestion tests/transformation tests/storage tests/notification tests/test_deployment_config.py
+
+The branch must be `codex`; the focused suite currently contains 40 tests.
+
+2. Memory-only Windy transformation
+-----------------------------------
+
+    uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK,MT --limit 2 --dry-run
+
+Output must include source and derived dimensions, derived byte size, scalar
+signature, and image ID. It must have null object key and MQTT topic and must
+not update PostgreSQL.
+
+3. Local MQTT smoke test
+------------------------
+
+    docker compose --env-file .env up -d mqtt
+    docker compose --env-file .env exec mqtt mosquitto_sub -h localhost -t 'webcam/T0V0' -q 1 -C 1 -W 30 -v
+
+In another terminal, when running from the host:
+
+    MQTT_HOST=localhost uv run --env-file .env python -m ingestion.notification.mqtt_smoke_test
+
+The subscriber must receive the N0V0-labelled smoke-test JSON.
+
+4. Configure S3 without exposing secrets
+----------------------------------------
+
+Set `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_PUBLIC_URL_BASE`, and optional
+`S3_REGION`/`S3_PREFIX` in `.env`. Put the access and secret keys in the ignored
+files configured by `S3_ACCESS_KEY_FILE` and `S3_SECRET_KEY_FILE`. Verify:
+
+    git check-ignore -v .env .secrets/s3_access_key .secrets/s3_secret_key
+
+Do not print or commit credential values.
+
+5. Bounded complete publication
+-------------------------------
+
+Keep the MQTT subscriber from step 3 running, then execute one camera:
+
+    MQTT_HOST=localhost uv run --env-file .env python -m ingestion.windy.windy_ingestion_workflow --countries DK --limit 1 --publish
+
+The outcome must be `published`. Confirm the subscriber receives a complete
+N0V0 payload and that its object key exists in the configured bucket and can be
+retrieved through the intended downstream access mechanism.
+
+6. Failure ordering and final decision
+--------------------------------------
+
+Fixture tests must show that S3 failure prevents MQTT publication and MQTT
+failure is reported only after an object exists. Review the diff for secrets.
+Checkpoint 6 is accepted. The bounded live S3/MQTT path succeeded and the
+referenced object was independently confirmed. Stop before checkpoint 7.

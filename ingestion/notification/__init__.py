@@ -1,1 +1,1 @@
-
+"""Versioned MQTT notification contracts."""

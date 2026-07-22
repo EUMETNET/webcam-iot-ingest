@@ -1,1 +1,1 @@
-
+"""Versioned derived-image transformations."""

@@ -160,6 +160,8 @@ Stop after validation and wait for approval.
 Checkpoint 5 - Windy image acquisition and ingestion state
 ----------------------------------------------------------
 
+Status: accepted by the repository owner on 2026-07-21.
+
 Objectives:
 
 - Retrieve due active Windy source streams from PostgreSQL.
@@ -187,6 +189,8 @@ Stop after validation and wait for approval.
 
 Checkpoint 6 - Shared transformation, S3 storage, and MQTT notification
 -----------------------------------------------------------------------
+
+Status: accepted by the repository owner on 2026-07-21.
 
 Objectives:
 
@@ -219,23 +223,35 @@ to an existing object. Stop after validation and wait for approval.
 Checkpoint 7 - Operational Windy worker
 ---------------------------------------
 
+Status: implemented and ready for repository-owner validation on 2026-07-21.
+
 Objectives:
 
 - Add the continuous Windy worker loop.
-- Enforce the minimum ingestion interval.
+- Enforce adaptive per-stream polling from the last freshness query using
+  `min(max(minimum_ingestion_interval, 0.7 * EMA), 30 minutes)`.
 - Bound worker threads, retries, and backoff.
+- Enforce a configurable minimum epoch start-to-start period, initially 15
+  seconds, as a loop-level safeguard in addition to per-stream polling.
+- Default to zero transformation retries, one S3 upload retry, and one MQTT
+  publication retry. Reuse the same transformed bytes and identifiers on retry.
 - Support graceful shutdown.
 - Expose low-cardinality Prometheus metrics.
 - Add application health checks.
 - Verify restart and state-recovery behavior.
+- Persist unfinished S3/MQTT delivery in a publication outbox so replay after
+  retry exhaustion or process restart does not require downloading or
+  transforming the provider image again.
 - Stabilize Compose operation before adding production systemd units.
 
 Expected validation:
 
     docker compose --env-file .env up -d postgres mqtt
-    uv run pytest tests/ingestion/shared tests/ingestion/windy -v
-    timeout 60s uv run python -m ingestion.windy.windy_ingestion_workflow
-    curl --fail http://localhost:8001/metrics
+    uv run pytest tests/ingestion tests/transformation tests/storage \
+      tests/notification tests/worker tests/metrics -v
+    uv run python -m ingestion.worker --network win --countries DK \
+      --max-jobs 2 --epochs 2 --dry-run
+    curl --fail http://localhost:8002/metrics
     docker compose restart postgres mqtt
     uv run python -m database.healthcheck
 

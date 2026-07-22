@@ -85,9 +85,31 @@ class DueSourceStream:
     corrected_latitude: float | None
     corrected_longitude: float | None
     corrected_altitude: float | None
+    last_freshness_query_timestamp: datetime | None
     last_download_timestamp: datetime | None
     last_provider_image_marker: str | None
     ema_download_period: float | None
+
+
+@dataclass(frozen=True)
+class EmaUpdateCandidate:
+    source_stream_id: str
+    download_timestamp: datetime
+    ema_download_period: float
+
+
+@dataclass(frozen=True)
+class PendingPublication:
+    image_id: str
+    source_stream_id: str
+    provider_marker: str
+    download_timestamp: datetime
+    object_key: str
+    derived_content: bytes
+    notification: dict[str, Any]
+    stage: Literal["pending_s3", "pending_mqtt"]
+    attempt_count: int
+    last_error_code: str | None
 
 
 def get_network_registry(
@@ -263,14 +285,31 @@ def get_due_source_streams(
     network_id: str,
     minimum_ingestion_interval: timedelta,
     *,
+    polling_interval_factor: float = 0.7,
+    maximum_poll_interval: timedelta = timedelta(minutes=30),
     now: datetime | None = None,
+    countries: Sequence[str] | None = None,
+    limit: int | None = None,
 ) -> list[DueSourceStream]:
-    """Return active streams whose last successful download is old enough."""
+    """Return active streams whose adaptive freshness-query interval elapsed."""
     if minimum_ingestion_interval < timedelta(0):
         raise ValueError("minimum ingestion interval cannot be negative")
+    if polling_interval_factor < 0:
+        raise ValueError("polling interval factor cannot be negative")
+    if maximum_poll_interval < minimum_ingestion_interval:
+        raise ValueError("maximum poll interval cannot be below the minimum")
     now = now or datetime.now(timezone.utc)
     _require_aware_datetime(now, "now")
-    cutoff = now - minimum_ingestion_interval
+    if countries is not None and (
+        not countries
+        or any(len(code) != 2 or not code.isalpha() for code in countries)
+    ):
+        raise ValueError("countries must contain uppercase ISO alpha-2 codes")
+    normalized_countries = (
+        [code.upper() for code in countries] if countries is not None else None
+    )
+    if limit is not None and limit < 1:
+        raise ValueError("due-stream limit must be positive")
     with connection.cursor(row_factory=dict_row) as cursor:
         cursor.execute(
             """
@@ -281,22 +320,63 @@ def get_due_source_streams(
                 ss.provider_metadata AS source_stream_metadata,
                 s.latitude, s.longitude, s.altitude, s.country,
                 s.corrected_latitude, s.corrected_longitude,
-                s.corrected_altitude, ss.last_download_timestamp,
+                s.corrected_altitude, ss.last_freshness_query_timestamp,
+                ss.last_download_timestamp,
                 ss.last_provider_image_marker, ss.ema_download_period
             FROM source_stream AS ss
             JOIN site AS s USING (site_id)
             WHERE s.network_id = %s
               AND ss.status = 'active'
+              AND (%s::text[] IS NULL OR s.country = ANY(%s::text[]))
               AND (
-                  ss.last_download_timestamp IS NULL
-                  OR ss.last_download_timestamp <= %s
+                  ss.last_freshness_query_timestamp IS NULL
+                  OR ss.last_freshness_query_timestamp + LEAST(
+                      %s::double precision,
+                      GREATEST(
+                          %s::double precision,
+                          COALESCE(ss.ema_download_period * %s, %s::double precision)
+                      )
+                  ) * interval '1 second' <= %s
               )
-            ORDER BY ss.last_download_timestamp NULLS FIRST,
+            ORDER BY ss.last_freshness_query_timestamp NULLS FIRST,
                      ss.source_stream_id
+            LIMIT %s
             """,
-            (network_id, cutoff),
+            (
+                network_id,
+                normalized_countries,
+                normalized_countries,
+                maximum_poll_interval.total_seconds(),
+                minimum_ingestion_interval.total_seconds(),
+                polling_interval_factor,
+                minimum_ingestion_interval.total_seconds(),
+                now,
+                limit,
+            ),
         )
         return [DueSourceStream(**dict(row)) for row in cursor.fetchall()]
+
+
+def record_freshness_query(
+    connection: psycopg.Connection[Any],
+    source_stream_id: str,
+    query_timestamp: datetime,
+) -> None:
+    """Record a provider freshness attempt, regardless of its outcome."""
+    _require_aware_datetime(query_timestamp, "query_timestamp")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE source_stream
+            SET last_freshness_query_timestamp = %s
+            WHERE source_stream_id = %s
+            """,
+            (query_timestamp, source_stream_id),
+        )
+        if cursor.rowcount != 1:
+            raise RegistryRecordNotFoundError(
+                f"source stream does not exist: {source_stream_id}"
+            )
 
 
 def record_provider_image_marker(
@@ -328,7 +408,8 @@ def record_successful_download(
     *,
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
-) -> float:
+    defer_ema_update: bool = False,
+) -> float | EmaUpdateCandidate:
     """Atomically record a successful source download and update its EMA."""
     if not 0 <= ema_alpha <= 1:
         raise ValueError("ema_alpha must be between 0 and 1")
@@ -371,17 +452,164 @@ def record_successful_download(
                 UPDATE source_stream
                 SET last_provider_image_marker = %s,
                     last_download_timestamp = %s,
-                    ema_download_period = %s
+                    ema_download_period = CASE WHEN %s THEN ema_download_period ELSE %s END
                 WHERE source_stream_id = %s
                 """,
                 (
                     provider_image_marker,
                     download_timestamp,
+                    defer_ema_update,
                     next_ema,
                     source_stream_id,
                 ),
             )
+    if defer_ema_update:
+        return EmaUpdateCandidate(
+            source_stream_id, download_timestamp, next_ema
+        )
     return next_ema
+
+
+def apply_ema_update_candidates(
+    connection: psycopg.Connection[Any],
+    candidates: Sequence[EmaUpdateCandidate],
+) -> int:
+    """Apply one epoch's EMA candidates without overwriting newer downloads."""
+    if not candidates:
+        return 0
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE source_stream
+                SET ema_download_period = %s
+                WHERE source_stream_id = %s
+                  AND last_download_timestamp = %s
+                """,
+                (
+                    (
+                        candidate.ema_download_period,
+                        candidate.source_stream_id,
+                        candidate.download_timestamp,
+                    )
+                    for candidate in candidates
+                ),
+            )
+            return cursor.rowcount
+
+
+def record_download_and_enqueue_publication(
+    connection: psycopg.Connection[Any],
+    source_stream_id: str,
+    provider_image_marker: str,
+    download_timestamp: datetime,
+    *,
+    ema_alpha: float,
+    image_id: str,
+    object_key: str,
+    derived_content: bytes,
+    notification: JsonObject,
+    defer_ema_update: bool = False,
+) -> float | EmaUpdateCandidate:
+    """Atomically record source success and durable pending publication."""
+    if not derived_content:
+        raise ValueError("derived publication content cannot be empty")
+    with connection.transaction():
+        ema = record_successful_download(
+            connection,
+            source_stream_id,
+            provider_image_marker,
+            download_timestamp,
+            ema_alpha=ema_alpha,
+            defer_ema_update=defer_ema_update,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO publication_outbox (
+                    image_id, source_stream_id, provider_marker,
+                    download_timestamp, object_key, derived_content, notification
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (image_id) DO NOTHING
+                """,
+                (
+                    image_id,
+                    source_stream_id,
+                    provider_image_marker,
+                    download_timestamp,
+                    object_key,
+                    derived_content,
+                    Jsonb(dict(notification)),
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RegistryCollisionError(
+                    f"publication image identifier already exists: {image_id}"
+                )
+    return ema
+
+
+def get_pending_publications(
+    connection: psycopg.Connection[Any], *, limit: int = 100
+) -> list[PendingPublication]:
+    if limit < 1:
+        raise ValueError("publication limit must be positive")
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(
+            """
+            SELECT image_id, source_stream_id, provider_marker,
+                   download_timestamp, object_key, derived_content,
+                   notification, stage, attempt_count, last_error_code
+            FROM publication_outbox
+            ORDER BY created_at, image_id
+            LIMIT %s
+            """,
+            (limit,),
+        )
+        return [PendingPublication(**dict(row)) for row in cursor.fetchall()]
+
+
+def mark_publication_uploaded(
+    connection: psycopg.Connection[Any], image_id: str
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE publication_outbox
+            SET stage = 'pending_mqtt', updated_at = now(), last_error_code = NULL
+            WHERE image_id = %s
+            """,
+            (image_id,),
+        )
+        if cursor.rowcount != 1:
+            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
+
+
+def record_publication_failure(
+    connection: psycopg.Connection[Any], image_id: str, error_code: str
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            UPDATE publication_outbox
+            SET attempt_count = attempt_count + 1,
+                last_error_code = %s,
+                updated_at = now()
+            WHERE image_id = %s
+            """,
+            (error_code, image_id),
+        )
+        if cursor.rowcount != 1:
+            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
+
+
+def complete_publication(
+    connection: psycopg.Connection[Any], image_id: str
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("DELETE FROM publication_outbox WHERE image_id = %s", (image_id,))
+        if cursor.rowcount != 1:
+            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
 
 
 def _ensure_network_exists(

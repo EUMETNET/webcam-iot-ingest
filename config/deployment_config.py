@@ -201,3 +201,253 @@ class WindyConfig:
         if not api_key:
             raise ValueError(f"Windy API key file is empty: {self.api_key_file}")
         return api_key
+
+
+@dataclass(frozen=True)
+class WindyIngestionConfig:
+    api_key_file: Path
+    request_timeout_s: float
+    image_download_timeout_s: float
+    image_max_bytes: int
+    minimum_ingestion_interval_s: float
+    polling_interval_factor: float
+    maximum_poll_interval_s: float
+    request_delay_s: float
+    download_retry_count: int
+    retry_backoff_s: float
+    ema_alpha: float
+    default_limit: int
+
+    @classmethod
+    def from_environment(cls) -> "WindyIngestionConfig":
+        config = cls(
+            api_key_file=Path(
+                os.getenv("WINDY_API_KEY_FILE", ".secrets/windy_api_key")
+            ),
+            request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
+            image_download_timeout_s=float(
+                os.getenv("IMAGE_DOWNLOAD_TIMEOUT_S", "15")
+            ),
+            image_max_bytes=int(os.getenv("SOURCE_IMAGE_MAX_BYTES", "10000000")),
+            minimum_ingestion_interval_s=float(
+                os.getenv("MINIMUM_INGESTION_INTERVAL_S", "300")
+            ),
+            polling_interval_factor=float(
+                os.getenv("POLLING_INTERVAL_FACTOR", "0.7")
+            ),
+            maximum_poll_interval_s=float(
+                os.getenv("MAXIMUM_POLL_INTERVAL_S", "1800")
+            ),
+            request_delay_s=float(
+                os.getenv("WINDY_INGESTION_REQUEST_DELAY_S", "0.1")
+            ),
+            download_retry_count=int(os.getenv("DOWNLOAD_RETRY_COUNT", "0")),
+            retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
+            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            default_limit=int(os.getenv("WINDY_INGESTION_DEFAULT_LIMIT", "10")),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if self.request_timeout_s <= 0 or self.image_download_timeout_s <= 0:
+            raise ValueError("Windy ingestion timeouts must be positive")
+        if self.image_max_bytes < 1:
+            raise ValueError("source image maximum bytes must be positive")
+        if self.minimum_ingestion_interval_s < 0:
+            raise ValueError("minimum ingestion interval cannot be negative")
+        if self.polling_interval_factor < 0:
+            raise ValueError("polling interval factor cannot be negative")
+        if self.maximum_poll_interval_s < self.minimum_ingestion_interval_s:
+            raise ValueError("maximum poll interval cannot be below the minimum")
+        if self.request_delay_s < 0 or self.retry_backoff_s < 0:
+            raise ValueError("Windy ingestion delays cannot be negative")
+        if self.download_retry_count < 0:
+            raise ValueError("download retry count cannot be negative")
+        if not 0 <= self.ema_alpha <= 1:
+            raise ValueError("EMA alpha must be between 0 and 1")
+        if self.default_limit < 1:
+            raise ValueError("Windy ingestion default limit must be positive")
+
+    def read_api_key(self) -> str:
+        api_key = self.api_key_file.read_text(encoding="utf-8").strip()
+        if not api_key:
+            raise ValueError(f"Windy API key file is empty: {self.api_key_file}")
+        return api_key
+
+
+@dataclass(frozen=True)
+class TransformationConfig:
+    version: str
+    max_height_px: int
+    jpeg_quality_initial: int
+    target_size_bytes: int
+    panoramic_target_size_bytes: int
+    panoramic_aspect_ratio: float
+
+    @classmethod
+    def from_environment(cls) -> "TransformationConfig":
+        config = cls(
+            version=os.getenv("TRANSFORMATION_VERSION", "T0V0"),
+            max_height_px=int(os.getenv("MAX_DERIVED_HEIGHT_PX", "288")),
+            jpeg_quality_initial=int(os.getenv("JPEG_QUALITY_INITIAL", "90")),
+            target_size_bytes=int(os.getenv("TARGET_IMAGE_SIZE_BYTES", "50000")),
+            panoramic_target_size_bytes=int(
+                os.getenv("TARGET_PANORAMIC_IMAGE_SIZE_BYTES", "200000")
+            ),
+            panoramic_aspect_ratio=float(
+                os.getenv("PANORAMIC_ASPECT_RATIO_THRESHOLD", "2.0")
+            ),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if len(self.version) != 4 or not self.version.isalnum():
+            raise ValueError("transformation version must be four alphanumeric characters")
+        if self.max_height_px < 1:
+            raise ValueError("maximum derived height must be positive")
+        if not 1 <= self.jpeg_quality_initial <= 95:
+            raise ValueError("initial JPEG quality must be between 1 and 95")
+        if self.target_size_bytes < 1 or self.panoramic_target_size_bytes < 1:
+            raise ValueError("derived image size targets must be positive")
+        if self.panoramic_aspect_ratio <= 1:
+            raise ValueError("panoramic aspect ratio threshold must exceed one")
+
+
+@dataclass(frozen=True)
+class S3Config:
+    endpoint_url: str
+    bucket: str
+    prefix: str
+    public_url_base: str
+    region: str | None
+    access_key_file: Path
+    secret_key_file: Path
+    retry_count: int
+    retry_backoff_s: float
+    addressing_style: str = "path"
+
+    @classmethod
+    def from_environment(cls) -> "S3Config":
+        config = cls(
+            endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
+            bucket=os.getenv("S3_BUCKET", "webcam"),
+            prefix=os.getenv("S3_PREFIX", "").strip("/"),
+            public_url_base=os.getenv("S3_PUBLIC_URL_BASE", ""),
+            region=os.getenv("S3_REGION") or None,
+            access_key_file=Path(
+                os.getenv("S3_ACCESS_KEY_FILE", ".secrets/s3_access_key")
+            ),
+            secret_key_file=Path(
+                os.getenv("S3_SECRET_KEY_FILE", ".secrets/s3_secret_key")
+            ),
+            retry_count=int(os.getenv("S3_UPLOAD_RETRY_COUNT", "1")),
+            retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
+            addressing_style=os.getenv("S3_ADDRESSING_STYLE", "path"),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.endpoint_url.startswith(("http://", "https://")):
+            raise ValueError("S3 endpoint URL must use HTTP or HTTPS")
+        if not self.public_url_base.startswith(("http://", "https://")):
+            raise ValueError("S3 public URL base must use HTTP or HTTPS")
+        if not self.bucket or self.retry_count < 0 or self.retry_backoff_s < 0:
+            raise ValueError("invalid S3 bucket or retry configuration")
+        if self.addressing_style not in {"path", "virtual"}:
+            raise ValueError("S3 addressing style must be path or virtual")
+
+    def read_credentials(self) -> tuple[str, str]:
+        access_key = self.access_key_file.read_text(encoding="utf-8").strip()
+        secret_key = self.secret_key_file.read_text(encoding="utf-8").strip()
+        if not access_key or not secret_key:
+            raise ValueError("S3 credential files cannot be empty")
+        return access_key, secret_key
+
+
+@dataclass(frozen=True)
+class MqttConfig:
+    host: str
+    port: int
+    tls_enabled: bool
+    topic_prefix: str
+    qos: int
+    retry_count: int
+    retry_backoff_s: float
+
+    @classmethod
+    def from_environment(cls) -> "MqttConfig":
+        tls_value = os.getenv("MQTT_TLS", "false").lower()
+        if tls_value not in {"true", "false"}:
+            raise ValueError("MQTT_TLS must be true or false")
+        config = cls(
+            host=os.getenv("MQTT_HOST", "localhost"),
+            port=int(os.getenv("MQTT_PORT", "1883")),
+            tls_enabled=tls_value == "true",
+            topic_prefix=os.getenv("MQTT_TOPIC_PREFIX", "webcam").strip("/"),
+            qos=int(os.getenv("MQTT_QOS", "1")),
+            retry_count=int(os.getenv("MQTT_PUBLICATION_RETRY_COUNT", "1")),
+            retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.host or not 1 <= self.port <= 65535:
+            raise ValueError("invalid MQTT host or port")
+        if not self.topic_prefix or self.qos not in {0, 1, 2}:
+            raise ValueError("invalid MQTT topic prefix or QoS")
+        if self.retry_count < 0 or self.retry_backoff_s < 0:
+            raise ValueError("invalid MQTT retry configuration")
+
+
+@dataclass(frozen=True)
+class WorkerConfig:
+    threads: int
+    max_jobs_per_epoch: int
+    idle_delay_s: float
+    failure_backoff_s: float
+    shutdown_grace_s: float
+    health_host: str
+    health_port: int
+    outbox_batch_size: int
+    database_pool_size: int = 16
+    minimum_epoch_period_s: float = 15
+
+    @classmethod
+    def from_environment(cls) -> "WorkerConfig":
+        config = cls(
+            threads=int(os.getenv("INGESTION_WORKER_THREADS", "4")),
+            max_jobs_per_epoch=int(os.getenv("INGESTION_MAX_JOBS_PER_EPOCH", "100")),
+            idle_delay_s=float(os.getenv("INGESTION_IDLE_DELAY_S", "5")),
+            failure_backoff_s=float(os.getenv("INGESTION_FAILURE_BACKOFF_S", "10")),
+            shutdown_grace_s=float(os.getenv("INGESTION_SHUTDOWN_GRACE_S", "30")),
+            health_host=os.getenv("INGESTION_HEALTH_HOST", "127.0.0.1"),
+            health_port=int(os.getenv("INGESTION_HEALTH_PORT", "8002")),
+            outbox_batch_size=int(os.getenv("INGESTION_OUTBOX_BATCH_SIZE", "100")),
+            database_pool_size=int(os.getenv("INGESTION_DATABASE_POOL_SIZE", "16")),
+            minimum_epoch_period_s=float(
+                os.getenv("INGESTION_MIN_EPOCH_PERIOD_S", "15")
+            ),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not 1 <= self.threads <= 128:
+            raise ValueError("worker threads must be between 1 and 128")
+        if self.max_jobs_per_epoch < 1 or self.outbox_batch_size < 1:
+            raise ValueError("worker epoch and outbox limits must be positive")
+        if not 1 <= self.database_pool_size <= 64:
+            raise ValueError("database pool size must be between 1 and 64")
+        if min(
+            self.idle_delay_s,
+            self.failure_backoff_s,
+            self.shutdown_grace_s,
+            self.minimum_epoch_period_s,
+        ) < 0:
+            raise ValueError("worker delays cannot be negative")
+        if not self.health_host or not 1 <= self.health_port <= 65535:
+            raise ValueError("invalid worker health host or port")

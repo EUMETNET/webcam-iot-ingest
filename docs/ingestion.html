@@ -46,28 +46,29 @@
     <header>
       <div>
         <h1>Windy webcam ingestion</h1>
-        <p class="subtitle">20 epochs · France and Germany · five-minute start cadence · complete S3 and MQTT pipeline</p>
+        <p class="subtitle">20 epochs · all 33 EUMETNET countries · EMA-aware scheduling · complete S3 and MQTT pipeline</p>
       </div>
-      <div class="headline">40.49 s mean epoch</div>
+      <div class="headline">232.71 s mean epoch</div>
     </header>
     <div class="layout">
       <section>
         <h2>Observed workload</h2>
         <div class="cards">
-          <div class="card"><strong>61,526</strong><span>camera checks</span></div>
-          <div class="card"><strong>53.87%</strong><span>new images published</span></div>
+          <div class="card"><strong>280,069</strong><span>camera checks</span></div>
+          <div class="card"><strong>61.86%</strong><span>new images published</span></div>
           <div class="card"><strong>0</strong><span>Windy throttling responses</span></div>
         </div>
         <table aria-label="Ingestion benchmark outcomes">
           <thead><tr><th>Outcome</th><th>Count</th><th>Share</th></tr></thead>
           <tbody>
-            <tr><td>New image → S3 + MQTT</td><td>33,142</td><td class="accent">53.87%</td></tr>
-            <tr><td>Provider marker unchanged</td><td>27,763</td><td>45.12%</td></tr>
-            <tr><td>Provider error</td><td>621</td><td>1.01%</td></tr>
+            <tr><td>New image → S3 + MQTT</td><td>173,259</td><td class="accent">61.86%</td></tr>
+            <tr><td>Provider marker unchanged</td><td>104,111</td><td>37.17%</td></tr>
+            <tr><td>Provider error</td><td>2,657</td><td>0.95%</td></tr>
+            <tr><td>Image download error</td><td>42</td><td>0.01%</td></tr>
           </tbody>
         </table>
-        <div class="detail"><strong>Epoch timing.</strong> Mean 40.49 s · minimum 14.10 s · maximum 65.35 s · about 3,076 selected streams per epoch. The durable publication outbox was empty after the run.</div>
-        <p class="note">Configuration: 100 worker threads, 64 pooled PostgreSQL connections, 0.01 s Windy request-start pacing, 300 s minimum epoch start-to-start period, JPEG transformation, EWC S3 upload and MQTT QoS 1 acknowledgement.</p>
+        <div class="detail"><strong>Epoch timing.</strong> Mean 232.71 s · minimum 160.73 s · maximum 594.73 s · 14,003 selected streams per epoch. The 20 epochs took 1 h 19 min 10 s wall-clock, and the durable publication outbox was empty afterward.</div>
+        <p class="note">Configuration: 25,055 discovered streams, 100 worker threads, 64 pooled PostgreSQL connections, 0.01 s Windy request-start pacing, 15 s minimum epoch period, JPEG transformation, EWC S3 upload and MQTT QoS 1 acknowledgement.</p>
       </section>
       <section>
         <h2>Observed image-availability EMA</h2>
@@ -86,11 +87,11 @@
             <tr><td>France</td><td>29 · 1.4%</td><td class="accent">1,923 · 94.2%</td><td>89 · 4.4%</td></tr>
           </tbody>
         </table>
-        <div class="detail"><strong>Interpretation.</strong> Most observed update periods fall between 10 and 30 minutes, and 45% of freshness checks found no new image. Batch metadata lookup would reduce refresh traffic, while EMA-aware scheduling could also reduce unnecessary checks. EMA describes observed successful-ingestion intervals and will continue to stabilize with longer operation.</div>
-        <p class="note">Stage timing from the preceding live FR+DE sample: provider metadata 0.67 s, source download 0.68 s, S3 0.18 s, database enqueue 0.15 s, MQTT 0.037 s and transformation 0.018 s on average.</p>
+        <div class="detail"><strong>Interpretation.</strong> The earlier continuous France–Germany run provides the less biased EMA sample: most observed update periods fell between 10 and 30 minutes. The full-domain cold-start run is excluded from this table because its long preceding idle interval inflated EMA values.</div>
+        <p class="note">Prometheus stage timing was unavailable for this run because the host worker metrics endpoint was not exposed. The benchmark log still recorded complete per-epoch timing and outcomes.</p>
       </section>
     </div>
-    <footer>Windy ingestion benchmark · 20 epochs completed 21 July 2026</footer>
+    <footer>Windy ingestion benchmark · 20 full-domain epochs completed 22 July 2026</footer>
   </main>
 </body>
 </html>

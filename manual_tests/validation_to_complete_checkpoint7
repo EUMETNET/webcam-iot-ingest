@@ -1,0 +1,133 @@
+Checkpoint 7 validation - operational Windy worker
+==================================================
+
+Status
+------
+
+Implemented and ready for bounded owner validation. These commands match the
+current paths; there is no `tests/ingestion/shared` directory argument mistake
+and the worker tests are under `tests/worker`.
+
+1. Safety and services
+----------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git diff --check
+    docker compose --env-file .env up -d postgres mqtt prometheus
+    uv run --env-file .env python -m database.healthcheck
+
+The branch must be `codex`. Do not recreate the PostgreSQL volume. Confirm the
+health check includes `publication_outbox`.
+
+2. Focused automated tests
+--------------------------
+
+    uv run --env-file .env pytest -q \
+      tests/ingestion tests/transformation tests/storage tests/notification \
+      tests/worker tests/metrics tests/test_deployment_config.py
+
+Expected current result: 48 passed, with the health socket test either passing
+or being skipped only when the execution sandbox forbids binding a local port.
+
+For database integration coverage:
+
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest -q tests/database
+
+Confirm outbox enqueue, stage transition, completion, and rollback tests pass.
+
+3. Bounded worker dry run
+-------------------------
+
+This exercises selection, Windy access, decoding, concurrency, and epochs but
+does not write ingestion state, S3 objects, or MQTT messages:
+
+    uv run --env-file .env python -m ingestion.worker \
+      --network win --countries DK --max-jobs 2 --epochs 2 --dry-run
+
+Confirm each epoch selects no more than two jobs and the command terminates
+after exactly two epochs. Windy request starts must still observe the configured
+request delay even with multiple worker threads. Consecutive epoch starts must
+be at least `INGESTION_MIN_EPOCH_PERIOD_S` apart (15 seconds by default).
+Because dry runs do not write `last_freshness_query_timestamp`, this command is
+not the validation of adaptive exclusion.
+
+For an applied bounded check, run one DK job once, then inspect its scheduler
+state before running it again:
+
+    uv run --env-file .env python -m ingestion.worker \
+      --network win --countries DK --max-jobs 1 --epochs 1
+
+    docker compose --env-file .env exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT source_stream_id, last_freshness_query_timestamp,
+              ema_download_period,
+              LEAST(1800, GREATEST(300, 0.7 * COALESCE(ema_download_period, 300)))
+                  AS poll_interval_s
+       FROM source_stream ss JOIN site s USING (site_id)
+       WHERE s.network_id = 'win' AND s.country = 'DK'
+       ORDER BY last_freshness_query_timestamp DESC NULLS LAST LIMIT 1;"
+
+Confirm the freshness timestamp is populated. A provider error is still a
+freshness attempt and must populate it. Do not expect the same stream to become
+due again before its displayed polling interval.
+
+4. Health and graceful shutdown
+-------------------------------
+
+Start the foreground worker in one terminal with a small bounded intake:
+
+    uv run --env-file .env python -m ingestion.worker \
+      --network win --countries DK --max-jobs 1 --dry-run
+
+From another terminal run:
+
+    curl --fail http://127.0.0.1:8002/livez
+    curl --fail http://127.0.0.1:8002/readyz
+    curl --fail http://127.0.0.1:8002/metrics
+
+Send Ctrl-C once. Confirm no new epoch starts and the process exits cleanly.
+Metric labels must not contain a camera ID, site ID, image ID, object key, URL,
+exception text, or credential.
+
+5. Retry and durable replay checks
+----------------------------------
+
+Fixture tests are authoritative for exact attempt counts. They verify:
+
+- transformation is performed once and is not retried;
+- S3 gets one retry, for at most two attempts total;
+- MQTT gets one retry, for at most two attempts total;
+- MQTT is not attempted until S3 succeeds;
+- `pending_mqtt` replay does not repeat transformation or S3 upload;
+- identical bytes, image ID, object key, and N0V0 payload are reused.
+
+Inspect pending work without changing it:
+
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion \
+      -c "SELECT stage, count(*) FROM publication_outbox GROUP BY stage ORDER BY stage;"
+
+Replay at most ten pending publications:
+
+    uv run --env-file .env python -m ingestion.replay_publications --limit 10
+
+Do not inject failures into Windy or EWC for routine validation. A controlled
+local S3 failure followed by successful EWC replay has already demonstrated
+restart-safe `pending_s3` recovery and MQTT completion.
+
+6. Infrastructure restart
+--------------------------
+
+    docker compose --env-file .env restart postgres mqtt
+    uv run --env-file .env python -m database.healthcheck
+    uv run --env-file .env python -m ingestion.replay_publications --limit 10
+
+Confirm PostgreSQL retains source and outbox state. The replay command must
+finish normally whether it publishes pending rows or finds none.
+
+7. Acceptance
+-------------
+
+Checkpoint 7 is complete when the focused tests, bounded worker, health checks,
+clean shutdown, and persisted-state checks above are accepted. Record any new
+evidence in `history/checkpoint7_work_record.txt`, then stop before Checkpoint 8.
