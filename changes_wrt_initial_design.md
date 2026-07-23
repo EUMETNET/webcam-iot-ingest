@@ -337,3 +337,22 @@ Created this consolidated register after checkpoints 3–9 implementation and
 live validation. Future material changes must be appended below with the date,
 affected component, old behavior or assumption, new behavior, rationale, and
 operational consequences.
+
+### 2026-07-23 — Skaping discovery snapshot safeguards and country handling
+
+**Affected component:** Skaping discovery (checkpoint 10).
+
+The Skaping summary response is accepted as either its camera array or one of
+the explicitly tested `cameras`/`data` envelopes. A malformed response, or a
+camera count below `SKAPING_DISCOVERY_MIN_CAMERAS`, aborts before registry
+reconciliation. After the first complete live response returned 45 cameras,
+the default threshold was set to 20: below the observed total but high enough
+to reject a materially truncated snapshot. This guards against an apparently
+successful empty or partial response inactivating stored Skaping streams.
+
+EUMETNET filtering is applied when a camera supplies a valid ISO alpha-2
+country code. A camera with no provider country code is retained rather than
+discarded from the authorized snapshot; its registry country remains null
+unless an existing unchanged site already has a country. This avoids inferring
+geography from coordinates during checkpoint 10 while preserving the complete
+authorized provider snapshot.

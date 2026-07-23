@@ -270,6 +270,81 @@ class FintrafficConfig:
 
 
 @dataclass(frozen=True)
+class SkapingConfig:
+    api_key_file: Path
+    summary_url: str
+    request_timeout_s: float
+    retry_count: int
+    retry_backoff_s: float
+    request_delay_s: float
+    minimum_camera_count: int
+    member_countries: tuple[str, ...] = EUMETNET_MEMBER_COUNTRIES
+    selected_rendition: str = "mini"
+
+    @classmethod
+    def from_environment(cls) -> "SkapingConfig":
+        config = cls(
+            api_key_file=Path(
+                os.getenv("SKAPING_API_KEY_FILE", ".secrets/skaping_api_key")
+            ),
+            summary_url=os.getenv(
+                "SKAPING_SUMMARY_URL",
+                "https://api.skaping.com/camera/summaryApp",
+            ).strip(),
+            request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
+            retry_count=int(os.getenv("SKAPING_DISCOVERY_RETRY_COUNT", "2")),
+            retry_backoff_s=float(
+                os.getenv("SKAPING_DISCOVERY_RETRY_BACKOFF_S", "1")
+            ),
+            request_delay_s=float(
+                os.getenv("SKAPING_DISCOVERY_REQUEST_DELAY_S", "0")
+            ),
+            minimum_camera_count=int(
+                os.getenv("SKAPING_DISCOVERY_MIN_CAMERAS", "20")
+            ),
+            member_countries=tuple(
+                code.strip().upper()
+                for code in os.getenv(
+                    "SKAPING_MEMBER_COUNTRIES",
+                    ",".join(EUMETNET_MEMBER_COUNTRIES),
+                ).split(",")
+                if code.strip()
+            ),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.summary_url.startswith("https://"):
+            raise ValueError("Skaping summary URL must use HTTPS")
+        if self.request_timeout_s <= 0:
+            raise ValueError("provider request timeout must be positive")
+        if self.retry_count < 0:
+            raise ValueError("Skaping retry count cannot be negative")
+        if self.retry_backoff_s < 0 or self.request_delay_s < 0:
+            raise ValueError("Skaping request delays cannot be negative")
+        if self.minimum_camera_count < 1:
+            raise ValueError(
+                "Skaping discovery minimum camera count must be positive"
+            )
+        if not self.member_countries or any(
+            len(code) != 2 or not code.isalpha()
+            for code in self.member_countries
+        ):
+            raise ValueError("Skaping member countries must be ISO alpha-2 codes")
+        if self.selected_rendition != "mini":
+            raise ValueError("Skaping discovery must select the mini rendition")
+
+    def read_api_key(self) -> str:
+        api_key = self.api_key_file.read_text(encoding="utf-8").strip()
+        if not api_key:
+            raise ValueError(
+                f"Skaping API key file is empty: {self.api_key_file}"
+            )
+        return api_key
+
+
+@dataclass(frozen=True)
 class WindyIngestionConfig:
     api_key_file: Path
     request_timeout_s: float

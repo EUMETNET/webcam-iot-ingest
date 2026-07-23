@@ -1,0 +1,180 @@
+Checkpoint 10 validation runbook - Skaping discovery
+=====================================================
+
+Checkpoint outcome to validate
+------------------------------
+
+Skaping cameras become `ska` sites and their image points of view become
+source streams using the `mini` rendition. Non-image points are excluded. The
+complete provider snapshot is reconciled transactionally without downloading
+or publishing images.
+
+1. Confirm branch and preserve unrelated work
+---------------------------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git status --short
+    git diff --check
+
+The branch must be `codex`. Do not discard or stage unrelated files.
+
+2. Verify the installed secret without displaying it
+----------------------------------------------------
+
+The key is already installed. Do not rerun a file-creation command because it
+could truncate the existing key. Confirm only path handling and permissions:
+
+    git check-ignore -v .secrets/skaping_api_key
+    test -s .secrets/skaping_api_key
+    stat -c '%a %n' .secrets/skaping_api_key
+
+The mode should be `600`. Do not print the file, paste its contents into a
+command, or copy it into `.env`.
+
+3. Run offline contract tests
+-----------------------------
+
+    uv run --env-file .env pytest -q \
+      tests/discovery/skaping tests/test_deployment_config.py
+
+    uv run --env-file .env python -m \
+      discovery.skaping.skaping_discovery_workflow --help
+
+The tests must cover secret-file loading, summary envelopes,
+partial-snapshot guarding, transient retries, sanitized errors, coordinates,
+optional altitude, country filtering, media filtering, metadata, stable
+identifiers, duplicates, and deterministic collisions.
+
+4. Verify PostgreSQL without recreating it
+-----------------------------------------
+
+    docker compose --env-file .env up -d postgres
+    uv run --env-file .env python -m database.healthcheck
+
+Confirm the pre-existing network row:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT network_id, network_name, api_version
+       FROM network WHERE network_id = 'ska';"
+
+5. Run the first complete live dry run
+--------------------------------------
+
+Record current counts:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT count(DISTINCT s.site_id) AS sites,
+              count(ss.source_stream_id) AS streams
+       FROM site s
+       LEFT JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'ska';"
+
+Run:
+
+    just discover-skaping --dry-run
+
+The summary must report cameras and points of view seen/accepted, country and
+non-image exclusions, and normalized site/stream counts. It must not print the
+API key, request URL containing the key, full provider payload, or image data.
+There must be at least one camera and image point of view. Repeat the SQL count
+and confirm the dry run did not change it.
+
+If the live response does not match an explicitly tested response envelope or
+field contract, stop. Adapt the parser and fixture tests before applying any
+snapshot. Do not weaken validation merely to accept an unknown response.
+
+6. Apply and inspect one complete snapshot
+------------------------------------------
+
+    just discover-skaping
+
+Inspect status and rendition:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT count(DISTINCT s.site_id) AS sites,
+              count(ss.source_stream_id) AS streams,
+              count(*) FILTER (WHERE ss.status = 'active') AS active,
+              count(*) FILTER (WHERE ss.status = 'inactive') AS inactive,
+              count(*) FILTER (WHERE ss.status = 'blacklisted') AS blacklisted,
+              count(*) FILTER (WHERE ss.selected_rendition = 'mini') AS mini
+       FROM site s
+       JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'ska';"
+
+Inspect a bounded metadata sample:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT s.site_id, s.provider_site_id, s.country,
+              s.longitude, s.latitude, s.altitude,
+              s.provider_metadata->>'label' AS camera_label,
+              s.provider_metadata->>'time_zone' AS time_zone,
+              ss.source_stream_id, ss.provider_source_stream_id,
+              ss.selected_rendition, ss.status,
+              ss.provider_metadata->>'type' AS media_type,
+              ss.provider_metadata->>'label' AS point_label,
+              ss.provider_metadata->>'tags' AS tags
+       FROM site s
+       JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'ska'
+       ORDER BY s.site_id, ss.source_stream_id
+       LIMIT 20;"
+
+Confirm plausible coordinates, alphanumeric IDs, `image` media type, `mini`
+rendition, and retained descriptive metadata. Skaping supplies `tags` as a
+space-separated string rather than a JSON array; an empty string is allowed
+when the provider has not assigned tags. Null country or altitude is allowed
+when omitted by the provider; altitude enrichment may resolve missing
+altitudes within its configured per-run quota.
+
+7. Repeat immediately for idempotency
+-------------------------------------
+
+    just discover-skaping
+
+For an unchanged provider snapshot, the second summary must report no inserted
+sites/streams and no activation/inactivation. Metadata refresh counts may be
+non-zero. Provider changes between calls must be recorded separately from the
+deterministic fixture and shared registry idempotency tests.
+
+8. Review checkpoint boundaries
+-------------------------------
+
+    git diff --check
+    git status --short
+    git diff -- \
+      .env.example config/deployment_config.py discovery/skaping \
+      tests/discovery/skaping justfile README.md \
+      history/checkpoint10_work_record.txt \
+      manual_tests/validation_to_complete_checkpoint10 \
+      changes_wrt_initial_design.md
+
+Verify that no secret, provider payload, image download, transformation, S3
+write, MQTT publication, or private architecture text entered the checkpoint.
+
+Checkpoint decision
+-------------------
+
+Do not mark checkpoint 10 accepted until the live dry run, applied run,
+bounded SQL inspection, and immediate repeat have all succeeded and the owner
+has reviewed their results.
+
+Evidence already produced on 2026-07-23
+---------------------------------------
+
+- focused Skaping/configuration tests: 44 passed;
+- discovery regression suite including Windy and Fintraffic: 77 passed;
+- dry run: 45 cameras, 67 points of view, 41 image streams, 26 non-image
+  exclusions, and no registry mutation;
+- applied run: 45 sites and 41 active `mini` streams inserted;
+- altitude enrichment: five missing values resolved;
+- immediate repeat: zero insertions and zero status transitions;
+- SQL inspection: 45 labelled sites with customer/timezone metadata and
+  altitude, plus 41 active image streams.
+
+The remaining action is owner review of the commands/results and an explicit
+checkpoint-10 acceptance decision.

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Fintraffic webcam discovery</title>
+  <title>Skaping webcam discovery</title>
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; }
@@ -42,70 +42,68 @@
   </style>
 </head>
 <body>
-  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html" aria-current="page">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a></nav>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html" aria-current="page">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a></nav>
   <main>
     <header>
       <div>
-        <h1>Fintraffic webcam discovery</h1>
-        <p class="subtitle">Finnish road-weather stations · complete list plus detailed station metadata</p>
+        <h1>Skaping webcam discovery</h1>
+        <p class="subtitle">Authorized camera summary · image points of view selected for ingestion</p>
       </div>
-      <div class="headline">809 stations · 2,255 views</div>
+      <div class="headline">45 sites · 41 image views</div>
     </header>
     <div class="layout">
       <div class="stack">
         <section>
           <h2>Registry and discovery</h2>
           <div class="cards">
-            <div class="card"><strong>2 min 27 s</strong><span>measured detailed dry run</span></div>
-            <div class="card"><strong>2.79</strong><span>mean presets per station</span></div>
-            <div class="card"><strong>100%</strong><span>sites with derived altitude</span></div>
+            <div class="card"><strong>0.62 s</strong><span>measured complete dry run</span></div>
+            <div class="card"><strong>0.91</strong><span>image views per site</span></div>
+            <div class="card"><strong>100%</strong><span>sites with altitude</span></div>
           </div>
-          <div class="detail"><strong>Complete metadata.</strong> One bulk request establishes the station set; 809 paced detail requests add station purpose, camera and road metadata, plus each preset’s name, direction, resolution and image URL. Four non-gathering stations and 21 non-collection presets were excluded.</div>
+          <div class="detail"><strong>Complete summary.</strong> One authenticated metadata request returned 45 cameras and 67 points of view. Discovery retained all camera and point-of-view metadata, registered 41 image views with the <code>mini</code> rendition, and excluded 26 non-image views. Four camera sites currently have no eligible image view.</div>
         </section>
         <section>
-          <h2>Scene purpose</h2>
-          <table aria-label="Fintraffic station purpose">
-            <thead><tr><th>Provider purpose</th><th>Stations</th><th>Views</th><th>Share</th></tr></thead>
-            <tbody>
-              <tr><td>Secondary-road weather (<code>keli</code>)</td><td>592</td><td>2,004</td><td class="accent">73.2%</td></tr>
-              <tr><td>Highway traffic (<code>liikenne</code>)</td><td>191</td><td>225</td><td>23.6%</td></tr>
-              <tr><td>Tunnel (<code>tunneli</code>)</td><td>26</td><td>26</td><td>3.2%</td></tr>
-            </tbody>
-          </table>
-          <p class="note"><code>purpose</code> is the architecture-defined station-level description of scene use. <code>keli</code> cameras primarily monitor weather and road-surface conditions on secondary roads, while <code>liikenne</code> cameras primarily monitor highway traffic. Preset labels identify 562 explicit road-surface views (<code>Tienpinta</code>).</p>
+          <h2>Panoramic image views</h2>
+          <div class="cards">
+            <div class="card"><strong>33</strong><span>deduplicated panoramic views</span></div>
+            <div class="card"><strong>29</strong><span>matched in tags</span></div>
+            <div class="card"><strong>28</strong><span>matched in labels</span></div>
+          </div>
+          <p class="note">A view is panoramic when <code>panorama</code>, <code>panoramic</code>, <code>panoramique</code>, or <code>360</code> appears in its provider tags, type, or label. Each view is counted once; provider type is <code>image</code> for all 41 selected streams.</p>
         </section>
       </div>
       <div class="stack">
         <section>
-          <h2>Preset viewing direction</h2>
-          <table aria-label="Fintraffic preset directions">
-            <thead><tr><th>Direction</th><th>Views</th></tr></thead>
+          <h2>Most frequent raw tags</h2>
+          <table aria-label="Most frequent Skaping tags">
+            <thead><tr><th>Tag</th><th>Views</th><th>Tag</th><th>Views</th></tr></thead>
             <tbody>
-              <tr><td>Special / road surface</td><td class="accent">688</td></tr>
-              <tr><td>Simple road</td><td>1,201</td></tr>
-              <tr><td>Unknown</td><td>164</td></tr>
-              <tr><td>Crossing</td><td>202</td></tr>
+              <tr><td>France</td><td>39</td><td>landscape</td><td>28</td></tr>
+              <tr><td>panoramic</td><td class="accent">28</td><td>panoramique</td><td>28</td></tr>
+              <tr><td>paysage</td><td>28</td><td>resort</td><td>23</td></tr>
+              <tr><td>station</td><td>23</td><td>montagnes</td><td>21</td></tr>
+              <tr><td>mountains</td><td>20</td><td>sport</td><td>20</td></tr>
             </tbody>
           </table>
+          <p class="note">Counts are per image view. Skaping supplies tags as a space-separated multilingual string, not a JSON array; 39 of 41 image views have non-empty tags.</p>
         </section>
         <section>
-          <h2>Acquisition metadata</h2>
-          <table aria-label="Fintraffic acquisition metadata">
+          <h2>Metadata coverage</h2>
+          <table aria-label="Skaping discovery metadata coverage">
             <thead><tr><th>Characteristic</th><th>Count</th></tr></thead>
             <tbody>
-              <tr><td>Nominal 600 s collection interval</td><td class="accent">801 stations</td></tr>
-              <tr><td>1280 × 720 image resolution</td><td>2,139 views</td></tr>
-              <tr><td>VAPIX camera type</td><td>495 stations</td></tr>
-              <tr><td>BOSCH camera type</td><td>211 stations</td></tr>
-              <tr><td>ENEO camera type</td><td>56 stations</td></tr>
-              <tr><td>Road address metadata present</td><td>809 stations</td></tr>
+              <tr><td>Camera label, customer and timezone</td><td class="accent">45 sites</td></tr>
+              <tr><td>Altitude present after enrichment</td><td>45 sites</td></tr>
+              <tr><td>Image type and descriptive metadata</td><td>41 views</td></tr>
+              <tr><td>Non-empty tag text</td><td>39 views</td></tr>
+              <tr><td>Selected <code>mini</code> rendition</td><td>41 views</td></tr>
             </tbody>
           </table>
-          <p class="note">Every registered view has <code>presentationName</code>, <code>direction</code>, <code>resolution</code> and <code>imageUrl</code>. Every station has purpose, municipality, province and road-address metadata. Median presets per station: 3; maximum: 7.</p>
+          <p class="note">Five missing provider altitudes were resolved by the shared elevation enrichment pass. The provider snapshot supplies no normalized country code, so registry country remains unset rather than being inferred during discovery.</p>
         </section>
       </div>
     </div>
-    <footer>Fintraffic detailed discovery snapshot · 23 July 2026 · full JPEG rendition selected</footer>
+    <footer>Skaping unversioned summaryApp discovery snapshot · 23 July 2026 · mini rendition selected</footer>
   </main>
 </body>
 </html>

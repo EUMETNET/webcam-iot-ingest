@@ -6,6 +6,7 @@ from config.deployment_config import (
     AltitudeConfig,
     DatabaseConfig,
     FintrafficConfig,
+    SkapingConfig,
     WindyConfig,
     WindyIngestionConfig,
     TransformationConfig,
@@ -140,6 +141,41 @@ def test_fintraffic_config_rejects_header_injection(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="line breaks"):
         FintrafficConfig.from_environment()
+
+
+def test_skaping_config_has_safe_discovery_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("SKAPING_DISCOVERY_MIN_CAMERAS", raising=False)
+    config = SkapingConfig.from_environment()
+
+    assert config.summary_url == "https://api.skaping.com/camera/summaryApp"
+    assert config.minimum_camera_count == 20
+    assert config.selected_rendition == "mini"
+    assert len(config.member_countries) == 33
+
+
+def test_skaping_config_reads_api_key_from_file(tmp_path: Path) -> None:
+    key_file = tmp_path / "skaping_api_key"
+    key_file.write_text("skaping-test-key\n", encoding="utf-8")
+    config = SkapingConfig(
+        api_key_file=key_file,
+        summary_url="https://api.skaping.com/camera/summaryApp",
+        request_timeout_s=15,
+        retry_count=2,
+        retry_backoff_s=1,
+        request_delay_s=0,
+        minimum_camera_count=1,
+    )
+
+    assert config.read_api_key() == "skaping-test-key"
+
+
+def test_skaping_config_rejects_unsafe_empty_snapshot_threshold(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("SKAPING_DISCOVERY_MIN_CAMERAS", "0")
+
+    with pytest.raises(ValueError, match="minimum camera count"):
+        SkapingConfig.from_environment()
 
 
 def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:

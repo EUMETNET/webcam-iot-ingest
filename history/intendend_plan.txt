@@ -322,6 +322,9 @@ requested.
 Checkpoint 10 - Skaping discovery
 ---------------------------------
 
+Implementation status: fixture-validated locally; live provider dry run,
+registry reconciliation, and owner acceptance remain pending.
+
 Objectives:
 
 - Load the Skaping API key from an ignored secret file.
@@ -339,8 +342,8 @@ Expected validation:
 
     uv run pytest tests/discovery/skaping -v
     git check-ignore -v .secrets/skaping_api_key
-    uv run python -m discovery.skaping.skaping_discovery_workflow --dry-run
-    uv run python -m discovery.skaping.skaping_discovery_workflow
+    just discover-skaping --dry-run
+    just discover-skaping
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'ska';"
 

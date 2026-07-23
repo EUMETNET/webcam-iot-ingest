@@ -6,10 +6,10 @@ FastAPI service that ingests webcam images, stores them in S3-compatible object 
 
 A presentation describing the repository and the current Windy discovery
 statistics is available on [GitHub Pages](https://nanopiero.github.io/webcam-iot-ingest/).
-The slide set also includes dedicated
-[Fintraffic discovery](https://nanopiero.github.io/webcam-iot-ingest/fintraffic.html)
-and [Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html)
-pages.
+The slide set also includes dedicated pages for
+[Fintraffic discovery](https://nanopiero.github.io/webcam-iot-ingest/fintraffic.html),
+[Skaping discovery](https://nanopiero.github.io/webcam-iot-ingest/skaping.html),
+and [Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html).
 
 Missing site altitudes may be enriched with the
 [Open-Meteo Elevation API](https://open-meteo.com/en/docs/elevation-api),
@@ -71,6 +71,7 @@ Run a complete provider discovery pass with:
 
 ```bash
 just discover-fintraffic
+just discover-skaping
 just discover-windy
 ```
 
@@ -79,6 +80,7 @@ and compare a complete snapshot without changing the registry:
 
 ```bash
 just discover-fintraffic --dry-run
+just discover-skaping --dry-run
 just discover-windy --dry-run
 ```
 
@@ -86,6 +88,9 @@ Fintraffic uses the non-secret `FINTRAFFIC_USER_HEADER` application identifier
 as the official `Digitraffic-User` request header. Set it to a meaningful
 application name; the repository name is the default. Windy discovery requires
 the API-key file and geographic configuration documented in `.env.example`.
+Skaping discovery reads its API key from the ignored
+`.secrets/skaping_api_key` file and selects only `image` points of view with
+the `mini` rendition; it never prints the key or complete provider payload.
 Fintraffic discovery retrieves the complete station list and then paced details
 for every eligible station so descriptive station and preset metadata are
 retained in the registry.

@@ -51,6 +51,13 @@ discover-windy *args:
     exec uv run --env-file .env python -m \
         discovery.windy.windy_discovery_workflow "$@"
 
+# Run one complete Skaping discovery pass. Add --dry-run to avoid writes.
+discover-skaping *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec uv run --env-file .env python -m \
+        discovery.skaping.skaping_discovery_workflow "$@"
+
 # Run a bounded Fintraffic ingestion sample. Add --dry-run to avoid S3/MQTT.
 ingest-fintraffic *args:
     #!/usr/bin/env bash
