@@ -44,6 +44,40 @@ class DatabaseConfig:
 
 
 @dataclass(frozen=True)
+class DiscoveryMetricsConfig:
+    enabled: bool
+    gateway_url: str
+    push_timeout_s: float
+
+    @classmethod
+    def from_environment(cls) -> "DiscoveryMetricsConfig":
+        enabled_value = os.getenv("DISCOVERY_METRICS_ENABLED", "true").lower()
+        if enabled_value not in {"true", "false"}:
+            raise ValueError("DISCOVERY_METRICS_ENABLED must be true or false")
+        config = cls(
+            enabled=enabled_value == "true",
+            gateway_url=os.getenv(
+                "DISCOVERY_METRICS_GATEWAY_URL", "http://localhost:9091"
+            ).rstrip("/"),
+            push_timeout_s=float(
+                os.getenv("DISCOVERY_METRICS_PUSH_TIMEOUT_S", "5")
+            ),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.gateway_url.startswith(("http://", "https://")):
+            raise ValueError(
+                "discovery metrics gateway URL must use HTTP or HTTPS"
+            )
+        if self.push_timeout_s <= 0:
+            raise ValueError(
+                "discovery metrics push timeout must be positive"
+            )
+
+
+@dataclass(frozen=True)
 class AltitudeConfig:
     enabled: bool
     provider_url: str
@@ -106,7 +140,7 @@ class WindyConfig:
     site_distance_threshold_m: float
     request_timeout_s: float
     member_countries: tuple[str, ...] = EUMETNET_MEMBER_COUNTRIES
-    request_delay_s: float = 1.0
+    request_delay_s: float = 0.1
     discovery_cache_file: Path | None = None
     page_size: int = 50
     selected_rendition: str = "preview"

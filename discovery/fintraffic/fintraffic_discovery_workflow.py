@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from typing import Any, Mapping, Sequence
 
 import psycopg
@@ -27,6 +28,10 @@ from discovery.fintraffic.fintraffic_source_access import (
 )
 from discovery.shared.add_altitude import enrich_missing_altitudes
 from discovery.shared.altitude_lookup import AltitudeClient
+from discovery.shared.discovery_metrics import (
+    DiscoveryMetrics,
+    registry_status_counts,
+)
 
 
 NETWORK_ID = "fin"
@@ -285,8 +290,14 @@ def _new_identifier(prefix: str, provider_id: str, used: set[str]) -> str:
 
 
 def run_discovery(
-    *, dry_run: bool = False
-) -> tuple[FintrafficDiscoverySnapshot, DiscoveryUpdateResult | None]:
+    *,
+    dry_run: bool = False,
+    metrics: DiscoveryMetrics | None = None,
+) -> tuple[
+    FintrafficDiscoverySnapshot,
+    DiscoveryUpdateResult | None,
+    dict[str, int],
+]:
     fintraffic = FintrafficConfig.from_environment()
     database = DatabaseConfig.from_environment()
     with FintrafficClient(
@@ -296,6 +307,9 @@ def run_discovery(
         retry_count=fintraffic.retry_count,
         retry_backoff_s=fintraffic.retry_backoff_s,
         request_delay_s=fintraffic.request_delay_s,
+        request_observer=(
+            metrics.observe_provider_request if metrics is not None else None
+        ),
     ) as client:
         payload = client.fetch_stations()
         payload = _expand_station_details(
@@ -320,7 +334,11 @@ def run_discovery(
             require_in_collection=fintraffic.require_in_collection,
         )
         if dry_run:
-            return snapshot, None
+            return (
+                snapshot,
+                None,
+                registry_status_counts(stored.source_streams),
+            )
         update = apply_discovery_update(
             connection, NETWORK_ID, snapshot.sites, snapshot.source_streams
         )
@@ -346,7 +364,12 @@ def run_discovery(
                 altitudes_unresolved=enrichment.unresolved,
                 altitudes_updated=enrichment.updated,
             )
-        return snapshot, update
+        refreshed = get_network_registry(connection, NETWORK_ID)
+        return (
+            snapshot,
+            update,
+            registry_status_counts(refreshed.source_streams),
+        )
 
 
 def _expand_station_details(
@@ -386,7 +409,25 @@ def main() -> None:
         "--dry-run", action="store_true", help="retrieve and compare without writing"
     )
     args = parser.parse_args()
-    snapshot, update = run_discovery(dry_run=args.dry_run)
+    metrics = DiscoveryMetrics.from_environment(NETWORK_ID)
+    started = time.monotonic()
+    try:
+        snapshot, update, status_counts = run_discovery(
+            dry_run=args.dry_run,
+            metrics=metrics,
+        )
+    except Exception:
+        metrics.publish_failure(duration_s=time.monotonic() - started)
+        raise
+    duration_s = time.monotonic() - started
+    metrics_published = metrics.publish_success(
+        duration_s=duration_s,
+        sources_seen=snapshot.presets_accepted,
+        sources_added=update.streams_inserted if update is not None else 0,
+        sources_updated=update.streams_updated if update is not None else 0,
+        sources_disabled=update.streams_inactivated if update is not None else 0,
+        status_counts=status_counts,
+    )
     output = {
         "dry_run": args.dry_run,
         "provider_stations_seen": snapshot.provider_stations_seen,
@@ -397,6 +438,8 @@ def main() -> None:
         "presets_excluded": snapshot.presets_excluded,
         "sites": len(snapshot.sites),
         "source_streams": len(snapshot.source_streams),
+        "duration_seconds": round(duration_s, 6),
+        "discovery_metrics_published": metrics_published,
     }
     if update is not None:
         output["registry_update"] = asdict(update)

@@ -141,7 +141,50 @@ sites/streams and no activation/inactivation. Metadata refresh counts may be
 non-zero. Provider changes between calls must be recorded separately from the
 deterministic fixture and shared registry idempotency tests.
 
-8. Review checkpoint boundaries
+8. Validate discovery observability and Grafana
+-----------------------------------------------
+
+Start or refresh the existing monitoring stack:
+
+    docker compose --env-file .env --profile monitoring up -d \
+      pushgateway prometheus grafana
+    docker compose restart prometheus
+
+Run one applied discovery and confirm that its JSON contains
+`discovery_metrics_published: true` and a positive `duration_seconds`:
+
+    just discover-skaping
+
+Check the persistent batch metrics without printing any provider metadata:
+
+    curl -fsS -G http://127.0.0.1:9090/api/v1/query \
+      --data-urlencode \
+      'query=webcam_discovery_last_duration_seconds{source_network="ska"}'
+
+    curl -fsS -G http://127.0.0.1:9090/api/v1/query \
+      --data-urlencode \
+      'query=webcam_source_stream_status_count{source_network="ska"}'
+
+The first query must return one positive duration. The second must expose
+active, inactive, and blacklisted series; the validated snapshot has 41 active
+and zero inactive/blacklisted streams.
+
+Use the existing Grafana tunnel on local port 3000 and open the provisioned
+`Skaping discovery` dashboard. Confirm that it displays:
+
+- successful and failed run counters;
+- latest run time and duration;
+- current registry status;
+- streams seen, added, refreshed, and disabled;
+- discovery-duration p50/p95;
+- provider summary-request outcomes, throttling, and p50/p95 duration.
+
+The metrics remain visible after the discovery process exits. Pushgateway
+publishing is intentionally non-fatal: if the monitoring stack is unavailable,
+the registry transaction may still succeed but the command reports
+`discovery_metrics_published: false`.
+
+9. Review checkpoint boundaries
 -------------------------------
 
     git diff --check
@@ -149,6 +192,9 @@ deterministic fixture and shared registry idempotency tests.
     git diff -- \
       .env.example config/deployment_config.py discovery/skaping \
       tests/discovery/skaping justfile README.md \
+      discovery/shared/discovery_metrics.py \
+      docker-compose.yml prometheus/prometheus.yml \
+      grafana/dashboards/skaping-discovery.json \
       history/checkpoint10_work_record.txt \
       manual_tests/validation_to_complete_checkpoint10 \
       changes_wrt_initial_design.md
@@ -166,8 +212,8 @@ has reviewed their results.
 Evidence already produced on 2026-07-23
 ---------------------------------------
 
-- focused Skaping/configuration tests: 44 passed;
-- discovery regression suite including Windy and Fintraffic: 77 passed;
+- focused shared-metrics/Skaping/configuration tests: 57 passed;
+- discovery regression suite including Windy and Fintraffic: 93 passed;
 - dry run: 45 cameras, 67 points of view, 41 image streams, 26 non-image
   exclusions, and no registry mutation;
 - applied run: 45 sites and 41 active `mini` streams inserted;
@@ -175,6 +221,10 @@ Evidence already produced on 2026-07-23
 - immediate repeat: zero insertions and zero status transitions;
 - SQL inspection: 45 labelled sites with customer/timezone metadata and
   altitude, plus 41 active image streams.
+- first instrumented applied run: 0.492 seconds, one successful provider
+  summary request, 41 streams refreshed, no status changes;
+- Pushgateway publication succeeded; Prometheus returned the duration and
+  current 41-active/0-inactive/0-blacklisted status series.
 
 The remaining action is owner review of the commands/results and an explicit
 checkpoint-10 acceptance decision.

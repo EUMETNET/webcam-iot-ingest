@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -34,6 +34,7 @@ class WindyClient:
         client: httpx.Client | None = None,
         request_delay_s: float = 0.0,
         cache_file: Path | None = None,
+        request_observer: Callable[[str, str, float], None] | None = None,
     ) -> None:
         if not api_key:
             raise ValueError("Windy API key cannot be empty")
@@ -43,6 +44,7 @@ class WindyClient:
         self._request_delay_s = request_delay_s
         self._made_request = False
         self._cache_file = cache_file
+        self._request_observer = request_observer
         self._cache = self._load_cache()
         self._unsaved_pages = 0
         self._client = client or httpx.Client(
@@ -165,11 +167,15 @@ class WindyClient:
             time.sleep(self._request_delay_s)
         self._made_request = True
         for attempt in range(6):
+            started = time.monotonic()
+            observed = False
             try:
                 response = self._client.get(
                     WINDY_WEBCAMS_URL, params=params, headers=self._headers
                 )
                 if response.status_code == 429 and attempt < 5:
+                    self._observe_request("throttled", started)
+                    observed = True
                     retry_after = response.headers.get("Retry-After")
                     try:
                         requested_wait = float(retry_after) if retry_after else 0.0
@@ -179,8 +185,14 @@ class WindyClient:
                     continue
                 response.raise_for_status()
                 payload = response.json()
+                self._observe_request("success", started)
             except httpx.HTTPStatusError as error:
                 status = error.response.status_code
+                if not observed:
+                    self._observe_request(
+                        "throttled" if status == 429 else "error",
+                        started,
+                    )
                 detail = (
                     "Windy throttled discovery (HTTP 429)"
                     if status == 429
@@ -188,6 +200,8 @@ class WindyClient:
                 )
                 raise WindyDiscoveryError(detail) from error
             except (httpx.HTTPError, ValueError) as error:
+                if not observed:
+                    self._observe_request("error", started)
                 raise WindyDiscoveryError("Windy discovery request failed") from error
             validated = _validate_page(payload)
             self._cache["pages"][cache_key] = payload
@@ -195,6 +209,12 @@ class WindyClient:
             self._save_cache()
             return validated
         raise AssertionError("unreachable")
+
+    def _observe_request(self, result: str, started: float) -> None:
+        if self._request_observer is not None:
+            self._request_observer(
+                "list", result, max(0.0, time.monotonic() - started)
+            )
 
     def _load_cache(self) -> dict[str, Any]:
         today = datetime.now(UTC).date().isoformat()

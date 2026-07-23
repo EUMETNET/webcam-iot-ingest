@@ -322,8 +322,9 @@ requested.
 Checkpoint 10 - Skaping discovery
 ---------------------------------
 
-Implementation status: fixture-validated locally; live provider dry run,
-registry reconciliation, and owner acceptance remain pending.
+Implementation status: provider discovery, registry reconciliation, and
+Skaping-first discovery observability are implemented and live-validated.
+Owner acceptance remains pending.
 
 Objectives:
 
@@ -337,6 +338,9 @@ Objectives:
   normalized jsonb snapshots.
 - Reuse the shared transactional registry update layer.
 - Add fixture-based and live dry-run tests.
+- Emit shared discovery-run, stream-reconciliation, provider-request, and
+  registry-status Prometheus metrics through the batch Pushgateway.
+- Provision a dedicated Skaping discovery Grafana dashboard.
 
 Expected validation:
 
@@ -344,10 +348,33 @@ Expected validation:
     git check-ignore -v .secrets/skaping_api_key
     just discover-skaping --dry-run
     just discover-skaping
+    docker compose --env-file .env --profile monitoring up -d \
+      pushgateway prometheus grafana
+    curl -G http://127.0.0.1:9090/api/v1/query \
+      --data-urlencode 'query=webcam_discovery_last_duration_seconds{source_network="ska"}'
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'ska';"
 
 Stop after validation and wait for approval.
+
+Discovery observability rollout after checkpoint 10
+---------------------------------------------------
+
+The provider-independent implementation begins with Skaping because its
+sub-second batch cannot reliably be scraped while it is alive. Persistent
+batch metrics are therefore pushed to a local Pushgateway and scraped by
+Prometheus. After the parallel Fintraffic ingestion test completes, apply the
+same shared functions to discovery in this order:
+
+1. Fintraffic discovery;
+2. Windy discovery.
+
+Provider connectors retain only their provider-specific request endpoint and
+result observations. Metric names, bounded labels, Pushgateway lifecycle,
+Prometheus scraping, and dashboard conventions remain shared. This staged
+rollout moves application-level discovery observability forward from
+checkpoint 12; checkpoint 12 still owns production systemd supervision,
+infrastructure exporters, health alerts, and full orchestration.
 
 Checkpoint 11 - Skaping ingestion
 ---------------------------------

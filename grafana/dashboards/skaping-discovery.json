@@ -1,0 +1,141 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "description": "Persistent metrics for the short-lived Skaping discovery batch job.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Counters accumulated across Skaping discovery runs through the Pushgateway.",
+      "fieldConfig": {"defaults": {"decimals": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "sum(webcam_discovery_run_total{source_network=\"ska\",result=\"success\"})", "legendFormat": "successful"},
+        {"expr": "sum(webcam_discovery_run_total{source_network=\"ska\",result=\"failure\"}) or vector(0)", "legendFormat": "failed"}
+      ],
+      "title": "Discovery runs",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Wall-clock duration recorded by the latest successful Skaping discovery.",
+      "fieldConfig": {"defaults": {"decimals": 3, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "webcam_discovery_last_duration_seconds{source_network=\"ska\"}", "legendFormat": "latest"}
+      ],
+      "title": "Latest run duration",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Timestamp pushed after the latest successful complete Skaping discovery.",
+      "fieldConfig": {"defaults": {"unit": "dateTimeFromNow"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "webcam_discovery_last_success_unixtime{source_network=\"ska\"} * 1000", "legendFormat": "last success"}
+      ],
+      "title": "Last successful run",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Current registry state, replaced after each successful Skaping discovery.",
+      "fieldConfig": {"defaults": {"decimals": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "id": 4,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "webcam_source_stream_status_count{source_network=\"ska\"}", "legendFormat": "{{status}}"}
+      ],
+      "title": "Source-stream status",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Cumulative stream counts emitted by successful applied or dry-run discoveries. Added, refreshed, and disabled are zero for a dry run.",
+      "fieldConfig": {"defaults": {"decimals": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 4},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "webcam_discovery_sources_seen_total{source_network=\"ska\"}", "legendFormat": "seen"},
+        {"expr": "webcam_discovery_sources_added_total{source_network=\"ska\"}", "legendFormat": "added"},
+        {"expr": "webcam_discovery_sources_updated_total{source_network=\"ska\"}", "legendFormat": "refreshed"},
+        {"expr": "webcam_discovery_sources_disabled_total{source_network=\"ska\"}", "legendFormat": "disabled"}
+      ],
+      "title": "Cumulative discovery stream results",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Quantiles computed from all Skaping discovery durations retained since the Pushgateway state was created.",
+      "fieldConfig": {"defaults": {"decimals": 3, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 4},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (webcam_discovery_duration_seconds_bucket{source_network=\"ska\"}))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (webcam_discovery_duration_seconds_bucket{source_network=\"ska\"}))", "legendFormat": "p95"}
+      ],
+      "title": "Discovery duration distribution",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Every summary request attempt is counted. Retries therefore appear as additional attempts.",
+      "fieldConfig": {"defaults": {"decimals": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 11},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "webcam_provider_request_total{source_network=\"ska\"}", "legendFormat": "{{endpoint_type}} · {{result}}"},
+        {"expr": "webcam_provider_throttling_total{source_network=\"ska\"}", "legendFormat": "throttled"}
+      ],
+      "title": "Provider request outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Summary endpoint duration per HTTP attempt, including failed and throttled attempts.",
+      "fieldConfig": {"defaults": {"decimals": 3, "unit": "s"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 11},
+      "id": 8,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi"}},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (webcam_provider_request_duration_seconds_bucket{source_network=\"ska\",endpoint_type=\"summary\"}))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (webcam_provider_request_duration_seconds_bucket{source_network=\"ska\",endpoint_type=\"summary\"}))", "legendFormat": "p95"}
+      ],
+      "title": "Provider summary-request duration",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["webcam", "discovery", "skaping"],
+  "templating": {
+    "list": [
+      {
+        "current": {"text": "Prometheus", "value": "Prometheus"},
+        "hide": 2,
+        "label": "Prometheus",
+        "name": "DS_PROMETHEUS",
+        "query": "prometheus",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Skaping discovery",
+  "uid": "skaping-discovery",
+  "version": 1
+}

@@ -356,3 +356,45 @@ discarded from the authorized snapshot; its registry country remains null
 unless an existing unchanged site already has a country. This avoids inferring
 geography from coordinates during checkpoint 10 while preserving the complete
 authorized provider snapshot.
+
+### 2026-07-23 — Discovery observability starts with Skaping
+
+**Affected component:** discovery observability and checkpoint sequencing.
+
+Application-level discovery observability was originally deferred with the
+broader checkpoint-12 orchestration work. It is now implemented first for
+Skaping during checkpoint 10, then will be applied through the same shared
+functions to Fintraffic and finally Windy after the parallel ingestion test.
+Checkpoint 12 retains systemd supervision, infrastructure exporters, health
+alerts, backup/cleanup metrics, and production orchestration.
+
+Skaping discovery is a sub-second service-level batch job, so it normally exits
+before Prometheus's 15-second pull interval can scrape it. A pinned Prometheus
+Pushgateway persists the batch metrics. Event counters/histograms are added
+across runs, while current registry status and last-success gauges are
+replaced. The fixed grouping key is only `source_network`; process/host labels
+are deliberately omitted. Prometheus scrapes the gateway and a dedicated
+Skaping discovery Grafana dashboard filters every query to
+`source_network="ska"`.
+
+Metrics publication is non-fatal. A committed registry update is not reported
+as a discovery failure merely because monitoring is unavailable; the command
+instead emits `discovery_metrics_published=false`. This preserves transaction
+semantics while making the observability failure explicit in structured
+output.
+
+### 2026-07-23 — Fintraffic one-hour benchmark presentation
+
+**Affected component:** ingestion performance reporting.
+
+The completed one-hour Fintraffic benchmark is summarized using its final
+30-minute Prometheus window, matching the steady-window approach used for the
+Windy ingestion page. The presentation adds mean external-download and
+successful-S3 payload throughput and image-size distribution alongside job,
+latency, epoch, and EMA statistics.
+
+The retained metrics contain exact S3 byte totals but no histogram restricted
+to successful S3 PUT object sizes. The page therefore labels the p90
+transformed-image size for images subsequently uploaded to S3; successful S3 and transformed-image
+counts were nearly identical in the observed window. This limitation must not
+be hidden or presented as an exact S3-only percentile.

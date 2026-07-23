@@ -128,9 +128,30 @@ download, and 0.50 seconds p50 and 0.95 seconds p95 from download to completed
 MQTT publication. The internal transformation/storage/publication chain was
 therefore not the material latency source.
 
-An optional one-hour staggered run was started after acceptance to study longer
-EMA and throughput convergence. It is follow-up performance evidence and does
-not block checkpoint 9 acceptance.
+The optional one-hour full-network staggered run completed from 14:43:30 to
+15:43:45 UTC. The final 30-minute window was retained in Prometheus and used
+for the dedicated `docs/fintraffic-ingestion.html` benchmark slide:
+
+- 14,352 completed checks and 1,092 MQTT publications per five minutes;
+- 1.29 MB/s mean completed external image payload throughput;
+- 0.163 MB/s mean successful S3 PUT payload throughput;
+- 47.6 kB p90 transformed-image size for images subsequently uploaded to S3,
+  distinct from the 497 kB p90 downloaded source-image size;
+- 1.44/2.69 minutes p50/p95 provider-marker-to-download latency;
+- 0.50/0.96 seconds p50/p95 download-to-completed-job latency;
+- 10.0 seconds p90 epoch duration in a 75.6-epoch Prometheus estimate;
+- current learned EMA p50/p90/p95 of 8.41/8.88/10.37 minutes across 2,170
+  streams.
+
+The same final window averaged 11,736 unchanged markers, 1,488 download
+errors, 26 invalid images, and 11 missing-preset/provider errors per five
+minutes. Download errors are repeated due-stream jobs, not distinct camera
+counts; the earlier distinct-camera interpretation remains applicable.
+
+The historical metrics expose exact total successful S3 PUT bytes but only a
+derived-image size histogram. Successful S3 uploads differed from derived
+images by about 0.17 image per five minutes, so 47.6 kB is a close, explicitly
+labelled proxy rather than an exact successful-upload-only p90.
 
 Checkpoint decision
 -------------------

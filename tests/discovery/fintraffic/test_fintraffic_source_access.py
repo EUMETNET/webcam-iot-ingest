@@ -74,6 +74,40 @@ def test_retries_transient_status_then_succeeds() -> None:
     assert calls == 2
 
 
+def test_observes_list_and_detail_request_attempts() -> None:
+    observations = []
+    detail = {
+        "type": "Feature",
+        "id": "C1",
+        "properties": {},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        response = detail if request.url.path.endswith("/C1") else payload()
+        return httpx.Response(200, json=response)
+
+    client = FintrafficClient(
+        "test-application",
+        stations_url=URL,
+        timeout_s=1,
+        retry_count=0,
+        retry_backoff_s=0,
+        request_delay_s=0,
+        request_observer=lambda endpoint, result, duration: observations.append(
+            (endpoint, result, duration)
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    client.fetch_stations()
+    client.fetch_station("C1")
+    assert [(endpoint, result) for endpoint, result, _ in observations] == [
+        ("list", "success"),
+        ("detail", "success"),
+    ]
+    assert all(duration >= 0 for _, _, duration in observations)
+
+
 @pytest.mark.parametrize(
     "bad_payload",
     [[], {}, {"type": "Feature", "features": []}, {"type": "FeatureCollection"}],

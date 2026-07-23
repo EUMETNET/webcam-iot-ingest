@@ -9,7 +9,8 @@ statistics is available on [GitHub Pages](https://nanopiero.github.io/webcam-iot
 The slide set also includes dedicated pages for
 [Fintraffic discovery](https://nanopiero.github.io/webcam-iot-ingest/fintraffic.html),
 [Skaping discovery](https://nanopiero.github.io/webcam-iot-ingest/skaping.html),
-and [Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html).
+[Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html),
+and [Fintraffic ingestion](https://nanopiero.github.io/webcam-iot-ingest/fintraffic-ingestion.html).
 
 Missing site altitudes may be enriched with the
 [Open-Meteo Elevation API](https://open-meteo.com/en/docs/elevation-api),
@@ -201,6 +202,7 @@ The benchmark keeps two independent timing controls explicit:
 | Component | Version | Pin location |
 |---|---:|---|
 | Prometheus | 3.13.1 | `docker-compose.yml` image tag |
+| Prometheus Pushgateway | 1.11.3 | `docker-compose.yml` image tag |
 | Grafana OSS | 11.2.0 | `docker-compose.yml` image tag |
 | just | 1.57.0 | `justfile` and `install-just.sh` |
 
@@ -208,7 +210,11 @@ The Compose image tags make monitoring recreation deterministic at the release
 version level. For byte-identical container images, deployments may additionally
 lock the resolved image digests in their deployment manifest.
 
-Pre-built dashboards for FastAPI and MQTT are provisioned automatically.
+Pre-built dashboards for FastAPI, MQTT, ingestion workers, and Skaping
+discovery are provisioned automatically. Short-lived discovery jobs publish
+their persistent batch metrics to the locally bound Pushgateway on port 9091;
+Prometheus scrapes it and Grafana displays the retained results after the
+discovery process exits.
 
 ## Running tests
 

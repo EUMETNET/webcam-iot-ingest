@@ -5,6 +5,7 @@ import pytest
 from config.deployment_config import (
     AltitudeConfig,
     DatabaseConfig,
+    DiscoveryMetricsConfig,
     FintrafficConfig,
     SkapingConfig,
     WindyConfig,
@@ -53,6 +54,23 @@ def test_altitude_config_defaults_to_open_meteo() -> None:
     assert config.provider_url == "https://api.open-meteo.com/v1/elevation"
     assert config.batch_size == 100
     assert config.max_sites_per_run == 5000
+
+
+def test_discovery_metrics_config_has_batch_gateway_defaults(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("DISCOVERY_METRICS_ENABLED", raising=False)
+    monkeypatch.delenv("DISCOVERY_METRICS_GATEWAY_URL", raising=False)
+    config = DiscoveryMetricsConfig.from_environment()
+
+    assert config.enabled is True
+    assert config.gateway_url == "http://localhost:9091"
+    assert config.push_timeout_s == 5
+
+
+def test_discovery_metrics_config_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("DISCOVERY_METRICS_ENABLED", "false")
+    assert DiscoveryMetricsConfig.from_environment().enabled is False
 
 
 def test_windy_config_loads_query_discs(monkeypatch, tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from typing import Any, Mapping, Sequence
 
 import psycopg
@@ -23,6 +24,10 @@ from database.registry_queries import (
 )
 from discovery.shared.add_altitude import enrich_missing_altitudes
 from discovery.shared.altitude_lookup import AltitudeClient
+from discovery.shared.discovery_metrics import (
+    DiscoveryMetrics,
+    registry_status_counts,
+)
 from discovery.windy.windy_source_access import WindyClient, WindyDiscoveryError
 
 
@@ -189,7 +194,15 @@ def build_discovery_snapshot(
     return WindyDiscoverySnapshot(tuple(sites), tuple(streams), excluded)
 
 
-def run_discovery(*, dry_run: bool = False) -> WindyDiscoverySnapshot | DiscoveryUpdateResult:
+def run_discovery(
+    *,
+    dry_run: bool = False,
+    metrics: DiscoveryMetrics | None = None,
+) -> tuple[
+    WindyDiscoverySnapshot,
+    DiscoveryUpdateResult | None,
+    dict[str, int],
+]:
     windy = WindyConfig.from_environment()
     database = DatabaseConfig.from_environment()
     allowed_countries = set(windy.member_countries)
@@ -199,6 +212,9 @@ def run_discovery(*, dry_run: bool = False) -> WindyDiscoverySnapshot | Discover
         page_size=windy.page_size,
         request_delay_s=windy.request_delay_s,
         cache_file=windy.discovery_cache_file,
+        request_observer=(
+            metrics.observe_provider_request if metrics is not None else None
+        ),
     ) as client:
         raw_webcams = client.discover_members(
             windy.member_countries, windy.discovery_areas
@@ -220,32 +236,41 @@ def run_discovery(*, dry_run: bool = False) -> WindyDiscoverySnapshot | Discover
             selected_rendition=windy.selected_rendition,
         )
         if dry_run:
-            return snapshot
+            return (
+                snapshot,
+                None,
+                registry_status_counts(stored.source_streams),
+            )
         update = apply_discovery_update(
             connection, NETWORK_ID, snapshot.sites, snapshot.source_streams
         )
         altitude = AltitudeConfig.from_environment()
-        if not altitude.enabled:
-            return update
-        with AltitudeClient(
-            altitude.provider_url,
-            timeout_s=altitude.request_timeout_s,
-            request_delay_s=altitude.request_delay_s,
-            max_attempts=altitude.max_attempts,
-        ) as altitude_client:
-            enrichment = enrich_missing_altitudes(
-                connection,
-                NETWORK_ID,
-                altitude_client,
-                limit=altitude.max_sites_per_run,
-                batch_size=altitude.batch_size,
+        if altitude.enabled:
+            with AltitudeClient(
+                altitude.provider_url,
+                timeout_s=altitude.request_timeout_s,
+                request_delay_s=altitude.request_delay_s,
+                max_attempts=altitude.max_attempts,
+            ) as altitude_client:
+                enrichment = enrich_missing_altitudes(
+                    connection,
+                    NETWORK_ID,
+                    altitude_client,
+                    limit=altitude.max_sites_per_run,
+                    batch_size=altitude.batch_size,
+                )
+            update = replace(
+                update,
+                altitudes_eligible=enrichment.eligible,
+                altitudes_resolved=enrichment.resolved,
+                altitudes_unresolved=enrichment.unresolved,
+                altitudes_updated=enrichment.updated,
             )
-        return replace(
+        refreshed = get_network_registry(connection, NETWORK_ID)
+        return (
+            snapshot,
             update,
-            altitudes_eligible=enrichment.eligible,
-            altitudes_resolved=enrichment.resolved,
-            altitudes_unresolved=enrichment.unresolved,
-            altitudes_updated=enrichment.updated,
+            registry_status_counts(refreshed.source_streams),
         )
 
 
@@ -352,16 +377,35 @@ def main() -> None:
         "--dry-run", action="store_true", help="retrieve and compare without writing"
     )
     args = parser.parse_args()
-    result = run_discovery(dry_run=args.dry_run)
-    if isinstance(result, WindyDiscoverySnapshot):
-        output = {
-            "dry_run": True,
-            "sites": len(result.sites),
-            "source_streams": len(result.source_streams),
-            "excluded": result.excluded_count,
-        }
-    else:
-        output = {"dry_run": False, **asdict(result)}
+    metrics = DiscoveryMetrics.from_environment(NETWORK_ID)
+    started = time.monotonic()
+    try:
+        snapshot, update, status_counts = run_discovery(
+            dry_run=args.dry_run,
+            metrics=metrics,
+        )
+    except Exception:
+        metrics.publish_failure(duration_s=time.monotonic() - started)
+        raise
+    duration_s = time.monotonic() - started
+    metrics_published = metrics.publish_success(
+        duration_s=duration_s,
+        sources_seen=len(snapshot.source_streams),
+        sources_added=update.streams_inserted if update is not None else 0,
+        sources_updated=update.streams_updated if update is not None else 0,
+        sources_disabled=update.streams_inactivated if update is not None else 0,
+        status_counts=status_counts,
+    )
+    output = {
+        "dry_run": args.dry_run,
+        "sites": len(snapshot.sites),
+        "source_streams": len(snapshot.source_streams),
+        "excluded": snapshot.excluded_count,
+        "duration_seconds": round(duration_s, 6),
+        "discovery_metrics_published": metrics_published,
+    }
+    if update is not None:
+        output.update(asdict(update))
     print(json.dumps(output, sort_keys=True))
 
 

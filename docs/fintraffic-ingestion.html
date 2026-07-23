@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fintraffic ingestion benchmark</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #edf5ff; }
+    main { width: min(1500px, 100%); min-height: 100vh; margin: auto; padding: 3vh 3vw; display: flex; flex-direction: column; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin-bottom: 2vh; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 4.5rem); letter-spacing: -.045em; }
+    h2 { margin: 0 0 .7rem; color: #70d7ff; font-size: clamp(1rem, 1.4vw, 1.4rem); }
+    .headline { color: #70d7ff; font-size: clamp(1.1rem, 2vw, 2rem); font-weight: 750; white-space: nowrap; }
+    .subtitle { margin: .45rem 0 0; color: #9fb2c8; font-size: clamp(.8rem, 1.15vw, 1.15rem); }
+    .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 1.2rem; }
+    .stack { display: flex; flex-direction: column; gap: 1.2rem; }
+    section { border: 1px solid #294059; border-radius: 16px; background: #0c1a2b; padding: 1rem 1.2rem; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; }
+    .card { padding: .8rem; border-radius: 12px; background: #10263d; }
+    .card strong { display: block; color: #70d7ff; font-size: clamp(1.1rem, 1.8vw, 1.8rem); font-variant-numeric: tabular-nums; }
+    .card span { color: #9fb2c8; font-size: .73rem; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: clamp(.72rem, .9vw, .92rem); }
+    th { color: #91a8bf; text-align: left; font-weight: 600; }
+    th, td { padding: .4rem .38rem; border-bottom: 1px solid #1d3045; }
+    td:not(:first-child), th:not(:first-child) { text-align: right; }
+    tr:last-child td { border-bottom: 0; }
+    .accent { color: #70d7ff; font-weight: 700; }
+    .note { margin: .7rem 0 0; color: #91a8bf; font-size: clamp(.68rem, .82vw, .83rem); line-height: 1.42; }
+    .detail { margin-top: .7rem; padding: .65rem .75rem; border-left: 3px solid #70d7ff; background: #0a2137; color: #b8cbe0; font-size: .76rem; line-height: 1.4; }
+    nav { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+    nav a { padding: .4rem .66rem; border: 1px solid #294059; border-radius: 999px; background: #0c1a2b; color: #9fb2c8; text-decoration: none; font-size: .72rem; }
+    nav a[aria-current="page"], nav a:hover { color: #70d7ff; border-color: #70d7ff; }
+    footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; gap: .3rem; }
+      .layout { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a><a href="fintraffic-ingestion.html" aria-current="page">Fintraffic ingestion</a></nav>
+  <main>
+    <header>
+      <div>
+        <h1>Fintraffic webcam ingestion</h1>
+        <p class="subtitle">One-hour full-network run · final 30-minute window · complete EWC S3 and MQTT pipeline</p>
+      </div>
+      <div class="headline">14,352 checks / 5 min</div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2>Throughput</h2>
+        <div class="cards">
+          <div class="card"><strong>14,352</strong><span>completed preset checks / 5 min</span></div>
+          <div class="card"><strong>1,092</strong><span>MQTT publications / 5 min</span></div>
+          <div class="card"><strong>10.0 s</strong><span>p90 epoch duration</span></div>
+          <div class="card"><strong>1.29 MB/s</strong><span>mean external image payload · 30 min</span></div>
+          <div class="card"><strong>0.163 MB/s</strong><span>mean successful S3 PUT payload · 30 min</span></div>
+          <div class="card"><strong>47.6 kB</strong><span>p90 transformed image size uploaded to S3 · 30 min</span></div>
+        </div>
+        <table aria-label="Five-minute Fintraffic ingestion pipeline throughput">
+          <thead><tr><th>Pipeline stage or outcome</th><th>Per 5 min</th></tr></thead>
+          <tbody>
+            <tr><td>Source image validated</td><td>1,092</td></tr>
+            <tr><td>Image transformation completed</td><td>1,092</td></tr>
+            <tr><td>S3 storage completed</td><td>1,092</td></tr>
+            <tr><td>MQTT publication completed</td><td class="accent">1,092</td></tr>
+            <tr><td>Provider marker unchanged</td><td>11,736</td></tr>
+            <tr><td>Image download error</td><td>1,488</td></tr>
+            <tr><td>Invalid image</td><td>26</td></tr>
+            <tr><td>Provider preset missing/error</td><td>11</td></tr>
+          </tbody>
+        </table>
+        <div class="detail"><strong>Failure interpretation.</strong> A provider error means a due registered preset was absent from the current bulk freshness snapshot. A download error occurs later, when its current Fintraffic JPEG URL cannot be retrieved or its <code>Last-Modified</code> value cannot validate the bulk marker. These failures renew the freshness-attempt timestamp and are retried only when the stream becomes due again.</div>
+        <p class="note">Values are Prometheus estimates over 15:13:45–15:43:45 UTC. MB/s uses decimal megabytes of completed HTTP image bodies and successful S3 PUT payloads, excluding protocol overhead. Pipeline stages describe the same images and must not be added.</p>
+        <p class="note">Image sizes must not be confused: the p90 downloaded source image is 497 kB, whereas 47.6 kB is the p90 transformed image subsequently uploaded to S3. The historical metrics contain a transformed-image size histogram rather than a histogram restricted to successful S3 PUTs; only about 0.17 fewer S3 uploads than transformed images occurred per five minutes.</p>
+      </section>
+      <div class="stack">
+        <section>
+          <h2>Latency per published image</h2>
+          <div class="cards">
+            <div class="card"><strong>1.44 min</strong><span>p50 provider marker → download</span></div>
+            <div class="card"><strong>2.69 min</strong><span>p95 provider marker → download</span></div>
+            <div class="card"><strong>0.96 s</strong><span>p95 download → job end</span></div>
+          </div>
+          <table aria-label="Fintraffic published image latency percentiles">
+            <thead><tr><th>Latency measure</th><th>p50</th><th>p95</th></tr></thead>
+            <tbody>
+              <tr><td>Provider marker → download</td><td>1.44 min</td><td>2.69 min</td></tr>
+              <tr><td>Download → completed job/MQTT</td><td>0.50 s</td><td>0.96 s</td></tr>
+            </tbody>
+          </table>
+          <div class="detail"><strong>Interpretation.</strong> Fintraffic freshness uses the station-data <code>measuredTime</code> marker, checked against the JPEG <code>Last-Modified</code> header. Internal processing from successful download through transformation, S3 and MQTT remains below one second at p95.</div>
+        </section>
+        <section>
+          <h2>Current EMA and image profile</h2>
+          <div class="cards">
+            <div class="card"><strong>8.41 min</strong><span>median EMA</span></div>
+            <div class="card"><strong>8.88 min</strong><span>p90 EMA</span></div>
+            <div class="card"><strong>10.37 min</strong><span>p95 EMA</span></div>
+          </div>
+          <table aria-label="Fintraffic image profile">
+            <thead><tr><th>Characteristic</th><th>p90</th></tr></thead>
+            <tbody>
+              <tr><td>Downloaded source image size</td><td>497 kB</td></tr>
+              <tr><td>Downloaded source width</td><td>1,257 px</td></tr>
+              <tr><td>Transformed image size uploaded to S3</td><td>47.6 kB</td></tr>
+              <tr><td>Derived image width</td><td>609 px</td></tr>
+            </tbody>
+          </table>
+          <div class="detail"><strong>Be careful.</strong> EMA statistics are estimated from gaps between effective download events, not from provider timestamps.</div>
+          <p class="note">Current database values for 2,170 Fintraffic streams with a learned EMA; mean 8.52 min. Final-window stage p95: provider refresh 0.63 s, successful source download 9.75 s, S3 upload 0.24 s, and MQTT publication 4.8 ms.</p>
+        </section>
+      </div>
+    </div>
+    <footer>Fintraffic ingestion benchmark · final 30 minutes of the one-hour run completed 23 July 2026</footer>
+  </main>
+</body>
+</html>

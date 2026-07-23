@@ -83,13 +83,37 @@ Repository material
 
 The `just discover-skaping [--dry-run]` recipe loads `.env` automatically.
 
+Discovery observability
+-----------------------
+
+Skaping is the first provider to use
+`discovery/shared/discovery_metrics.py`. Because a complete run finishes in
+less than one Prometheus scrape interval, the one-shot process pushes
+service-level batch metrics to a local persistent Pushgateway. Prometheus
+scrapes that gateway, and Grafana provisions the dedicated `Skaping discovery`
+dashboard.
+
+The shared metrics cover:
+
+- run success/failure and end-to-end duration;
+- source streams seen, inserted, refreshed, and inactivated;
+- current active, inactive, and blacklisted registry counts;
+- provider summary-request attempts, outcomes, duration, and throttling;
+- last successful run time and latest successful duration.
+
+Event counters and histograms accumulate across runs. Current registry gauges
+are replaced after each successful run. A Pushgateway outage is reported by
+`discovery_metrics_published=false` but does not roll back or fail an otherwise
+successful registry transaction. The fixed grouping key is the bounded
+`source_network`, not a process or host identifier.
+
 Automated validation evidence
 -----------------------------
 
 Focused Skaping tests plus Windy/Fintraffic discovery regression and
 deployment-configuration tests:
 
-    77 passed
+    93 passed
 
 Coverage includes authentication placement, accepted response envelopes,
 partial-snapshot safety, retry and sanitized errors, coordinate and altitude
@@ -128,3 +152,14 @@ The GitHub Pages discovery slide records the same snapshot, including
 discovery duration, registry and metadata coverage, the most frequent raw tag
 tokens, and 33 deduplicated panoramic image views identified across provider
 tags, type, and label.
+
+The first instrumented applied run completed in 0.492 seconds. It observed one
+successful summary request, 41 source streams seen and refreshed, zero
+insertions or inactivations, and registry state of 41 active, zero inactive,
+and zero blacklisted streams. The command reported
+`discovery_metrics_published=true`; the Pushgateway exposed the expected
+series, and Prometheus returned them with `source_network="ska"`.
+
+The focused shared-discovery-metrics, Skaping, and configuration suite passed
+57 tests. The complete discovery regression suite passed 93 tests after
+instrumentation.

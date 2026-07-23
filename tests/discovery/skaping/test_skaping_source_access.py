@@ -66,6 +66,36 @@ def test_retries_transient_status_then_succeeds() -> None:
     assert calls == 2
 
 
+def test_observes_every_provider_request_attempt() -> None:
+    calls = 0
+    observations = []
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(429 if calls == 1 else 200, json=[camera()])
+
+    client = SkapingClient(
+        API_KEY,
+        summary_url=URL,
+        timeout_s=1,
+        retry_count=1,
+        retry_backoff_s=0,
+        minimum_camera_count=1,
+        request_observer=lambda endpoint, result, duration: observations.append(
+            (endpoint, result, duration)
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert client.fetch_cameras() == [camera()]
+    assert [(endpoint, result) for endpoint, result, _ in observations] == [
+        ("summary", "throttled"),
+        ("summary", "success"),
+    ]
+    assert all(duration >= 0 for _, _, duration in observations)
+
+
 @pytest.mark.parametrize(
     "payload",
     [None, {}, {"data": {}}, [None], {"cameras": "not-a-list"}],

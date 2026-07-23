@@ -130,6 +130,20 @@ services:
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - pushgateway
+
+  pushgateway:
+    profiles: ["monitoring"]
+    image: prom/pushgateway:v1.11.3
+    command:
+      - --persistence.file=/data/metrics
+      - --persistence.interval=1m
+    ports:
+      - "127.0.0.1:9091:9091"
+    volumes:
+      - pushgateway-data:/data
+    restart: unless-stopped
 
   grafana:
     profiles: ["monitoring"]
@@ -147,6 +161,7 @@ volumes:
   postgres-data:
   grafana-storage:
   prometheus-data:
+  pushgateway-data:
 
 secrets:
   database_password:

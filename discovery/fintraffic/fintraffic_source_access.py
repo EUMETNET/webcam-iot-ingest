@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import time
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import httpx
@@ -24,6 +24,7 @@ class FintrafficClient:
         retry_count: int,
         retry_backoff_s: float,
         request_delay_s: float = 0.1,
+        request_observer: Callable[[str, str, float], None] | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         if not user_header:
@@ -37,6 +38,7 @@ class FintrafficClient:
         self._retry_count = retry_count
         self._retry_backoff_s = retry_backoff_s
         self._request_delay_s = request_delay_s
+        self._request_observer = request_observer
         self._made_request = False
         self._owns_client = client is None
         self._client = client or httpx.Client(
@@ -78,6 +80,8 @@ class FintrafficClient:
         self._made_request = True
         attempts = self._retry_count + 1
         for attempt in range(attempts):
+            started = time.monotonic()
+            observed = False
             try:
                 response = self._client.get(
                     url, headers=self._headers
@@ -86,12 +90,27 @@ class FintrafficClient:
                     response.status_code == 429
                     or response.status_code >= 500
                 ) and attempt + 1 < attempts:
+                    self._observe_request(
+                        url,
+                        "throttled"
+                        if response.status_code == 429
+                        else "error",
+                        started,
+                    )
+                    observed = True
                     self._wait_before_retry(response, attempt)
                     continue
                 response.raise_for_status()
                 payload = response.json()
+                self._observe_request(url, "success", started)
             except httpx.HTTPStatusError as error:
                 status = error.response.status_code
+                if not observed:
+                    self._observe_request(
+                        url,
+                        "throttled" if status == 429 else "error",
+                        started,
+                    )
                 detail = (
                     "Fintraffic throttled discovery (HTTP 429)"
                     if status == 429
@@ -99,6 +118,8 @@ class FintrafficClient:
                 )
                 raise FintrafficDiscoveryError(detail) from error
             except (httpx.HTTPError, ValueError) as error:
+                if not observed:
+                    self._observe_request(url, "error", started)
                 if isinstance(error, httpx.TransportError) and attempt + 1 < attempts:
                     self._sleep(attempt)
                     continue
@@ -107,6 +128,21 @@ class FintrafficClient:
                 ) from error
             return payload
         raise AssertionError("unreachable")
+
+    def _observe_request(
+        self, url: str, result: str, started: float
+    ) -> None:
+        if self._request_observer is not None:
+            endpoint_type = (
+                "list"
+                if url.rstrip("/") == self._stations_url.rstrip("/")
+                else "detail"
+            )
+            self._request_observer(
+                endpoint_type,
+                result,
+                max(0.0, time.monotonic() - started),
+            )
 
     def _wait_before_retry(
         self, response: httpx.Response, attempt: int

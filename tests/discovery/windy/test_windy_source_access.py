@@ -46,6 +46,33 @@ def test_deduplicates_overlapping_areas() -> None:
     assert len(client_for(handler).discover((AREA, AREA))) == 1
 
 
+def test_observes_provider_requests_but_not_cache_hits(tmp_path) -> None:
+    observations = []
+    cache_file = tmp_path / "windy.json"
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"total": 1, "webcams": [webcam(7)]})
+
+    client = WindyClient(
+        "test-key",
+        timeout_s=1,
+        page_size=2,
+        request_delay_s=0,
+        cache_file=cache_file,
+        request_observer=lambda endpoint, result, duration: observations.append(
+            (endpoint, result, duration)
+        ),
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert len(client.discover((AREA,))) == 1
+    assert len(client.discover((AREA,))) == 1
+
+    assert [(endpoint, result) for endpoint, result, _ in observations] == [
+        ("list", "success")
+    ]
+    assert observations[0][2] >= 0
+
+
 def test_member_discovery_uses_country_listing_below_offset_limit_and_discs_above() -> None:
     france_area = WindyDiscoveryArea(46.0, 2.0, 40.0, ("FR",))
     requests = []
