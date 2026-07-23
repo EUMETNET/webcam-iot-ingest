@@ -5,9 +5,12 @@ import pytest
 
 from config.deployment_config import WindyIngestionConfig, WorkerConfig
 from ingestion.worker import (
+    DEFAULT_INITIAL_STAGGER_SEED,
     DatabaseConnectionPool,
+    InitialPollingStagger,
     LazyPooledConnection,
     _epoch_wait_s,
+    _initial_phase_s,
     _progress,
     _run_epoch,
     run_worker,
@@ -112,3 +115,35 @@ def test_worker_rejects_conflicting_or_invalid_time_limits() -> None:
         run_worker(network="win", countries=("DK",), epochs=1, run_for_seconds=60)
     with pytest.raises(ValueError, match="run_for_seconds must be positive"):
         run_worker(network="win", countries=("DK",), run_for_seconds=0)
+
+
+def test_initial_stagger_is_deterministic_and_releases_without_db_changes() -> None:
+    stream = job()
+    windy = WindyIngestionConfig.from_environment()
+    window_s = 600.0
+    phase_s = _initial_phase_s(stream, DEFAULT_INITIAL_STAGGER_SEED, window_s)
+
+    assert phase_s == _initial_phase_s(
+        stream, DEFAULT_INITIAL_STAGGER_SEED, window_s
+    )
+    assert 0 <= phase_s < window_s
+
+    stagger = InitialPollingStagger(DEFAULT_INITIAL_STAGGER_SEED, window_s, 100.0)
+    selected, deferred, released = stagger.select(
+        [stream], now_monotonic=100.0 + max(0.0, phase_s - 0.001)
+    )
+    assert selected == []
+    assert deferred == 1
+    assert released == set()
+
+    selected, deferred, released = stagger.select(
+        [stream], now_monotonic=100.0 + phase_s
+    )
+    assert selected == [stream]
+    assert deferred == 0
+    assert released == {stream.source_stream_id}
+    assert stagger.select([stream], now_monotonic=100.0) == (
+        [stream],
+        0,
+        set(),
+    )

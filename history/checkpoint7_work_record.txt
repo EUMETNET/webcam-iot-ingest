@@ -5,7 +5,7 @@ Status
 ------
 
 Nearly finished and undergoing repository-owner performance validation on
-2026-07-22. Checkpoint 7 is not yet marked accepted; do not begin Fintraffic
+2026-07-23. Checkpoint 7 is not yet marked accepted; do not begin Fintraffic
 until the owner accepts the validation described below.
 
 Current differences from the architecture background
@@ -14,9 +14,9 @@ Current differences from the architecture background
 Checkpoint 7 currently has three deliberate implementation refinements with
 respect to the architecture background used to guide the repository:
 
-1. The polling interval is not always the minimum ingestion interval. It is
-   adaptive per stream:
-   `min(max(minimum_ingestion_interval, 0.7 * ema_download_period), 30 min)`.
+1. Due selection uses two per-stream time guards: time must be later than the
+   last successful download plus the minimum ingestion interval, and later
+   than the stored provider timestamp plus `0.7 * ema_download_period`.
 2. EMA updates are deferred until the end of the epoch and applied as one
    conditional database batch only when the epoch is not the first epoch and
    its duration is below the minimum ingestion interval. Other epochs discard
@@ -24,23 +24,32 @@ respect to the architecture background used to guide the repository:
    immediate.
 3. Observability adds three latency measures derived from the provider update
    timestamp: provider update to successful download, successful download to
-   completed MQTT job, and their sum. For Windy, the provider timestamp is the
-   provider's image-availability timestamp, so these measures estimate actual
-   availability-to-ingestion latency rather than only internal stage time.
+   completed MQTT job, and their sum. For Windy, `lastUpdatedOn` is the
+   provider marker known at metadata refresh rather than a guaranteed physical
+   acquisition timestamp for the downloaded bytes. The measures therefore
+   estimate provider-marker age at ingestion and internal completion latency.
 
 Implemented scope
 -----------------
 
 - `python -m ingestion.worker --network win` provides a continuous foreground
-  worker with finite epochs, a bounded thread pool, configurable idle/failure
-  delays, country and job limits, and bounded `--epochs` validation runs.
-- Epoch starts are separated by at least 15 seconds by default. Per-stream
-  repeat requests are independently bounded by adaptive due-stream selection.
+  worker with a bounded thread pool, configurable idle/failure delays, country
+  and job limits, bounded `--epochs` validation runs, and duration-bounded
+  `--run-for-seconds` benchmarks that stop new intake at the deadline and
+  finish the active epoch.
+- Epoch starts are separated by at least 15 seconds by default. The benchmark
+  recipe uses zero additional idle delay.
 - Migration `003_adaptive_polling.sql` adds
-  `last_freshness_query_timestamp`. A stream is due after
-  `min(max(minimum_ingestion_interval, 0.7 * ema_download_period), 30 min)`;
-  a missing EMA uses the minimum. Every applied Windy freshness attempt is
-  recorded, including provider errors, while dry runs remain non-mutating.
+  `last_freshness_query_timestamp`. For streams with prior successful state,
+  both the last-download minimum-interval guard and the provider-timestamp EMA
+  guard must pass. Streams without a prior download remain immediately
+  eligible. Every applied Windy freshness attempt is recorded, including
+  provider errors, while dry runs remain non-mutating.
+- `last_freshness_query_timestamp` is deliberately not a third eligibility
+  guard in the current owner-requested experiment. Once both time guards pass,
+  an unchanged or provider-error stream can therefore be selected again in
+  the next epoch until a successful download advances its stored state. The
+  resulting request load is part of the checkpoint performance measurement.
 - Windy metadata request starts remain serialized through a shared rate gate
   even when image jobs use multiple worker threads.
 - `last_download_timestamp`, the provider marker, and durable publication
@@ -71,6 +80,16 @@ Implemented scope
   unchanged jobs from being misread as increased Windy API response latency.
 - Docker Compose includes the optional `worker` profile and Prometheus scrapes
   the worker metrics endpoint.
+- `just ingestion-test <scope> <duration> staggered` assigns each source stream
+  a reproducible SHA-256-derived first-check phase. The fixed seed is
+  `windy-benchmark-v1`; `INITIAL_STAGGER_WINDOW_S` defaults to 600 seconds and
+  is independent of EMA. This state is in memory only and does not invent
+  registry timestamps. Each stream's first staggered EMA candidate is
+  discarded as cold-start evidence.
+- The Grafana dashboard shows cumulative epoch-completion steps, one-minute
+  instantaneous job/outcome rates, five-minute smoothed completed-job and
+  published-image throughput, five-minute stage means and p50/p95 histograms,
+  and explicit information-tool-tip descriptions of every window.
 
 Retry and publication recovery
 ------------------------------
@@ -110,9 +129,9 @@ Implemented configuration
     INGESTION_OUTBOX_BATCH_SIZE=100
     INGESTION_DATABASE_POOL_SIZE=16
     INGESTION_MIN_EPOCH_PERIOD_S=15
+    INITIAL_STAGGER_WINDOW_S=600
     MINIMUM_INGESTION_INTERVAL_S=300
     POLLING_INTERVAL_FACTOR=0.7
-    MAXIMUM_POLL_INTERVAL_S=1800
     S3_UPLOAD_RETRY_COUNT=1
     MQTT_PUBLICATION_RETRY_COUNT=1
 
@@ -131,8 +150,9 @@ with local socket permission.
 
 Database schema and registry integration tests completed with 16 passing tests
 in 25.22 seconds after applying migrations `002_publication_outbox.sql` and
-`003_adaptive_polling.sql` to the existing PostgreSQL volume. The adaptive
-selection tests cover the EMA factor and 30-minute cap.
+`003_adaptive_polling.sql` to the existing PostgreSQL volume. The current
+selection test covers the conjunction of the last-download minimum-interval
+guard and the provider-timestamp-plus-EMA guard.
 
 A bounded live dry run used DK, two jobs per epoch, and two epochs. Both epochs
 selected and downloaded exactly two images. A live health exercise reported
@@ -162,6 +182,18 @@ observed. Epoch 1 discarded its 4,710 EMA candidates as designed, while epochs
 2 and 3 conditionally applied 2,322 and 1,485 candidates. The run also exposed
 that the original `provider_refresh` duration combined local rate-gate waiting
 with HTTP latency, leading to the explicit timing split documented above.
+
+A 100-minute all-Windy benchmark completed on 2026-07-23 with the deterministic
+initial phase spread over 600 seconds. Prometheus retained the complete
+pipeline metrics. For the final 30-minute steady window, normalized averages
+per five minutes were 18,615 completed camera checks, 10,271 successful image
+downloads, 10,271 transformations, 10,269 S3 uploads, and 10,269 completed
+MQTT publications. Provider-marker-unchanged outcomes averaged 7,849 and
+provider-access errors 497 per five minutes; no throttling series was present.
+The provider-marker-to-completed-MQTT histogram estimated p50 at 2.31 minutes
+and p95 at 5.95 minutes, while download-to-completed-MQTT p95 was 0.98 seconds.
+These are Prometheus bucket estimates for 06:48:20--07:18:20 UTC, not exact
+order statistics.
 
 Remaining owner validation
 --------------------------

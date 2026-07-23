@@ -107,9 +107,28 @@ epoch finishes normally. Every invocation creates a uniquely hashed `screen`
 session and a timestamped `/tmp` log; the recipe prints both names when it
 starts.
 
+Add the optional `staggered` mode to spread the first freshness checks over a
+configurable window instead of creating a synchronized cold-start peak:
+
+```bash
+just ingestion-test FR,DE 20m staggered
+```
+
+This benchmark-only mode uses the fixed seed `windy-benchmark-v1` and a
+deterministic hash of each source-stream ID to assign a phase in `[0, 600)`
+seconds by default. `INITIAL_STAGGER_WINDOW_S` configures this window, and the
+benchmark recipe sets it explicitly to 600 seconds. The initial phase is
+independent of EMA. The mode changes neither
+registry timestamps nor EMA values; normal adaptive scheduling takes over after
+a stream's first check. As with a direct run's first epoch, EMA candidates from
+each stream's staggered first check are discarded to avoid cold-start bias. The
+worker prints the seed and phase window in its log.
+
 The benchmark keeps two independent timing controls explicit:
 
-- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam polling floor;
+- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam download-time guard;
+- after a download, normal selection also waits until the stored provider
+  timestamp plus `POLLING_INTERVAL_FACTOR * ema_download_period`;
 - `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
 - `INGESTION_IDLE_DELAY_S=0` adds no post-epoch pause; the 15-second minimum
   epoch period still prevents a tight loop for short or empty epochs.

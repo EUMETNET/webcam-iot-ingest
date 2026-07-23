@@ -9,6 +9,7 @@ from config.deployment_config import (
     WindyIngestionConfig,
     TransformationConfig,
     MqttConfig,
+    WorkerConfig,
 )
 
 
@@ -130,7 +131,7 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.image_max_bytes == 10_000_000
     assert config.minimum_ingestion_interval_s == 300
     assert config.polling_interval_factor == 0.7
-    assert config.maximum_poll_interval_s == 1800
+    assert WorkerConfig.from_environment().initial_stagger_window_s == 600
 
 
 def test_checkpoint6_configuration_defaults(monkeypatch) -> None:

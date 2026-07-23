@@ -5,16 +5,30 @@
   "panels": [
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "id": 1,
-      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": { "legend": { "displayMode": "hidden" }, "tooltip": { "mode": "single" } },
       "targets": [{
-        "expr": "sum(rate(webcam_ingestion_epoch_duration_seconds_sum[5m])) / sum(rate(webcam_ingestion_epoch_duration_seconds_count[5m]))",
-        "legendFormat": "mean epoch"
+        "expr": "sum(webcam_ingestion_epoch_total{result=\"success\"})",
+        "legendFormat": "completed epochs"
       }],
-      "title": "Mean epoch duration",
-      "type": "stat"
+      "description": "Cumulative successful epochs since the worker process started. Each upward step is an epoch completion; flat sections show time spent inside longer epochs.",
+      "title": "Completed epochs",
+      "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
@@ -32,7 +46,8 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "id": 3,
       "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [{ "expr": "sum(rate(webcam_ingestion_job_total[5m]))", "legendFormat": "jobs/s" }],
+      "targets": [{ "expr": "sum(irate(webcam_ingestion_job_total[1m]))", "legendFormat": "jobs/s" }],
+      "description": "Near-instantaneous completion rate calculated with Prometheus irate over the trailing 1 minute.",
       "title": "Completion rate",
       "type": "stat"
     },
@@ -53,9 +68,10 @@
       "id": 5,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [{
-        "expr": "sum(rate(webcam_ingestion_job_total[5m])) by (result)",
+        "expr": "sum(irate(webcam_ingestion_job_total[1m])) by (result)",
         "legendFormat": "{{result}}"
       }],
+      "description": "Near-instantaneous outcome rates calculated with Prometheus irate over the trailing 1 minute. Unlike a 5-minute rate, these series return to zero soon after activity stops.",
       "title": "Job outcomes",
       "type": "timeseries"
     },
@@ -69,7 +85,7 @@
         "expr": "sum(rate(webcam_ingestion_stage_duration_seconds_sum{outcome=\"success\"}[5m])) by (stage) / sum(rate(webcam_ingestion_stage_duration_seconds_count{outcome=\"success\"}[5m])) by (stage)",
         "legendFormat": "mean {{stage}}"
       }],
-      "description": "provider_refresh is total metadata time; provider_rate_gate_wait and provider_http split its controlled queueing and HTTP components.",
+      "description": "Rolling means use samples observed during the trailing 5 minutes. provider_refresh is total metadata time; provider_rate_gate_wait and provider_http split its controlled queueing and HTTP components.",
       "title": "Mean stage duration (refresh = gate + HTTP)",
       "type": "timeseries"
     },
@@ -79,11 +95,18 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "id": 7,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
-      "targets": [{
-        "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_stage_duration_seconds_bucket{outcome=\"success\"}[5m])) by (le, stage))",
-        "legendFormat": "p95 {{stage}}"
-      }],
-      "title": "P95 stage duration",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_stage_duration_seconds_bucket{outcome=\"success\"}[5m])) by (le, stage))",
+          "legendFormat": "p50 {{stage}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_stage_duration_seconds_bucket{outcome=\"success\"}[5m])) by (le, stage))",
+          "legendFormat": "p95 {{stage}}"
+        }
+      ],
+      "description": "Approximate p50 and p95 values from Prometheus histogram samples observed during the trailing 5 minutes.",
+      "title": "P50 and P95 stage duration",
       "type": "timeseries"
     },
     {
@@ -93,9 +116,10 @@
       "id": 8,
       "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "expr": "sum(rate(webcam_ingestion_job_total{result=\"throttled\"}[5m]))", "legendFormat": "throttled/s" },
-        { "expr": "sum(rate(webcam_ingestion_stage_failure_total[5m])) by (stage, reason)", "legendFormat": "{{stage}} · {{reason}}/s" }
+        { "expr": "sum(irate(webcam_ingestion_job_total{result=\"throttled\"}[1m]))", "legendFormat": "throttled/s" },
+        { "expr": "sum(irate(webcam_ingestion_stage_failure_total[1m])) by (stage, reason)", "legendFormat": "{{stage}} · {{reason}}/s" }
       ],
+      "description": "Near-instantaneous throttling and controlled-failure rates calculated with Prometheus irate over the trailing 1 minute.",
       "title": "Controlled failures and throttling",
       "type": "timeseries"
     },
@@ -115,6 +139,7 @@
           "legendFormat": "p95 {{measure}}"
         }
       ],
+      "description": "Approximate p50 and p95 image-latency values from Prometheus histogram samples observed during the trailing 5 minutes.",
       "title": "Provider → download → completed MQTT latency",
       "type": "timeseries"
     },
@@ -128,7 +153,28 @@
         "expr": "sum(rate(webcam_ingestion_source_job_duration_seconds_sum[5m])) by (outcome) / sum(rate(webcam_ingestion_source_job_duration_seconds_count[5m])) by (outcome)",
         "legendFormat": "mean {{outcome}}"
       }],
+      "description": "Rolling mean source-job duration by outcome, using samples observed during the trailing 5 minutes.",
       "title": "Mean source-job duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+      "id": 11,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_job_total[5m]))",
+          "legendFormat": "completed jobs/s"
+        },
+        {
+          "expr": "sum(rate(webcam_ingestion_job_total{result=\"published\"}[5m]))",
+          "legendFormat": "published images/s"
+        }
+      ],
+      "description": "Five-minute smoothed throughput. Completed jobs include unchanged and failed checks as well as publications; published images completed both S3 upload and MQTT publication.",
+      "title": "5-minute throughput",
       "type": "timeseries"
     }
   ],

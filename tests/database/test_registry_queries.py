@@ -256,29 +256,33 @@ def test_due_stream_selection_filters_country_and_applies_limit(
     assert [item.source_stream_id for item in selected] == [stream_a]
 
 
-def test_due_stream_selection_uses_ema_factor_and_maximum_cap(
+def test_due_stream_selection_combines_download_and_provider_time_guards(
     connection, identifiers
 ) -> None:
-    site_id, short_ema_stream, capped_stream = identifiers
+    site_id, due_stream, blocked_stream = identifiers
     now = datetime(2026, 7, 14, 12, 0, tzinfo=timezone.utc)
     apply_discovery_update(
         connection,
         "win",
         [site(site_id)],
-        [stream(short_ema_stream, site_id), stream(capped_stream, site_id)],
+        [stream(due_stream, site_id), stream(blocked_stream, site_id)],
     )
     connection.execute(
         """
         UPDATE source_stream
-        SET last_freshness_query_timestamp = %s,
-            ema_download_period = CASE source_stream_id WHEN %s THEN 600 ELSE 10000 END
+        SET last_download_timestamp = %s,
+            last_provider_image_marker = CASE source_stream_id
+                WHEN %s THEN %s ELSE %s END,
+            ema_download_period = 600
         WHERE source_stream_id IN (%s, %s)
         """,
         (
-            now - timedelta(minutes=10),
-            short_ema_stream,
-            short_ema_stream,
-            capped_stream,
+            now - timedelta(minutes=6),
+            due_stream,
+            (now - timedelta(minutes=8)).isoformat(),
+            (now - timedelta(minutes=6)).isoformat(),
+            due_stream,
+            blocked_stream,
         ),
     )
 
@@ -287,26 +291,46 @@ def test_due_stream_selection_uses_ema_factor_and_maximum_cap(
         "win",
         timedelta(minutes=5),
         polling_interval_factor=0.7,
-        maximum_poll_interval=timedelta(minutes=30),
         now=now,
     )
-    assert [item.source_stream_id for item in due] == [short_ema_stream]
+    assert [item.source_stream_id for item in due] == [due_stream]
 
-    record_freshness_query(
-        connection, capped_stream, now - timedelta(minutes=31)
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_provider_image_marker = %s
+        WHERE source_stream_id = %s
+        """,
+        ((now - timedelta(minutes=8)).isoformat(), blocked_stream),
     )
     due = get_due_source_streams(
         connection,
         "win",
         timedelta(minutes=5),
         polling_interval_factor=0.7,
-        maximum_poll_interval=timedelta(minutes=30),
         now=now,
     )
     assert {item.source_stream_id for item in due} == {
-        short_ema_stream,
-        capped_stream,
+        due_stream,
+        blocked_stream,
     }
+
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_download_timestamp = %s
+        WHERE source_stream_id = %s
+        """,
+        (now - timedelta(minutes=4), blocked_stream),
+    )
+    due = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        now=now,
+    )
+    assert [item.source_stream_id for item in due] == [due_stream]
 
 
 def test_ingestion_state_updates_respect_workflow_stages(

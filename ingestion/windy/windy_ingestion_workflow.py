@@ -141,9 +141,6 @@ def run_ingestion(
             selected_limit,
             timedelta(seconds=config.minimum_ingestion_interval_s),
             polling_interval_factor=config.polling_interval_factor,
-            maximum_poll_interval=timedelta(
-                seconds=config.maximum_poll_interval_s
-            ),
         )
         results = tuple(
             _process_job(
@@ -507,7 +504,6 @@ def _select_country_sample(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
-    maximum_poll_interval: timedelta = timedelta(minutes=30),
 ) -> list[DueSourceStream]:
     """Select a small deterministic sample without starving later countries."""
     selected: list[DueSourceStream] = []
@@ -521,7 +517,6 @@ def _select_country_sample(
                     NETWORK_ID,
                     minimum_ingestion_interval,
                     polling_interval_factor=polling_interval_factor,
-                    maximum_poll_interval=maximum_poll_interval,
                     countries=(country,),
                     limit=country_limit,
                 )

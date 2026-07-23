@@ -286,7 +286,6 @@ def get_due_source_streams(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
-    maximum_poll_interval: timedelta = timedelta(minutes=30),
     now: datetime | None = None,
     countries: Sequence[str] | None = None,
     limit: int | None = None,
@@ -296,8 +295,6 @@ def get_due_source_streams(
         raise ValueError("minimum ingestion interval cannot be negative")
     if polling_interval_factor < 0:
         raise ValueError("polling interval factor cannot be negative")
-    if maximum_poll_interval < minimum_ingestion_interval:
-        raise ValueError("maximum poll interval cannot be below the minimum")
     now = now or datetime.now(timezone.utc)
     _require_aware_datetime(now, "now")
     if countries is not None and (
@@ -329,16 +326,25 @@ def get_due_source_streams(
               AND ss.status = 'active'
               AND (%s::text[] IS NULL OR s.country = ANY(%s::text[]))
               AND (
-                  ss.last_freshness_query_timestamp IS NULL
-                  OR ss.last_freshness_query_timestamp + LEAST(
-                      %s::double precision,
-                      GREATEST(
-                          %s::double precision,
-                          COALESCE(ss.ema_download_period * %s, %s::double precision)
-                      )
-                  ) * interval '1 second' <= %s
+                  ss.last_download_timestamp IS NULL
+                  OR (
+                      ss.last_download_timestamp
+                          + %s::double precision * interval '1 second' <= %s
+                      AND CASE
+                          WHEN ss.ema_download_period IS NULL
+                            OR ss.last_provider_image_marker IS NULL
+                            OR NOT pg_input_is_valid(
+                                ss.last_provider_image_marker,
+                                'timestamp with time zone'
+                            )
+                          THEN TRUE
+                          ELSE ss.last_provider_image_marker::timestamptz
+                              + (ss.ema_download_period * %s::double precision)
+                                * interval '1 second' <= %s
+                      END
+                  )
               )
-            ORDER BY ss.last_freshness_query_timestamp NULLS FIRST,
+            ORDER BY ss.last_download_timestamp NULLS FIRST,
                      ss.source_stream_id
             LIMIT %s
             """,
@@ -346,10 +352,9 @@ def get_due_source_streams(
                 network_id,
                 normalized_countries,
                 normalized_countries,
-                maximum_poll_interval.total_seconds(),
                 minimum_ingestion_interval.total_seconds(),
+                now,
                 polling_interval_factor,
-                minimum_ingestion_interval.total_seconds(),
                 now,
                 limit,
             ),

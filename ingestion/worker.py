@@ -8,6 +8,7 @@ from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 from datetime import timedelta
+import hashlib
 import json
 import logging
 from queue import Empty, LifoQueue
@@ -42,6 +43,59 @@ from storage.s3_storage import S3Storage
 
 
 logger = logging.getLogger(__name__)
+DEFAULT_INITIAL_STAGGER_SEED = "windy-benchmark-v1"
+
+
+class InitialPollingStagger:
+    """Deterministically spread each stream's first check without DB writes."""
+
+    def __init__(
+        self,
+        seed: str,
+        window_s: float,
+        started_monotonic: float | None = None,
+    ) -> None:
+        if not seed:
+            raise ValueError("initial polling stagger seed cannot be empty")
+        if window_s <= 0:
+            raise ValueError("initial polling stagger window must be positive")
+        self.seed = seed
+        self.window_s = window_s
+        self.started_monotonic = (
+            time.monotonic() if started_monotonic is None else started_monotonic
+        )
+        self._released: set[str] = set()
+
+    def select(
+        self,
+        jobs: list[DueSourceStream],
+        now_monotonic: float | None = None,
+    ) -> tuple[list[DueSourceStream], int, set[str]]:
+        elapsed_s = max(
+            0.0,
+            (time.monotonic() if now_monotonic is None else now_monotonic)
+            - self.started_monotonic,
+        )
+        selected: list[DueSourceStream] = []
+        released_now: set[str] = set()
+        for job in jobs:
+            already_released = job.source_stream_id in self._released
+            if already_released or elapsed_s >= _initial_phase_s(
+                job, self.seed, self.window_s
+            ):
+                self._released.add(job.source_stream_id)
+                selected.append(job)
+                if not already_released:
+                    released_now.add(job.source_stream_id)
+        return selected, len(jobs) - len(selected), released_now
+
+
+def _initial_phase_s(job: DueSourceStream, seed: str, window_s: float) -> float:
+    digest = hashlib.sha256(
+        f"{seed}\0{job.source_stream_id}".encode("utf-8")
+    ).digest()
+    fraction = int.from_bytes(digest[:8], "big") / 2**64
+    return fraction * window_s
 
 
 class DatabaseConnectionPool:
@@ -135,6 +189,7 @@ def run_worker(
     max_jobs: int | None = None,
     epochs: int | None = None,
     run_for_seconds: float | None = None,
+    initial_stagger_seed: str | None = None,
     dry_run: bool = False,
     stop_event: threading.Event | None = None,
     verbose: bool = False,
@@ -157,6 +212,11 @@ def run_worker(
     server = HealthServer(worker.health_host, worker.health_port, health, metrics)
     server.start()
     gate = RateGate(windy.request_delay_s)
+    initial_stagger = (
+        InitialPollingStagger(initial_stagger_seed, worker.initial_stagger_window_s)
+        if initial_stagger_seed is not None
+        else None
+    )
     summaries: list[dict[str, object]] = []
     epoch_index = 0
     deadline = (
@@ -183,6 +243,7 @@ def run_worker(
                     metrics,
                     epoch_index + 1,
                     verbose,
+                    initial_stagger,
                 )
                 health.last_epoch_success_monotonic = time.monotonic()
                 metrics.epochs.labels("win", "success").inc()
@@ -231,6 +292,7 @@ def _run_epoch(
     metrics: WorkerMetrics,
     epoch_number: int = 1,
     verbose: bool = False,
+    initial_stagger: InitialPollingStagger | None = None,
 ) -> dict[str, object]:
     epoch_started = time.monotonic()
     database = DatabaseConfig.from_environment()
@@ -283,16 +345,20 @@ def _run_epoch(
                 "win",
                 timedelta(seconds=windy.minimum_ingestion_interval_s),
                 polling_interval_factor=windy.polling_interval_factor,
-                maximum_poll_interval=timedelta(
-                    seconds=windy.maximum_poll_interval_s
-                ),
                 countries=countries,
                 limit=max_jobs,
             )
             connection.commit()
+        stagger_deferred = 0
+        initial_release_ids: set[str] = set()
+        if initial_stagger is not None:
+            jobs, stagger_deferred, initial_release_ids = initial_stagger.select(jobs)
         metrics.selected.labels("win").set(len(jobs))
         if not jobs or stop.is_set():
-            return {"selected": len(jobs), "outcomes": {}}
+            summary: dict[str, object] = {"selected": len(jobs), "outcomes": {}}
+            if initial_stagger is not None:
+                summary["stagger_deferred"] = stagger_deferred
+            return summary
         results = []
         with ThreadPoolExecutor(max_workers=worker.threads, thread_name_prefix="windy") as executor:
             futures: set[Future] = {
@@ -327,6 +393,11 @@ def _run_epoch(
             for result in results
             if isinstance(result.ema_update_candidate, EmaUpdateCandidate)
         ]
+        applicable_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.source_stream_id not in initial_release_ids
+        ]
         ema_updates_applied = 0
         ema_update_eligible = (
             not dry_run
@@ -334,21 +405,27 @@ def _run_epoch(
             and time.monotonic() - epoch_started
             < windy.minimum_ingestion_interval_s
         )
-        if ema_update_eligible and candidates:
+        if ema_update_eligible and applicable_candidates:
             with pool.connection() as connection:
                 ema_updates_applied = apply_ema_update_candidates(
-                    connection, candidates
+                    connection, applicable_candidates
                 )
                 connection.commit()
     outcomes: dict[str, int] = {}
     for result in results:
         outcomes[result.outcome] = outcomes.get(result.outcome, 0) + 1
-    return {
+    summary = {
         "selected": len(jobs),
         "outcomes": dict(sorted(outcomes.items())),
         "ema_candidates": len(candidates),
         "ema_updates_applied": ema_updates_applied,
     }
+    if initial_stagger is not None:
+        summary["stagger_deferred"] = stagger_deferred
+        summary["ema_candidates_deferred_initial"] = len(candidates) - len(
+            applicable_candidates
+        )
+    return summary
 
 
 def _progress(epoch: int, selected: int, results: list[object]) -> dict[str, object]:
@@ -424,6 +501,16 @@ def main() -> None:
         type=float,
         help="stop starting epochs after this duration; finish an active epoch",
     )
+    parser.add_argument(
+        "--stagger-initial-polling",
+        action="store_true",
+        help="deterministically spread each stream's first check",
+    )
+    parser.add_argument(
+        "--stagger-seed",
+        default=DEFAULT_INITIAL_STAGGER_SEED,
+        help="fixed seed for deterministic initial polling phases",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--verbose", action="store_true", help="print epoch progress once per second"
@@ -436,12 +523,28 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
+    initial_stagger_seed = args.stagger_seed if args.stagger_initial_polling else None
+    if initial_stagger_seed is not None:
+        print(
+            json.dumps(
+                {
+                    "initial_polling_stagger": {
+                        "enabled": True,
+                        "seed": initial_stagger_seed,
+                        "window_s": WorkerConfig.from_environment().initial_stagger_window_s,
+                    }
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     summaries = run_worker(
         network=args.network,
         countries=tuple(args.countries.split(",")),
         max_jobs=args.max_jobs,
         epochs=args.epochs,
         run_for_seconds=args.run_for_seconds,
+        initial_stagger_seed=initial_stagger_seed,
         dry_run=args.dry_run,
         stop_event=stop,
         verbose=args.verbose,

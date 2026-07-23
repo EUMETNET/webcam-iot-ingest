@@ -61,16 +61,20 @@ state before running it again:
     docker compose --env-file .env exec postgres psql \
       -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT source_stream_id, last_freshness_query_timestamp,
+              last_download_timestamp, last_provider_image_marker,
               ema_download_period,
-              LEAST(1800, GREATEST(300, 0.7 * COALESCE(ema_download_period, 300)))
-                  AS poll_interval_s
+              last_download_timestamp + interval '300 seconds'
+                  AS download_guard_ends,
+              last_provider_image_marker::timestamptz
+                  + (0.7 * ema_download_period) * interval '1 second'
+                  AS provider_ema_guard_ends
        FROM source_stream ss JOIN site s USING (site_id)
        WHERE s.network_id = 'win' AND s.country = 'DK'
        ORDER BY last_freshness_query_timestamp DESC NULLS LAST LIMIT 1;"
 
 Confirm the freshness timestamp is populated. A provider error is still a
-freshness attempt and must populate it. Do not expect the same stream to become
-due again before its displayed polling interval.
+freshness attempt and must populate it. A previously downloaded stream becomes
+due only after both displayed guard timestamps have passed.
 
 4. Health and graceful shutdown
 -------------------------------

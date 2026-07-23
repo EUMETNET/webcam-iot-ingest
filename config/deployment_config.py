@@ -211,7 +211,6 @@ class WindyIngestionConfig:
     image_max_bytes: int
     minimum_ingestion_interval_s: float
     polling_interval_factor: float
-    maximum_poll_interval_s: float
     request_delay_s: float
     download_retry_count: int
     retry_backoff_s: float
@@ -235,9 +234,6 @@ class WindyIngestionConfig:
             polling_interval_factor=float(
                 os.getenv("POLLING_INTERVAL_FACTOR", "0.7")
             ),
-            maximum_poll_interval_s=float(
-                os.getenv("MAXIMUM_POLL_INTERVAL_S", "1800")
-            ),
             request_delay_s=float(
                 os.getenv("WINDY_INGESTION_REQUEST_DELAY_S", "0.1")
             ),
@@ -258,8 +254,6 @@ class WindyIngestionConfig:
             raise ValueError("minimum ingestion interval cannot be negative")
         if self.polling_interval_factor < 0:
             raise ValueError("polling interval factor cannot be negative")
-        if self.maximum_poll_interval_s < self.minimum_ingestion_interval_s:
-            raise ValueError("maximum poll interval cannot be below the minimum")
         if self.request_delay_s < 0 or self.retry_backoff_s < 0:
             raise ValueError("Windy ingestion delays cannot be negative")
         if self.download_retry_count < 0:
@@ -415,6 +409,7 @@ class WorkerConfig:
     outbox_batch_size: int
     database_pool_size: int = 16
     minimum_epoch_period_s: float = 15
+    initial_stagger_window_s: float = 600
 
     @classmethod
     def from_environment(cls) -> "WorkerConfig":
@@ -430,6 +425,9 @@ class WorkerConfig:
             database_pool_size=int(os.getenv("INGESTION_DATABASE_POOL_SIZE", "16")),
             minimum_epoch_period_s=float(
                 os.getenv("INGESTION_MIN_EPOCH_PERIOD_S", "15")
+            ),
+            initial_stagger_window_s=float(
+                os.getenv("INITIAL_STAGGER_WINDOW_S", "600")
             ),
         )
         config.validate()
@@ -449,5 +447,7 @@ class WorkerConfig:
             self.minimum_epoch_period_s,
         ) < 0:
             raise ValueError("worker delays cannot be negative")
+        if self.initial_stagger_window_s <= 0:
+            raise ValueError("initial stagger window must be positive")
         if not self.health_host or not 1 <= self.health_port <= 65535:
             raise ValueError("invalid worker health host or port")
