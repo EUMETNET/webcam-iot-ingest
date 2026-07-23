@@ -1,7 +1,7 @@
 Checkpoint 9 work record - Fintraffic ingestion
 ================================================
 
-Status: implemented; owner validation pending.
+Status: accepted by the repository owner on 2026-07-23.
 
 Implementation
 --------------
@@ -26,6 +26,10 @@ Implementation
   produced derived image size, width, height, bounded format/color mode, and
   color depth. Both dashboards display rolling P50, P90, and P95 distributions;
   P90 image width and P90 image size are explicit series.
+- Exact byte counters distinguish completed external image-response payloads
+  from bytes actually transferred by successful S3 PUT operations. Both
+  provider dashboards display their one-minute-smoothed throughput; immutable
+  S3 object reuse is excluded because it performs no PUT payload transfer.
 
 Architecture decision
 ---------------------
@@ -52,9 +56,10 @@ Prometheus, and MQTT metrics remain available before that checkpoint.
 Validation evidence
 -------------------
 
-Focused shared, Windy-regression, Fintraffic, worker, and metrics tests:
+Focused shared, Windy-regression, Fintraffic, worker, storage, and metrics
+tests after the image-metadata and throughput additions:
 
-    40 passed, 1 skipped
+    43 passed, 1 skipped
 
 A bounded live dry run parsed 2,264 usable freshness markers and downloaded and
 transformed four selected Fintraffic images without S3 or MQTT writes. A
@@ -96,3 +101,41 @@ seconds: 34 downloaded and transformed, 6 rejected at image access, with no
 throttling. Both Grafana dashboards query these histograms for rolling P50,
 P90, and P95 size, width, height, and color depth, including explicit P90 width
 and size series.
+
+The owner then completed a 20-minute full Fintraffic publication benchmark with
+deterministic 600-second staggering:
+
+- 60 epochs and 27,910 jobs;
+- 5,555 published images, 17,944 unchanged markers, 4,328 download errors,
+  50 invalid images, and 33 provider/freshness errors;
+- no throttling, S3 failure, or MQTT publication failure;
+- median epoch duration 14.38 seconds, mean 17.91 seconds, p90 32.76 seconds,
+  and maximum 58.64 seconds;
+- 3,505 eligible EMA candidates and 3,505 conditional EMA updates;
+- initial staggering completed at epoch 36.
+
+Registry inspection after the run found that 2,170 of 2,255 active streams
+(96.23%) had downloaded successfully at least once. The remaining 85 streams
+(3.77%) accounted for most repeated download-error jobs because a stream
+without any successful download remains due in later epochs. This inflates
+per-job error percentages but does not mean that 15.5% of distinct cameras
+were unavailable. A provider-specific failed-camera backoff or temporary
+unavailable status remains a possible later refinement.
+
+For the final ten-minute post-stagger window, Prometheus histogram estimates
+were approximately 98 seconds p50 and 323 seconds p95 from provider marker to
+download, and 0.50 seconds p50 and 0.95 seconds p95 from download to completed
+MQTT publication. The internal transformation/storage/publication chain was
+therefore not the material latency source.
+
+An optional one-hour staggered run was started after acceptance to study longer
+EMA and throughput convergence. It is follow-up performance evidence and does
+not block checkpoint 9 acceptance.
+
+Checkpoint decision
+-------------------
+
+Checkpoint 9 is accepted. The freshness choice, publication path, adaptive
+polling, deferred EMA behavior, failure isolation, observability, and parallel
+Windy/Fintraffic dashboards received bounded and full-worker validation.
+Checkpoint 10 may begin when requested by the repository owner.

@@ -34,10 +34,12 @@ class S3Storage:
         client: Any | None = None,
         sleep: Callable[[float], None] = time.sleep,
         observer: Callable[[str, str, float], None] | None = None,
+        event_observer: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
         self._config = config
         self._sleep = sleep
         self._observer = observer
+        self._event_observer = event_observer
         if client is None:
             client = create_s3_client(config)
         self._client = client
@@ -53,16 +55,21 @@ class S3Storage:
     def upload(self, object_key: str, content: bytes) -> StoredObject:
         started = time.monotonic()
         try:
-            result = self._upload(object_key, content)
+            result, transferred = self._upload(object_key, content)
         except Exception:
             if self._observer is not None:
                 self._observer("s3_upload", "failure", time.monotonic() - started)
             raise
         if self._observer is not None:
             self._observer("s3_upload", "success", time.monotonic() - started)
+        if transferred and self._event_observer is not None:
+            self._event_observer(
+                "s3_upload_bytes",
+                {"size_bytes": len(content)},
+            )
         return result
 
-    def _upload(self, object_key: str, content: bytes) -> StoredObject:
+    def _upload(self, object_key: str, content: bytes) -> tuple[StoredObject, bool]:
         if not object_key or not content:
             raise ValueError("S3 object key and content are required")
         last_error: Exception | None = None
@@ -75,7 +82,7 @@ class S3Storage:
                         existing.get("ContentLength") == len(content)
                         and existing.get("Metadata", {}).get("sha256") == digest
                     ):
-                        return self.reference(object_key)
+                        return self.reference(object_key), False
                     raise S3StorageError(
                         "immutable S3 object key already contains different content"
                     )
@@ -86,7 +93,7 @@ class S3Storage:
                     ContentType="image/jpeg",
                     Metadata={"sha256": digest},
                 )
-                return self.reference(object_key)
+                return self.reference(object_key), True
             except Exception as error:  # SDK providers expose several subclasses.
                 if isinstance(error, S3StorageError):
                     raise

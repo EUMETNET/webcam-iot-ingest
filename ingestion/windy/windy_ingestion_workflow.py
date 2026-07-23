@@ -242,6 +242,11 @@ def _process_job(
             "throttled" if error.throttled else "download_error",
             provider_marker=reference.marker,
         )
+    if event_observer is not None:
+        event_observer(
+            "source_download_bytes",
+            {"size_bytes": len(content)},
+        )
     try:
         source = validate_source_image(content)
     except InvalidSourceImageError:

@@ -1,6 +1,8 @@
 Checkpoint 9 owner validation - Fintraffic ingestion
 ====================================================
 
+Status: completed and accepted by the repository owner on 2026-07-23.
+
 Prerequisites
 -------------
 
@@ -14,12 +16,18 @@ Prerequisites
 
     uv run --env-file .env pytest -q \
       tests/ingestion/fintraffic \
+      tests/ingestion/windy \
       tests/ingestion/shared \
       tests/metrics \
+      tests/storage \
       tests/worker
 
 Confirm that the bulk snapshot, null marker, changed image, metadata/image race,
 zero-retry, transformation, durable publication, metrics, and worker tests pass.
+
+Recorded result after the final observability additions:
+
+    43 passed, 1 skipped
 
 2. Bounded read-only provider test
 ----------------------------------
@@ -28,6 +36,10 @@ zero-retry, transformation, durable publication, metrics, and worker tests pass.
 
 Confirm that one bulk snapshot is reported, no more than ten registered streams
 are selected, provider markers are ISO timestamps, and no S3/MQTT write occurs.
+
+Recorded result: successful. The live snapshot contained approximately 2,263
+to 2,264 usable markers during validation; selected images downloaded,
+validated, and transformed without external writes.
 
 3. Bounded publication and registry uniqueness
 -----------------------------------------------
@@ -49,6 +61,10 @@ not. The just recipe runs Python on the host and therefore selects
 `127.0.0.1` for the local Mosquitto broker rather than the Docker-internal
 hostname `mqtt`.
 
+Recorded result: successful. A bounded image completed validation, T0V0
+transformation, EWC S3 upload, durable outbox completion, and QoS 1 MQTT
+publication.
+
 4. Parallel monitored worker
 ----------------------------
 
@@ -65,5 +81,18 @@ The recipe prints the unique screen session and log path. Tunnel Grafana port
 - changed jobs expose relevant transformation, image size/dimensions, S3,
   MQTT, source-job duration, derived-image count, and provider latency metrics.
 
-Stop after recording the results. Do not begin checkpoint 10 until checkpoint 9
-is accepted.
+Recorded result: successful. The accepted 20-minute run completed 60 epochs and
+27,910 jobs, published 5,555 images, applied all 3,505 eligible EMA candidates,
+and observed no throttling, S3 failure, or MQTT failure. The persistent
+download-error volume was traced primarily to 85 never-successful provider
+cameras repeatedly remaining due; this is documented as a possible later
+backoff/status refinement rather than a checkpoint blocker.
+
+The Windy and Fintraffic dashboards are explicitly filtered by
+`source_network`, and source/derived metadata plus one-minute external-download
+and successful-S3-PUT throughput metrics are present. A newly started worker is
+required after metric-code changes because an already running process cannot
+expose newly defined collectors.
+
+Checkpoint 9 is accepted. The optional one-hour convergence benchmark is
+follow-up performance analysis and does not block checkpoint 10.

@@ -287,6 +287,8 @@ Stop after validation and wait for approval.
 Checkpoint 9 - Fintraffic ingestion
 ----------------------------------
 
+Status: accepted by the repository owner on 2026-07-23.
+
 Objectives:
 
 - Use Fintraffic full-JPEG image URLs.
@@ -309,9 +311,13 @@ Expected validation:
     just ingest-fintraffic --limit 10 --dry-run
     just ingestion-test-fintraffic 20m staggered
 
-A repeated run must exercise the unchanged path without creating a
-duplicate derived image for the same marker. Stop and wait for approval before
-beginning Skaping.
+Marker comparison, deterministic identifiers, and database collision tests
+must prevent duplicate processing for the same stored marker. Two immediate
+bounded commands are not an idempotency test because successful streams become
+temporarily not due while never-successful streams remain eligible. The
+accepted monitored worker run exercised unchanged markers and durable
+publication without duplicate processing. Checkpoint 10 may now begin when
+requested.
 
 Checkpoint 10 - Skaping discovery
 ---------------------------------

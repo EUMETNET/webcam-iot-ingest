@@ -168,6 +168,9 @@ then downloads only changed full-JPEG images.
 Both provider dashboards include source and derived image size, width, height,
 color depth, format, and color-mode observability. Size, width, height, and
 color-depth panels show rolling P50, P90, and P95 values over five minutes.
+They also show one-minute-smoothed external image-download and successful S3
+PUT payload throughput. S3 throughput excludes objects reused after immutable
+identity verification because no object bytes are retransmitted.
 
 This benchmark-only mode uses the fixed seed `windy-benchmark-v1` and a
 deterministic hash of each source-stream ID to assign a phase in `[0, 600)`

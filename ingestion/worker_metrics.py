@@ -73,6 +73,18 @@ class WorkerMetrics:
             ["source_network", "format", "color_mode"],
             registry=self.registry,
         )
+        self.source_download_bytes = Counter(
+            "webcam_ingestion_source_download_bytes_total",
+            "Bytes received in completed source-image HTTP downloads",
+            ["source_network"],
+            registry=self.registry,
+        )
+        self.s3_upload_bytes = Counter(
+            "webcam_ingestion_s3_upload_bytes_total",
+            "Derived-image bytes transferred by successful S3 PUT requests",
+            ["source_network"],
+            registry=self.registry,
+        )
         self.source_size = Histogram(
             "webcam_ingestion_source_image_size_bytes",
             "Validated source image size",
@@ -186,6 +198,14 @@ class WorkerMetrics:
             )
             self.source_color_depth.labels(self.source_network).observe(
                 float(values["color_depth_bits"])
+            )
+        elif event == "source_download_bytes":
+            self.source_download_bytes.labels(self.source_network).inc(
+                float(values["size_bytes"])
+            )
+        elif event == "s3_upload_bytes":
+            self.s3_upload_bytes.labels(self.source_network).inc(
+                float(values["size_bytes"])
             )
         elif event == "derived_image":
             labels = (self.source_network, str(values["version"]))

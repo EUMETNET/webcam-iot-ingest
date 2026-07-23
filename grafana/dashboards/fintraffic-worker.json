@@ -701,6 +701,47 @@
       "description": "Five-minute rates of validated source and produced derived images by bounded image format and color mode.",
       "title": "Image formats and color modes",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_source_download_bytes_total{source_network=\"fin\"}[1m]))",
+          "legendFormat": "external image downloads"
+        },
+        {
+          "expr": "sum(rate(webcam_ingestion_s3_upload_bytes_total{source_network=\"fin\"}[1m]))",
+          "legendFormat": "successful S3 PUT"
+        }
+      ],
+      "description": "One-minute-smoothed payload throughput in bytes per second. Source download bytes count completed image HTTP responses; S3 bytes count only data transferred by successful PUT requests and exclude immutable-object reuse.",
+      "title": "External download and S3 throughput",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

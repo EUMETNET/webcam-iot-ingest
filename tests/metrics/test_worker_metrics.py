@@ -23,6 +23,12 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         "transformation", {"version": "T0V0", "outcome": "success"}
     )
     metrics.observe_event(
+        "source_download_bytes", {"size_bytes": 60000}
+    )
+    metrics.observe_event(
+        "s3_upload_bytes", {"size_bytes": 12000}
+    )
+    metrics.observe_event(
         "source_image",
         {
             "size_bytes": 54321,
@@ -58,6 +64,8 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         b"webcam_ingestion_image_latency_seconds",
         b"webcam_ingestion_transformation_total",
         b"webcam_ingestion_source_image_total",
+        b"webcam_ingestion_source_download_bytes_total",
+        b"webcam_ingestion_s3_upload_bytes_total",
         b"webcam_ingestion_source_image_size_bytes",
         b"webcam_ingestion_source_image_width_pixels",
         b"webcam_ingestion_source_image_height_pixels",

@@ -160,7 +160,11 @@ def _run_epoch(
             )
         )
         storage = (
-            S3Storage(S3Config.from_environment(), observer=metrics.observe_stage)
+            S3Storage(
+                S3Config.from_environment(),
+                observer=metrics.observe_stage,
+                event_observer=metrics.observe_event,
+            )
             if not dry_run
             else None
         )

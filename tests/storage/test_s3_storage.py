@@ -25,11 +25,16 @@ def config(retries: int = 1) -> S3Config:
 
 def test_uploads_immutable_jpeg_and_returns_reference() -> None:
     client = Mock()
+    events = []
     client.head_object.side_effect = ClientError(
         {"Error": {"Code": "404"}, "ResponseMetadata": {"HTTPStatusCode": 404}},
         "HeadObject",
     )
-    stored = S3Storage(config(), client=client).upload("T0V0/win/a b.jpg", b"jpeg")
+    stored = S3Storage(
+        config(),
+        client=client,
+        event_observer=lambda event, values: events.append((event, values)),
+    ).upload("T0V0/win/a b.jpg", b"jpeg")
 
     client.put_object.assert_called_once_with(
         Bucket="webcam",
@@ -39,6 +44,7 @@ def test_uploads_immutable_jpeg_and_returns_reference() -> None:
         Metadata={"sha256": hashlib.sha256(b"jpeg").hexdigest()},
     )
     assert stored.url == "https://public.example/webcam/T0V0/win/a%20b.jpg"
+    assert events == [("s3_upload_bytes", {"size_bytes": 4})]
 
 
 def test_retries_once_then_reports_sanitized_failure() -> None:
@@ -54,12 +60,18 @@ def test_retries_once_then_reports_sanitized_failure() -> None:
 
 def test_matching_existing_object_is_reused_without_put() -> None:
     client = Mock()
+    events = []
     content = b"jpeg"
     client.head_object.return_value = {
         "ContentLength": len(content),
         "Metadata": {"sha256": hashlib.sha256(content).hexdigest()},
     }
 
-    S3Storage(config(), client=client).upload("key", content)
+    S3Storage(
+        config(),
+        client=client,
+        event_observer=lambda event, values: events.append((event, values)),
+    ).upload("key", content)
 
     client.put_object.assert_not_called()
+    assert events == []
