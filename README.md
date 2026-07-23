@@ -6,6 +6,10 @@ FastAPI service that ingests webcam images, stores them in S3-compatible object 
 
 A presentation describing the repository and the current Windy discovery
 statistics is available on [GitHub Pages](https://nanopiero.github.io/webcam-iot-ingest/).
+The slide set also includes dedicated
+[Fintraffic discovery](https://nanopiero.github.io/webcam-iot-ingest/fintraffic.html)
+and [Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html)
+pages.
 
 Missing site altitudes may be enriched with the
 [Open-Meteo Elevation API](https://open-meteo.com/en/docs/elevation-api),
@@ -82,6 +86,9 @@ Fintraffic uses the non-secret `FINTRAFFIC_USER_HEADER` application identifier
 as the official `Digitraffic-User` request header. Set it to a meaningful
 application name; the repository name is the default. Windy discovery requires
 the API-key file and geographic configuration documented in `.env.example`.
+Fintraffic discovery retrieves the complete station list and then paced details
+for every eligible station so descriptive station and preset metadata are
+retained in the registry.
 
 ## Environment variables
 
@@ -99,8 +106,8 @@ the API-key file and geographic configuration documented in `.env.example`.
 | `DATABASE_USER` | `webcam_ingestion` | PostgreSQL user |
 | `DATABASE_PASSWORD_FILE` | `.secrets/database_password` | Path to the database password file |
 | `FINTRAFFIC_USER_HEADER` | `webcam-iot-ingest` | Non-secret application identifier sent as `Digitraffic-User` |
-| `WINDY_FRESHNESS_QUERY_RETRY_COUNT` | `1` | Retries after the initial Windy metadata/freshness HTTP request |
-| `WINDY_DOWNLOAD_RETRY_COUNT` | `1` | Retries after the initial Windy image-download HTTP request |
+| `WINDY_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Windy metadata/freshness HTTP request |
+| `WINDY_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Windy image-download HTTP request |
 | `BUCKET_NAME` | - | Bucket name |
 | `BUCKET_ACCESS_KEY_ID` | — | S3 access key |
 | `BUCKET_SECRET_ACCESS_KEY` | — | S3 secret key |

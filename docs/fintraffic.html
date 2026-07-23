@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fintraffic webcam discovery</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #edf5ff; }
+    main { width: min(1500px, 100%); min-height: 100vh; margin: auto; padding: 3vh 3vw; display: flex; flex-direction: column; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin-bottom: 2vh; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 4.5rem); letter-spacing: -.045em; }
+    h2 { margin: 0 0 .7rem; color: #70d7ff; font-size: clamp(1rem, 1.4vw, 1.4rem); }
+    .headline { color: #70d7ff; font-size: clamp(1.1rem, 2vw, 2rem); font-weight: 750; white-space: nowrap; }
+    .subtitle { margin: .45rem 0 0; color: #9fb2c8; font-size: clamp(.8rem, 1.15vw, 1.15rem); }
+    .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.2rem; }
+    .stack { display: flex; flex-direction: column; gap: 1.2rem; }
+    section { border: 1px solid #294059; border-radius: 16px; background: #0c1a2b; padding: 1rem 1.2rem; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; }
+    .card { padding: .8rem; border-radius: 12px; background: #10263d; }
+    .card strong { display: block; color: #70d7ff; font-size: clamp(1.2rem, 2vw, 2rem); font-variant-numeric: tabular-nums; }
+    .card span { color: #9fb2c8; font-size: .76rem; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: clamp(.72rem, .92vw, .94rem); }
+    th { color: #91a8bf; text-align: left; font-weight: 600; }
+    th, td { padding: .42rem .4rem; border-bottom: 1px solid #1d3045; }
+    td:not(:first-child), th:not(:first-child) { text-align: right; }
+    tr:last-child td { border-bottom: 0; }
+    .accent { color: #70d7ff; font-weight: 700; }
+    .note { margin: .75rem 0 0; color: #91a8bf; font-size: clamp(.7rem, .86vw, .86rem); line-height: 1.45; }
+    .detail { margin-top: .8rem; padding: .7rem .8rem; border-left: 3px solid #70d7ff; background: #0a2137; color: #b8cbe0; font-size: .78rem; line-height: 1.4; }
+    nav { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; gap: .45rem; }
+    nav a { padding: .42rem .72rem; border: 1px solid #294059; border-radius: 999px; background: #0c1a2b; color: #9fb2c8; text-decoration: none; font-size: .76rem; }
+    nav a[aria-current="page"], nav a:hover { color: #70d7ff; border-color: #70d7ff; }
+    footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; gap: .3rem; }
+      .layout { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
+  </style>
+</head>
+<body>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html" aria-current="page">Fintraffic discovery</a><a href="ingestion.html">Windy ingestion</a></nav>
+  <main>
+    <header>
+      <div>
+        <h1>Fintraffic webcam discovery</h1>
+        <p class="subtitle">Finnish road-weather stations · complete list plus detailed station metadata</p>
+      </div>
+      <div class="headline">809 stations · 2,255 views</div>
+    </header>
+    <div class="layout">
+      <div class="stack">
+        <section>
+          <h2>Registry and discovery</h2>
+          <div class="cards">
+            <div class="card"><strong>2 min 27 s</strong><span>measured detailed dry run</span></div>
+            <div class="card"><strong>2.79</strong><span>mean presets per station</span></div>
+            <div class="card"><strong>100%</strong><span>sites with derived altitude</span></div>
+          </div>
+          <div class="detail"><strong>Complete metadata.</strong> One bulk request establishes the station set; 809 paced detail requests add station purpose, camera and road metadata, plus each preset’s name, direction, resolution and image URL. Four non-gathering stations and 21 non-collection presets were excluded.</div>
+        </section>
+        <section>
+          <h2>Scene purpose</h2>
+          <table aria-label="Fintraffic station purpose">
+            <thead><tr><th>Provider purpose</th><th>Stations</th><th>Views</th><th>Share</th></tr></thead>
+            <tbody>
+              <tr><td>Road weather (<code>keli</code>)</td><td>592</td><td>2,004</td><td class="accent">73.2%</td></tr>
+              <tr><td>Traffic (<code>liikenne</code>)</td><td>191</td><td>225</td><td>23.6%</td></tr>
+              <tr><td>Tunnel (<code>tunneli</code>)</td><td>26</td><td>26</td><td>3.2%</td></tr>
+            </tbody>
+          </table>
+          <p class="note"><code>purpose</code> is the architecture-defined station-level description of scene use. Preset labels identify 562 explicit road-surface views (<code>Tienpinta</code>).</p>
+        </section>
+      </div>
+      <div class="stack">
+        <section>
+          <h2>Preset viewing direction</h2>
+          <table aria-label="Fintraffic preset directions">
+            <thead><tr><th>Direction</th><th>Views</th></tr></thead>
+            <tbody>
+              <tr><td>Special / road surface</td><td class="accent">688</td></tr>
+              <tr><td>Increasing road direction</td><td>615</td></tr>
+              <tr><td>Decreasing road direction</td><td>586</td></tr>
+              <tr><td>Unknown</td><td>164</td></tr>
+              <tr><td>Crossing road, increasing</td><td>102</td></tr>
+              <tr><td>Crossing road, decreasing</td><td>100</td></tr>
+            </tbody>
+          </table>
+        </section>
+        <section>
+          <h2>Acquisition metadata</h2>
+          <table aria-label="Fintraffic acquisition metadata">
+            <thead><tr><th>Characteristic</th><th>Count</th></tr></thead>
+            <tbody>
+              <tr><td>Nominal 600 s collection interval</td><td class="accent">801 stations</td></tr>
+              <tr><td>1280 × 720 image resolution</td><td>2,139 views</td></tr>
+              <tr><td>VAPIX camera type</td><td>495 stations</td></tr>
+              <tr><td>BOSCH camera type</td><td>211 stations</td></tr>
+              <tr><td>ENEO camera type</td><td>56 stations</td></tr>
+              <tr><td>Road address metadata present</td><td>809 stations</td></tr>
+            </tbody>
+          </table>
+          <p class="note">Every registered view has <code>presentationName</code>, <code>direction</code>, <code>resolution</code> and <code>imageUrl</code>. Every station has purpose, municipality, province and road-address metadata. Median presets per station: 3; maximum: 7.</p>
+        </section>
+      </div>
+    </div>
+    <footer>Fintraffic detailed discovery snapshot · 23 July 2026 · full JPEG rendition selected</footer>
+  </main>
+</body>
+</html>

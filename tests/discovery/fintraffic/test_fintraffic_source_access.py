@@ -36,6 +36,32 @@ def test_fetches_complete_snapshot_with_required_headers() -> None:
     assert client_for(handler).fetch_stations() == payload()
 
 
+def test_fetches_and_validates_station_detail() -> None:
+    detail = {
+        "type": "Feature",
+        "id": "C01503",
+        "geometry": {"type": "Point", "coordinates": [24.0, 60.0, 0.0]},
+        "properties": {
+            "id": "C01503",
+            "purpose": "keli",
+            "presets": [
+                {
+                    "id": "C0150301",
+                    "inCollection": True,
+                    "presentationName": "Inkooseen",
+                    "direction": "INCREASING_DIRECTION",
+                }
+            ],
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/stations/C01503")
+        return httpx.Response(200, json=detail)
+
+    assert client_for(handler).fetch_station("C01503") == detail
+
+
 def test_retries_transient_status_then_succeeds() -> None:
     calls = 0
 

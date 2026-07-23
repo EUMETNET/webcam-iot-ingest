@@ -54,9 +54,10 @@ Implemented scope
   even when image jobs use multiple worker threads.
 - Windy metadata/freshness requests and JPEG downloads now have independent,
   network-scoped retry controls. `WINDY_FRESHNESS_QUERY_RETRY_COUNT` and
-  `WINDY_DOWNLOAD_RETRY_COUNT` both default to one retry after the initial
-  attempt; `RETRY_BACKOFF_S` remains their shared backoff duration and defaults
-  to one second. A freshness retry repeats the complete metadata/reference
+  `WINDY_DOWNLOAD_RETRY_COUNT` both default to zero retries; an experiment can
+  explicitly set either value to one or more. `RETRY_BACKOFF_S` remains their
+  shared backoff duration and defaults to one second. A freshness retry repeats
+  the complete metadata/reference
   operation, including HTTP access, JSON validation, provider-ID and marker
   validation, and selected-rendition lookup. A download retry applies only to
   the later JPEG request. The former generic `DOWNLOAD_RETRY_COUNT` setting is
@@ -103,10 +104,10 @@ Implemented scope
 Retry and publication recovery
 ------------------------------
 
-The configured defaults are zero transformation retries, one Windy freshness
-retry, one Windy image-download retry, one S3 upload retry, and one MQTT
-publication retry. Publication retries reuse the same transformed bytes, image
-identifier, immutable object key, and notification payload.
+The configured defaults are zero transformation retries, zero Windy freshness
+retries, zero Windy image-download retries, one S3 upload retry, and one MQTT
+publication retry. Publication retries reuse the same transformed bytes,
+image identifier, immutable object key, and notification payload.
 
 Checkpoint 7 adds `publication_outbox` as an explicitly documented operational
 extension to the original three-table pilot registry. Successful image download
@@ -208,15 +209,17 @@ After that benchmark, the approximately 497 provider-access errors per five
 minutes were identified as failures of the Windy metadata/reference operation,
 before JPEG download. Such a failure prevents publication in the current epoch
 and may add an epoch to the eventual provider-marker-to-download delay. The two
-Windy-specific retry settings were therefore introduced with one immediate
-retry each. The next full-scale benchmark is intended to measure whether the
-freshness retry reduces both provider-error throughput and the latency tail;
-persistent provider failures will instead incur one additional request and the
-configured backoff. Image-download errors remain separately observable.
+Windy-specific retry settings were therefore introduced and tested with one
+immediate retry each. Their operational defaults were then restored to zero
+after the retry run showed a worse latency tail despite fewer provider errors.
+Future controlled benchmarks can explicitly enable them. Persistent provider
+failures incur one additional request and the configured backoff only when a
+retry count is nonzero. Image-download errors remain separately observable.
 
-Remaining owner validation
---------------------------
+Checkpoint decision
+-------------------
 
-Use `manual_tests/validation_to_complete_checkpoint7`. The remaining decision
-is checkpoint acceptance, not missing checkpoint-7 implementation. Stop before
-Checkpoint 8 (Fintraffic discovery).
+Checkpoint 7 is accepted. Its validation procedure remains in
+`manual_tests/validation_to_complete_checkpoint7`; the later retry experiment
+and restored zero-retry defaults are recorded above. Checkpoint 8 Fintraffic
+discovery was subsequently implemented and accepted.

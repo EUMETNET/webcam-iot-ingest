@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -22,6 +23,7 @@ class FintrafficClient:
         timeout_s: float,
         retry_count: int,
         retry_backoff_s: float,
+        request_delay_s: float = 0.1,
         client: httpx.Client | None = None,
     ) -> None:
         if not user_header:
@@ -34,6 +36,8 @@ class FintrafficClient:
         }
         self._retry_count = retry_count
         self._retry_backoff_s = retry_backoff_s
+        self._request_delay_s = request_delay_s
+        self._made_request = False
         self._owns_client = client is None
         self._client = client or httpx.Client(
             timeout=httpx.Timeout(timeout_s), headers=self._headers
@@ -48,11 +52,35 @@ class FintrafficClient:
 
     def fetch_stations(self) -> dict[str, Any]:
         """Return one validated complete FeatureCollection."""
+        return _validate_feature_collection(self._request_json(self._stations_url))
+
+    def fetch_station(self, station_id: str) -> dict[str, Any]:
+        """Return one validated detailed station feature."""
+        url = f"{self._stations_url.rstrip('/')}/{quote(station_id, safe='')}"
+        payload = self._request_json(url)
+        if not isinstance(payload, Mapping) or payload.get("type") != "Feature":
+            raise FintrafficDiscoveryError(
+                f"Fintraffic station {station_id} detail is not a Feature"
+            )
+        if str(payload.get("id")) != station_id:
+            raise FintrafficDiscoveryError(
+                f"Fintraffic station {station_id} detail has a mismatched identifier"
+            )
+        if not isinstance(payload.get("properties"), Mapping):
+            raise FintrafficDiscoveryError(
+                f"Fintraffic station {station_id} detail has invalid properties"
+            )
+        return dict(payload)
+
+    def _request_json(self, url: str) -> Any:
+        if self._made_request and self._request_delay_s:
+            time.sleep(self._request_delay_s)
+        self._made_request = True
         attempts = self._retry_count + 1
         for attempt in range(attempts):
             try:
                 response = self._client.get(
-                    self._stations_url, headers=self._headers
+                    url, headers=self._headers
                 )
                 if (
                     response.status_code == 429
@@ -77,7 +105,7 @@ class FintrafficClient:
                 raise FintrafficDiscoveryError(
                     "Fintraffic discovery request failed"
                 ) from error
-            return _validate_feature_collection(payload)
+            return payload
         raise AssertionError("unreachable")
 
     def _wait_before_retry(

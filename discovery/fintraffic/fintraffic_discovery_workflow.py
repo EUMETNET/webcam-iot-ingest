@@ -295,8 +295,14 @@ def run_discovery(
         timeout_s=fintraffic.request_timeout_s,
         retry_count=fintraffic.retry_count,
         retry_backoff_s=fintraffic.retry_backoff_s,
+        request_delay_s=fintraffic.request_delay_s,
     ) as client:
         payload = client.fetch_stations()
+        payload = _expand_station_details(
+            payload,
+            client,
+            selected_collection_status=fintraffic.selected_collection_status,
+        )
     with psycopg.connect(
         host=database.host,
         port=database.port,
@@ -341,6 +347,35 @@ def run_discovery(
                 altitudes_updated=enrichment.updated,
             )
         return snapshot, update
+
+
+def _expand_station_details(
+    payload: Mapping[str, Any],
+    client: FintrafficClient,
+    *,
+    selected_collection_status: str,
+) -> dict[str, Any]:
+    """Replace eligible compact features with complete station details."""
+    features = payload.get("features")
+    if not isinstance(features, list):
+        raise FintrafficDiscoveryError("Fintraffic snapshot has no features array")
+    expanded: list[Mapping[str, Any]] = []
+    for feature in features:
+        if not isinstance(feature, Mapping):
+            raise FintrafficDiscoveryError(
+                "Fintraffic snapshot has a malformed feature"
+            )
+        properties = feature.get("properties")
+        if not isinstance(properties, Mapping):
+            raise FintrafficDiscoveryError(
+                "Fintraffic station has invalid properties"
+            )
+        if properties.get("collectionStatus") == selected_collection_status:
+            station_id = _required_identifier(feature.get("id"), "station")
+            expanded.append(client.fetch_station(station_id))
+        else:
+            expanded.append(feature)
+    return {**dict(payload), "features": expanded}
 
 
 def main() -> None:

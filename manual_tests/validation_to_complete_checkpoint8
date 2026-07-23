@@ -77,24 +77,29 @@ station/preset filtering, headers, retries, identifiers, metadata snapshots,
 unreliable zero altitude, transactional status transitions, blacklist
 preservation, and dry-run non-mutation.
 
-5. Inspect one bounded provider response without writing
---------------------------------------------------------
+5. Validate the provider contract automatically
+-----------------------------------------------
 
-Before the complete dry run, use the implemented fixture/inspection option if
-one exists to inspect only counts and field names. Do not print the full
-provider payload or the `Digitraffic-User` value.
+No separate provider-inspection option or manual JSON inspection is required.
+Run:
 
-Confirm from the bounded result:
+    uv run --env-file .env pytest -q tests/discovery/fintraffic
 
-- the top-level object is a FeatureCollection;
-- station features use Point coordinates in longitude/latitude order;
-- `collectionStatus` and `presets` are present;
-- presets expose `id` and `inCollection`;
-- any observed geometry altitude `0.0` is retained only as raw provider
-  metadata and is not assumed to be trustworthy site altitude.
+A passing result verifies automatically that:
 
-Do not add an N+1 station-detail crawl unless required checkpoint metadata is
-demonstrably absent from the station-list response.
+- the top-level object must be a FeatureCollection with a features array;
+- station geometry must be a Point with longitude followed by latitude;
+- `collectionStatus` and `presets` are required;
+- preset `id` and boolean `inCollection` values are validated;
+- provider altitude `0.0` remains raw metadata and is not used as registry
+  altitude;
+- malformed or incomplete snapshots fail instead of reaching reconciliation.
+
+The following live dry run then confirms that the current provider response
+satisfies this tested contract. Do not manually print the complete provider
+payload or the `Digitraffic-User` value. Discovery deliberately performs one
+paced detail request per eligible station because the compact list omits the
+descriptive station and preset metadata required by this checkpoint.
 
 6. Run a complete live dry run
 ------------------------------
@@ -113,6 +118,9 @@ Run:
 
     just discover-fintraffic --dry-run
 
+This is the only live inspection command required before applying discovery.
+It retrieves the station list and all eligible station details, so it takes
+longer than the earlier compact-list-only implementation.
 The JSON summary must report provider stations seen, stations accepted,
 presets seen, presets accepted, exclusions by station/preset eligibility, and
 normalized site/stream counts. It must not include the application identifier,
@@ -222,7 +230,7 @@ Checkpoint decision
 
 Local implementation evidence recorded on 2026-07-23:
 
-- focused Fintraffic, Windy-regression, and deployment-config tests: 47 passed;
+- focused Fintraffic, Windy-regression, and deployment-config tests: 49 passed;
 - shared registry integration tests: 11 passed;
 - dry run: 813 stations seen, 809 accepted, 2,276 presets seen, 2,255 accepted;
 - first apply: 809 sites and 2,255 streams inserted;
@@ -230,16 +238,15 @@ Local implementation evidence recorded on 2026-07-23:
 - altitude enrichment: 600 sites resolved, 209 retained for later retries;
 - final registry: 809 sites and 2,255 active streams.
 
-For an independent owner acceptance, confirm:
+Owner acceptance recorded on 2026-07-23
+---------------------------------------
 
-- focused fixture tests pass;
-- PostgreSQL integration tests pass;
-- one complete dry run is non-mutating;
-- one applied run produces coherent Fintraffic sites and presets;
-- an immediate repeated snapshot is idempotent or any provider-side delta is
-  recorded;
-- this runbook and `history/checkpoint8_work_record.txt` are rewritten with
-  actual commands, counts, findings, and the owner decision.
+The focused fixture and PostgreSQL integration tests passed. A complete dry run
+was non-mutating, applied discovery produced 809 sites and 2,255 active
+presets, and repeated reconciliation produced no insertions or status
+transitions. After detailed station requests were enabled, all registered
+stations and presets contained the architecture-relevant descriptive metadata.
+The owner confirmed checkpoint 8.
 
-After acceptance, stop and request explicit approval before starting
-Checkpoint 9 Fintraffic ingestion.
+Stop and request explicit approval before starting Checkpoint 9 Fintraffic
+ingestion.

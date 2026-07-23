@@ -42,7 +42,7 @@
   </style>
 </head>
 <body>
-  <nav aria-label="Slides"><a href="./">Discovery</a><a href="ingestion.html" aria-current="page">Ingestion</a></nav>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="ingestion.html" aria-current="page">Windy ingestion</a></nav>
   <main>
     <header>
       <div>
@@ -58,7 +58,6 @@
           <div class="card"><strong>18,615</strong><span>completed camera checks / 5 min</span></div>
           <div class="card"><strong>10,269</strong><span>MQTT publications / 5 min</span></div>
           <div class="card"><strong>0</strong><span>Windy throttling responses</span></div>
-          <div class="card"><strong>3.23 min</strong><span>median epoch duration</span></div>
           <div class="card"><strong>4.87 min</strong><span>p90 epoch duration</span></div>
         </div>
         <table aria-label="Five-minute ingestion pipeline throughput">
@@ -74,7 +73,7 @@
           </tbody>
         </table>
         <div class="detail"><strong>Provider error.</strong> The Windy metadata/current-image-reference request failed or returned an unusable response: for example an HTTP failure, invalid JSON, missing webcam or marker, mismatched ID, or missing rendition URL. It excludes a valid unchanged marker, image-download failures, and throttling.</div>
-        <p class="note">Counts are averages over six consecutive five-minute windows from the final 30 minutes. Epoch percentiles use the nine epochs completed in the same steady window. Pipeline-stage counts describe the same images progressing through successive stages and must not be added together.</p>
+        <p class="note">Counts are averages over six consecutive five-minute windows from the final 30 minutes. Epoch p90 uses the nine epochs completed in the same steady window. Pipeline-stage counts describe the same images progressing through successive stages and must not be added together.</p>
       </section>
       <div class="stack">
         <section>

@@ -49,13 +49,14 @@ The response must be a GeoJSON-like `FeatureCollection` containing a
 - a presets array whose accepted entries have a non-empty stable preset ID and
   `inCollection = true`.
 
-The complete list endpoint is preferred for discovery so one daily pass does
-not automatically fan out into roughly one request per station. The
-station-detail endpoint is not part of the initial request plan unless fixture
-and bounded live inspection show that a registry field required by this
-checkpoint is absent from the complete list. If detail requests become
-necessary, they must be bounded, timed, tested, and must preserve the
-all-or-nothing snapshot rule.
+The complete list endpoint establishes the authoritative station set and
+eligibility. Because its compact presets contain only `id` and `inCollection`,
+discovery then retrieves the detail endpoint for every eligible station.
+Those paced requests populate station metadata such as `purpose`, camera type,
+collection interval, municipality, province, and road address, and preset
+metadata such as `presentationName`, `direction`, resolution, and image URL.
+Any missing or malformed required detail aborts the complete run before
+reconciliation, preserving the all-or-nothing snapshot rule.
 
 HTTP access uses a finite timeout, a reusable client, explicit
 `Digitraffic-User` and gzip headers, controlled retry/backoff for transient
@@ -139,7 +140,7 @@ Validation evidence
 
 Focused Fintraffic, Windy-regression, and deployment-configuration tests:
 
-    47 passed
+    49 passed
 
 Shared PostgreSQL registry integration tests:
 
@@ -151,6 +152,17 @@ The complete live dry run observed:
 - 2,276 presets, of which 2,255 were in collection and 21 excluded;
 - 809 normalized sites and 2,255 normalized source streams;
 - no registry write.
+
+After detailed metadata retrieval was made mandatory, the same live dry run was
+repeated successfully with one list request and 809 paced station-detail
+requests. It completed in about 147 seconds and produced the same 809-site,
+2,255-stream eligible snapshot while adding the descriptive detail fields to
+the normalized JSONB metadata.
+
+The subsequent owner-applied discovery was verified from PostgreSQL: all 809
+sites have `purpose`, municipality, province, road-address metadata, and a
+derived altitude; all 2,255 active presets have `presentationName`, direction,
+resolution, and image URL metadata.
 
 The first applied run inserted 809 sites and 2,255 streams. It activated or
 inactivated no existing streams and preserved the complete eligible snapshot.
@@ -177,7 +189,12 @@ Operational commands
     just discover-windy
 
 Both recipes forward workflow options. Fintraffic discovery uses one complete
-station-list request rather than one detail request per station.
+station-list request followed by one paced detail request for each eligible
+station.
 
-Checkpoint 8 is implemented and locally validated. Checkpoint 9 Fintraffic
-ingestion remains out of scope.
+Checkpoint decision
+-------------------
+
+Checkpoint 8 was accepted by the owner on 2026-07-23 after the detailed
+discovery was applied and its registry metadata verified. Checkpoint 9
+Fintraffic ingestion remains out of scope.

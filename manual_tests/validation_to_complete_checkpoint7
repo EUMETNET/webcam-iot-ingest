@@ -132,6 +132,8 @@ finish normally whether it publishes pending rows or finds none.
 7. Acceptance
 -------------
 
-Checkpoint 7 is complete when the focused tests, bounded worker, health checks,
-clean shutdown, and persisted-state checks above are accepted. Record any new
-evidence in `history/checkpoint7_work_record.txt`, then stop before Checkpoint 8.
+Checkpoint 7 was accepted after the focused tests, bounded worker, health
+checks, clean shutdown, and persisted-state checks above passed. Later retry
+experiments and the restored zero-retry defaults are recorded in
+`history/checkpoint7_work_record.txt`. Checkpoint 8 was subsequently completed
+and accepted.

@@ -2,6 +2,7 @@ import pytest
 
 from database.registry_queries import RegistrySnapshot
 from discovery.fintraffic.fintraffic_discovery_workflow import (
+    _expand_station_details,
     build_discovery_snapshot,
 )
 from discovery.fintraffic.fintraffic_source_access import FintrafficDiscoveryError
@@ -74,6 +75,42 @@ def test_filters_non_gathering_stations_and_non_collection_presets() -> None:
     assert result.presets_seen == 3
     assert result.presets_accepted == 1
     assert result.presets_excluded == 2
+
+
+def test_expands_only_eligible_stations_with_detailed_metadata() -> None:
+    compact_gathering = station("ON")
+    compact_removed = station("OFF", status="REMOVED_TEMPORARILY")
+    detail = station(
+        "ON",
+        presets=[
+            {
+                "id": "ON01",
+                "inCollection": True,
+                "presentationName": "Road surface",
+                "direction": "SPECIAL_DIRECTION",
+            }
+        ],
+    )
+    detail["properties"]["purpose"] = "keli"
+
+    class Client:
+        def fetch_station(self, station_id):
+            assert station_id == "ON"
+            return detail
+
+    expanded = _expand_station_details(
+        snapshot(compact_gathering, compact_removed),
+        Client(),
+        selected_collection_status="GATHERING",
+    )
+    result = build_discovery_snapshot(expanded, empty_registry())
+
+    assert result.sites[0].provider_metadata["properties"]["purpose"] == "keli"
+    assert (
+        result.source_streams[0].provider_metadata["presentationName"]
+        == "Road surface"
+    )
+    assert result.source_streams[0].provider_metadata["direction"] == "SPECIAL_DIRECTION"
 
 
 def test_preserves_existing_identifiers_and_altitude_until_coordinates_change() -> None:

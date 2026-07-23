@@ -264,20 +264,21 @@ Checkpoint 8 - Fintraffic discovery
 Objectives:
 
 - Implement Fintraffic station discovery.
-- Send the required non-secret Fintraffic-User application identifier.
+- Send the required non-secret `Digitraffic-User` application identifier.
 - Select stations with collectionStatus equal to GATHERING.
 - Select presets with inCollection equal to true.
 - Treat stations as sites and presets as source streams.
 - Generate fin{station_id}PRE{preset_id} internal identifiers.
-- Preserve provider station and preset metadata in jsonb snapshots.
+- Retrieve paced details for every eligible station and preserve complete
+  provider station and preset metadata in jsonb snapshots.
 - Reuse the shared transactional registry update layer.
 - Add fixture-based and live dry-run tests.
 
 Expected validation:
 
     uv run pytest tests/discovery/fintraffic -v
-    uv run python -m discovery.fintraffic.fintraffic_discovery_workflow --dry-run
-    uv run python -m discovery.fintraffic.fintraffic_discovery_workflow
+    just discover-fintraffic --dry-run
+    just discover-fintraffic
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'fin';"
 

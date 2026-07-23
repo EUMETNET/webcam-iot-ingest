@@ -210,6 +210,7 @@ class FintrafficConfig:
     request_timeout_s: float
     retry_count: int
     retry_backoff_s: float
+    request_delay_s: float
     selected_collection_status: str
     require_in_collection: bool
     selected_rendition: str = "full_jpeg"
@@ -236,6 +237,9 @@ class FintrafficConfig:
             retry_backoff_s=float(
                 os.getenv("FINTRAFFIC_DISCOVERY_RETRY_BACKOFF_S", "1")
             ),
+            request_delay_s=float(
+                os.getenv("FINTRAFFIC_DISCOVERY_REQUEST_DELAY_S", "0.1")
+            ),
             selected_collection_status=os.getenv(
                 "FINTRAFFIC_SELECTED_COLLECTION_STATUS", "GATHERING"
             ).strip(),
@@ -257,6 +261,8 @@ class FintrafficConfig:
             raise ValueError("Fintraffic retry count cannot be negative")
         if self.retry_backoff_s < 0:
             raise ValueError("Fintraffic retry backoff cannot be negative")
+        if self.request_delay_s < 0:
+            raise ValueError("Fintraffic request delay cannot be negative")
         if not self.selected_collection_status:
             raise ValueError(
                 "Fintraffic selected collection status cannot be empty"
@@ -299,10 +305,10 @@ class WindyIngestionConfig:
                 os.getenv("WINDY_INGESTION_REQUEST_DELAY_S", "0.1")
             ),
             freshness_query_retry_count=int(
-                os.getenv("WINDY_FRESHNESS_QUERY_RETRY_COUNT", "1")
+                os.getenv("WINDY_FRESHNESS_QUERY_RETRY_COUNT", "0")
             ),
             download_retry_count=int(
-                os.getenv("WINDY_DOWNLOAD_RETRY_COUNT", "1")
+                os.getenv("WINDY_DOWNLOAD_RETRY_COUNT", "0")
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
             ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
