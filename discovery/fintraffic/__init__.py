@@ -1,1 +1,1 @@
-
+"""Fintraffic weather-camera discovery."""

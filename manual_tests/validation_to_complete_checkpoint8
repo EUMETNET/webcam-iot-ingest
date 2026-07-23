@@ -1,0 +1,245 @@
+Checkpoint 8 validation runbook - Fintraffic discovery
+=======================================================
+
+Checkpoint outcome to validate
+------------------------------
+
+Checkpoint 8 discovers Fintraffic weather-camera stations and presets,
+registers stations as `fin` sites and eligible presets as source streams, and
+reconciles a complete provider snapshot transactionally. It does not retrieve
+camera JPEGs, use ETags, transform images, upload to S3, or publish MQTT.
+
+The workflow and its focused tests were implemented on 2026-07-23. The
+commands below remain the reproducible owner-validation procedure.
+
+1. Confirm branch and preserve unrelated work
+---------------------------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git status --short
+    git diff --check
+
+The branch must be `codex`. Do not discard or stage unrelated files. Do not
+delete the PostgreSQL volume or clear Windy registry data.
+
+2. Configure the non-secret provider identity
+---------------------------------------------
+
+Set a meaningful application identifier in ignored local configuration:
+
+    FINTRAFFIC_USER_HEADER=<application identifier>
+
+The value is required by the provider but is not an API key. Verify only that
+the variable name exists; do not print its value in validation output:
+
+    awk -F= '$1 == "FINTRAFFIC_USER_HEADER" { found=1 } END { exit !found }' .env
+
+Confirm that no secret file or unrelated credential was added for Fintraffic:
+
+    git check-ignore -v .env .secrets/database_password
+    git diff -- .env.example config/deployment_config.py
+
+Fixture tests must assert that every provider request sends
+`Digitraffic-User` and `Accept-Encoding: gzip`, and that error messages do not
+echo the application identifier or request headers.
+
+3. Verify PostgreSQL without recreating it
+-----------------------------------------
+
+    docker compose --env-file .env up -d postgres
+    docker compose exec postgres pg_isready
+    uv run --env-file .env python -m database.healthcheck
+
+Confirm that the existing provider row is present:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT network_id, network_name, api_version
+       FROM network WHERE network_id = 'fin';"
+
+Expected identity: `fin`, `Fintraffic`, API version `v1`.
+
+4. Run focused automated validation
+-----------------------------------
+
+    uv run --env-file .env pytest -q \
+      tests/discovery/fintraffic tests/test_deployment_config.py
+
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest -q \
+      tests/database/test_registry_queries.py
+
+    uv run --env-file .env python -m \
+      discovery.fintraffic.fintraffic_discovery_workflow --help
+
+The focused suite must cover FeatureCollection and geometry validation,
+station/preset filtering, headers, retries, identifiers, metadata snapshots,
+unreliable zero altitude, transactional status transitions, blacklist
+preservation, and dry-run non-mutation.
+
+5. Inspect one bounded provider response without writing
+--------------------------------------------------------
+
+Before the complete dry run, use the implemented fixture/inspection option if
+one exists to inspect only counts and field names. Do not print the full
+provider payload or the `Digitraffic-User` value.
+
+Confirm from the bounded result:
+
+- the top-level object is a FeatureCollection;
+- station features use Point coordinates in longitude/latitude order;
+- `collectionStatus` and `presets` are present;
+- presets expose `id` and `inCollection`;
+- any observed geometry altitude `0.0` is retained only as raw provider
+  metadata and is not assumed to be trustworthy site altitude.
+
+Do not add an N+1 station-detail crawl unless required checkpoint metadata is
+demonstrably absent from the station-list response.
+
+6. Run a complete live dry run
+------------------------------
+
+Capture the current Fintraffic registry counts:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT count(DISTINCT s.site_id) AS sites,
+              count(ss.source_stream_id) AS streams
+       FROM site s
+       LEFT JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'fin';"
+
+Run:
+
+    just discover-fintraffic --dry-run
+
+The JSON summary must report provider stations seen, stations accepted,
+presets seen, presets accepted, exclusions by station/preset eligibility, and
+normalized site/stream counts. It must not include the application identifier,
+full provider payloads, or image bytes.
+
+Repeat the SQL count and confirm it is unchanged. A malformed or partial live
+snapshot must fail the run rather than reconcile it.
+
+7. Apply one complete snapshot
+------------------------------
+
+    just discover-fintraffic
+
+Record the result summary, then inspect counts and statuses:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT count(DISTINCT s.site_id) AS sites,
+              count(ss.source_stream_id) AS streams,
+              count(*) FILTER (WHERE ss.status = 'active') AS active,
+              count(*) FILTER (WHERE ss.status = 'inactive') AS inactive,
+              count(*) FILTER (WHERE ss.status = 'blacklisted') AS blacklisted
+       FROM site s
+       JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'fin';"
+
+There must be at least one accepted station and preset. All newly eligible
+presets should be active. Existing blacklisted rows, if any, must remain
+blacklisted.
+
+8. Inspect identifiers, coordinates, rendition, and metadata
+------------------------------------------------------------
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT s.site_id, s.provider_site_id, s.country,
+              s.longitude, s.latitude, s.altitude,
+              ss.source_stream_id, ss.provider_source_stream_id,
+              ss.selected_rendition, ss.status,
+              jsonb_object_keys(s.provider_metadata) AS site_metadata_key
+       FROM site s
+       JOIN source_stream ss USING (site_id)
+       WHERE s.network_id = 'fin'
+       ORDER BY s.site_id, ss.source_stream_id
+       LIMIT 20;"
+
+Check that:
+
+- site IDs begin with `fin` and contain only alphanumeric characters;
+- stream IDs begin with the corresponding site ID, contain `PRE`, and contain
+  only alphanumeric characters;
+- raw station and preset IDs remain in their dedicated provider-ID columns;
+- longitude/latitude are plausible Finnish coordinates and not reversed;
+- country is `FI`;
+- selected rendition is `full_jpeg`;
+- station and preset metadata are JSON objects;
+- observed raw altitude `0.0` has not been accepted as authoritative merely
+  because it appeared in GeoJSON.
+
+Inspect preset metadata separately without printing image content:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT ss.provider_source_stream_id,
+              ss.provider_metadata->>'inCollection' AS in_collection,
+              ss.provider_metadata->>'presentationName' AS presentation_name,
+              ss.provider_metadata->>'direction' AS direction
+       FROM source_stream ss
+       JOIN site s USING (site_id)
+       WHERE s.network_id = 'fin'
+       ORDER BY ss.source_stream_id
+       LIMIT 20;"
+
+9. Repeat immediately to validate idempotency
+---------------------------------------------
+
+    just discover-fintraffic
+
+For an unchanged provider snapshot, the second result must report zero inserted
+sites, zero inserted streams, and zero activation changes. Metadata refreshes
+may be counted as updates, but identifiers, site assignments, ingestion
+timestamps, blacklists, and existing derived altitude values must remain
+stable.
+
+Provider-side changes between the two live calls must be recorded explicitly
+rather than described as an idempotency defect. Fixture and PostgreSQL tests
+remain the deterministic proof of identical-snapshot idempotency.
+
+10. Confirm checkpoint boundaries and review the diff
+-----------------------------------------------------
+
+    git diff --check
+    git status --short
+    git diff -- \
+      .env.example config/deployment_config.py database \
+      discovery/fintraffic tests/discovery/fintraffic \
+      history/checkpoint8_work_record.txt \
+      manual_tests/validation_to_complete_checkpoint8
+
+Verify that the checkpoint contains no JPEG acquisition, ETag comparison,
+transformation, S3 upload, MQTT publication, systemd orchestration, or private
+architecture text. Verify that no application identifier, database password,
+token, or provider payload was committed.
+
+Checkpoint decision
+-------------------
+
+Local implementation evidence recorded on 2026-07-23:
+
+- focused Fintraffic, Windy-regression, and deployment-config tests: 47 passed;
+- shared registry integration tests: 11 passed;
+- dry run: 813 stations seen, 809 accepted, 2,276 presets seen, 2,255 accepted;
+- first apply: 809 sites and 2,255 streams inserted;
+- immediate repeat: zero sites/streams inserted and zero status transitions;
+- altitude enrichment: 600 sites resolved, 209 retained for later retries;
+- final registry: 809 sites and 2,255 active streams.
+
+For an independent owner acceptance, confirm:
+
+- focused fixture tests pass;
+- PostgreSQL integration tests pass;
+- one complete dry run is non-mutating;
+- one applied run produces coherent Fintraffic sites and presets;
+- an immediate repeated snapshot is idempotent or any provider-side delta is
+  recorded;
+- this runbook and `history/checkpoint8_work_record.txt` are rewritten with
+  actual commands, counts, findings, and the owner decision.
+
+After acceptance, stop and request explicit approval before starting
+Checkpoint 9 Fintraffic ingestion.

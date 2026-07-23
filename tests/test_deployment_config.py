@@ -5,6 +5,7 @@ import pytest
 from config.deployment_config import (
     AltitudeConfig,
     DatabaseConfig,
+    FintrafficConfig,
     WindyConfig,
     WindyIngestionConfig,
     TransformationConfig,
@@ -123,11 +124,30 @@ def test_windy_config_reads_api_key_from_file(tmp_path: Path) -> None:
     assert config.read_api_key() == "windy-test-key"
 
 
+def test_fintraffic_config_has_safe_discovery_defaults(monkeypatch) -> None:
+    monkeypatch.delenv("FINTRAFFIC_USER_HEADER", raising=False)
+    config = FintrafficConfig.from_environment()
+
+    assert config.user_header == "webcam-iot-ingest"
+    assert config.stations_url.endswith("/api/weathercam/v1/stations")
+    assert config.selected_collection_status == "GATHERING"
+    assert config.require_in_collection is True
+    assert config.selected_rendition == "full_jpeg"
+
+
+def test_fintraffic_config_rejects_header_injection(monkeypatch) -> None:
+    monkeypatch.setenv("FINTRAFFIC_USER_HEADER", "application\nInjected: value")
+
+    with pytest.raises(ValueError, match="line breaks"):
+        FintrafficConfig.from_environment()
+
+
 def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     config = WindyIngestionConfig.from_environment()
 
     assert config.default_limit == 10
-    assert config.download_retry_count == 0
+    assert config.freshness_query_retry_count == 1
+    assert config.download_retry_count == 1
     assert config.image_max_bytes == 10_000_000
     assert config.minimum_ingestion_interval_s == 300
     assert config.polling_interval_factor == 0.7

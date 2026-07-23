@@ -204,6 +204,66 @@ class WindyConfig:
 
 
 @dataclass(frozen=True)
+class FintrafficConfig:
+    user_header: str
+    stations_url: str
+    request_timeout_s: float
+    retry_count: int
+    retry_backoff_s: float
+    selected_collection_status: str
+    require_in_collection: bool
+    selected_rendition: str = "full_jpeg"
+
+    @classmethod
+    def from_environment(cls) -> "FintrafficConfig":
+        require_in_collection = os.getenv(
+            "FINTRAFFIC_REQUIRE_IN_COLLECTION", "true"
+        ).lower()
+        if require_in_collection not in {"true", "false"}:
+            raise ValueError(
+                "FINTRAFFIC_REQUIRE_IN_COLLECTION must be true or false"
+            )
+        config = cls(
+            user_header=os.getenv(
+                "FINTRAFFIC_USER_HEADER", "webcam-iot-ingest"
+            ).strip(),
+            stations_url=os.getenv(
+                "FINTRAFFIC_STATIONS_URL",
+                "https://tie.digitraffic.fi/api/weathercam/v1/stations",
+            ).strip(),
+            request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
+            retry_count=int(os.getenv("FINTRAFFIC_DISCOVERY_RETRY_COUNT", "2")),
+            retry_backoff_s=float(
+                os.getenv("FINTRAFFIC_DISCOVERY_RETRY_BACKOFF_S", "1")
+            ),
+            selected_collection_status=os.getenv(
+                "FINTRAFFIC_SELECTED_COLLECTION_STATUS", "GATHERING"
+            ).strip(),
+            require_in_collection=require_in_collection == "true",
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.user_header:
+            raise ValueError("FINTRAFFIC_USER_HEADER cannot be empty")
+        if "\r" in self.user_header or "\n" in self.user_header:
+            raise ValueError("FINTRAFFIC_USER_HEADER cannot contain line breaks")
+        if not self.stations_url.startswith("https://"):
+            raise ValueError("Fintraffic stations URL must use HTTPS")
+        if self.request_timeout_s <= 0:
+            raise ValueError("provider request timeout must be positive")
+        if self.retry_count < 0:
+            raise ValueError("Fintraffic retry count cannot be negative")
+        if self.retry_backoff_s < 0:
+            raise ValueError("Fintraffic retry backoff cannot be negative")
+        if not self.selected_collection_status:
+            raise ValueError(
+                "Fintraffic selected collection status cannot be empty"
+            )
+
+
+@dataclass(frozen=True)
 class WindyIngestionConfig:
     api_key_file: Path
     request_timeout_s: float
@@ -212,6 +272,7 @@ class WindyIngestionConfig:
     minimum_ingestion_interval_s: float
     polling_interval_factor: float
     request_delay_s: float
+    freshness_query_retry_count: int
     download_retry_count: int
     retry_backoff_s: float
     ema_alpha: float
@@ -237,7 +298,12 @@ class WindyIngestionConfig:
             request_delay_s=float(
                 os.getenv("WINDY_INGESTION_REQUEST_DELAY_S", "0.1")
             ),
-            download_retry_count=int(os.getenv("DOWNLOAD_RETRY_COUNT", "0")),
+            freshness_query_retry_count=int(
+                os.getenv("WINDY_FRESHNESS_QUERY_RETRY_COUNT", "1")
+            ),
+            download_retry_count=int(
+                os.getenv("WINDY_DOWNLOAD_RETRY_COUNT", "1")
+            ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
             ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
             default_limit=int(os.getenv("WINDY_INGESTION_DEFAULT_LIMIT", "10")),
@@ -256,8 +322,11 @@ class WindyIngestionConfig:
             raise ValueError("polling interval factor cannot be negative")
         if self.request_delay_s < 0 or self.retry_backoff_s < 0:
             raise ValueError("Windy ingestion delays cannot be negative")
-        if self.download_retry_count < 0:
-            raise ValueError("download retry count cannot be negative")
+        if (
+            self.freshness_query_retry_count < 0
+            or self.download_retry_count < 0
+        ):
+            raise ValueError("Windy retry counts cannot be negative")
         if not 0 <= self.ema_alpha <= 1:
             raise ValueError("EMA alpha must be between 0 and 1")
         if self.default_limit < 1:

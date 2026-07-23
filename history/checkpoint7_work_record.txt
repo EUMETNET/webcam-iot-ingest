@@ -52,6 +52,15 @@ Implemented scope
   resulting request load is part of the checkpoint performance measurement.
 - Windy metadata request starts remain serialized through a shared rate gate
   even when image jobs use multiple worker threads.
+- Windy metadata/freshness requests and JPEG downloads now have independent,
+  network-scoped retry controls. `WINDY_FRESHNESS_QUERY_RETRY_COUNT` and
+  `WINDY_DOWNLOAD_RETRY_COUNT` both default to one retry after the initial
+  attempt; `RETRY_BACKOFF_S` remains their shared backoff duration and defaults
+  to one second. A freshness retry repeats the complete metadata/reference
+  operation, including HTTP access, JSON validation, provider-ID and marker
+  validation, and selected-rendition lookup. A download retry applies only to
+  the later JPEG request. The former generic `DOWNLOAD_RETRY_COUNT` setting is
+  no longer used for Windy.
 - `last_download_timestamp`, the provider marker, and durable publication
   outbox state remain immediate and atomic. EMA is the only deferred field:
   worker threads return candidates to the epoch coordinator, which applies
@@ -94,10 +103,10 @@ Implemented scope
 Retry and publication recovery
 ------------------------------
 
-The configured defaults are zero transformation retries, one S3 upload retry,
-and one MQTT publication retry. Windy image download still has zero retries.
-Retries reuse the same transformed bytes, image identifier, immutable object
-key, and notification payload.
+The configured defaults are zero transformation retries, one Windy freshness
+retry, one Windy image-download retry, one S3 upload retry, and one MQTT
+publication retry. Publication retries reuse the same transformed bytes, image
+identifier, immutable object key, and notification payload.
 
 Checkpoint 7 adds `publication_outbox` as an explicitly documented operational
 extension to the original three-table pilot registry. Successful image download
@@ -171,8 +180,8 @@ A full France exercise subsequently covered all 2,056 registered streams:
 2,038 (99.12%) completed successfully and 18 (0.88%) persistently returned
 provider errors. No HTTP 429 throttling occurred with 100 threads and a
 0.01-second Windy request-start interval. At the new 15-second minimum epoch
-period, those 18 failures cause at most 1.2 freshness requests per second when
-no immediate provider retry is configured. A five-minute revisit also found
+period, those 18 failures caused at most 1.2 freshness requests per second
+under the then-current no-retry configuration. A five-minute revisit also found
 72 new images among the earlier 198-camera sample and published all of them.
 
 A three-epoch France+Germany adaptive-polling run on 2026-07-22 selected 4,849,
@@ -194,6 +203,16 @@ The provider-marker-to-completed-MQTT histogram estimated p50 at 2.31 minutes
 and p95 at 5.95 minutes, while download-to-completed-MQTT p95 was 0.98 seconds.
 These are Prometheus bucket estimates for 06:48:20--07:18:20 UTC, not exact
 order statistics.
+
+After that benchmark, the approximately 497 provider-access errors per five
+minutes were identified as failures of the Windy metadata/reference operation,
+before JPEG download. Such a failure prevents publication in the current epoch
+and may add an epoch to the eventual provider-marker-to-download delay. The two
+Windy-specific retry settings were therefore introduced with one immediate
+retry each. The next full-scale benchmark is intended to measure whether the
+freshness retry reduces both provider-error throughput and the latency tail;
+persistent provider failures will instead incur one additional request and the
+configured backoff. Image-download errors remain separately observable.
 
 Remaining owner validation
 --------------------------

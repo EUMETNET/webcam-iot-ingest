@@ -61,6 +61,28 @@ The PostgreSQL container initializes the pilot `network`, `site`, and
 data volume. Normal container restarts preserve the volume and its schema.
 Avoid `just destroy` unless deleting all local service data is intentional.
 
+## Webcam discovery
+
+Run a complete provider discovery pass with:
+
+```bash
+just discover-fintraffic
+just discover-windy
+```
+
+Both recipes forward workflow options. Use `--dry-run` to retrieve, validate,
+and compare a complete snapshot without changing the registry:
+
+```bash
+just discover-fintraffic --dry-run
+just discover-windy --dry-run
+```
+
+Fintraffic uses the non-secret `FINTRAFFIC_USER_HEADER` application identifier
+as the official `Digitraffic-User` request header. Set it to a meaningful
+application name; the repository name is the default. Windy discovery requires
+the API-key file and geographic configuration documented in `.env.example`.
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -76,6 +98,9 @@ Avoid `just destroy` unless deleting all local service data is intentional.
 | `DATABASE_NAME` | `webcam_ingestion` | PostgreSQL database |
 | `DATABASE_USER` | `webcam_ingestion` | PostgreSQL user |
 | `DATABASE_PASSWORD_FILE` | `.secrets/database_password` | Path to the database password file |
+| `FINTRAFFIC_USER_HEADER` | `webcam-iot-ingest` | Non-secret application identifier sent as `Digitraffic-User` |
+| `WINDY_FRESHNESS_QUERY_RETRY_COUNT` | `1` | Retries after the initial Windy metadata/freshness HTTP request |
+| `WINDY_DOWNLOAD_RETRY_COUNT` | `1` | Retries after the initial Windy image-download HTTP request |
 | `BUCKET_NAME` | - | Bucket name |
 | `BUCKET_ACCESS_KEY_ID` | — | S3 access key |
 | `BUCKET_SECRET_ACCESS_KEY` | — | S3 secret key |

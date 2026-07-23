@@ -37,6 +37,20 @@ infrastructure:
 database-check:
     uv run python -m database.healthcheck
 
+# Run one complete Fintraffic discovery pass. Add --dry-run to avoid writes.
+discover-fintraffic *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec uv run --env-file .env python -m \
+        discovery.fintraffic.fintraffic_discovery_workflow "$@"
+
+# Run one complete Windy discovery pass. Add --dry-run to avoid writes.
+discover-windy *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec uv run --env-file .env python -m \
+        discovery.windy.windy_discovery_workflow "$@"
+
 # Start the monitoring containers
 monitoring:
     docker compose --env-file .env --profile monitoring up -d

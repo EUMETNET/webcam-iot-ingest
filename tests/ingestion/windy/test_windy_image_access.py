@@ -11,7 +11,8 @@ def client_for(
     handler,
     *,
     max_bytes: int = 1000,
-    retry_count: int = 0,
+    freshness_query_retry_count: int = 0,
+    download_retry_count: int = 0,
     request_gate=None,
     observer=None,
 ):
@@ -22,7 +23,8 @@ def client_for(
         image_timeout_s=1,
         max_image_bytes=max_bytes,
         request_delay_s=0,
-        retry_count=retry_count,
+        freshness_query_retry_count=freshness_query_retry_count,
+        download_retry_count=download_retry_count,
         retry_backoff_s=0,
         client=http_client,
         request_gate=request_gate,
@@ -127,7 +129,46 @@ def test_retries_throttled_metadata_request_when_configured() -> None:
             return httpx.Response(429)
         return httpx.Response(200, json=metadata())
 
-    client_for(handler, retry_count=1).get_current_image("42", "preview")
+    client_for(handler, freshness_query_retry_count=1).get_current_image(
+        "42", "preview"
+    )
+    assert attempts == 2
+
+
+def test_retries_invalid_freshness_response_when_configured() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(200, json={"webcams": []})
+        return httpx.Response(200, json=metadata())
+
+    client_for(handler, freshness_query_retry_count=1).get_current_image(
+        "42", "preview"
+    )
+    assert attempts == 2
+
+
+def test_retries_failed_image_download_when_configured() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503)
+        return httpx.Response(
+            200, headers={"content-type": "image/jpeg"}, content=b"abc"
+        )
+
+    assert (
+        client_for(handler, download_retry_count=1).download(
+            "https://images.example/a.jpg"
+        )
+        == b"abc"
+    )
     assert attempts == 2
 
 

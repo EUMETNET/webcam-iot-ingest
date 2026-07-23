@@ -37,7 +37,8 @@ class WindyImageClient:
         image_timeout_s: float,
         max_image_bytes: int,
         request_delay_s: float = 0.1,
-        retry_count: int = 0,
+        freshness_query_retry_count: int = 1,
+        download_retry_count: int = 1,
         retry_backoff_s: float = 1,
         client: httpx.Client | None = None,
         request_gate: Callable[[], None] | None = None,
@@ -47,14 +48,20 @@ class WindyImageClient:
             raise ValueError("Windy API key cannot be empty")
         if request_timeout_s <= 0 or image_timeout_s <= 0 or max_image_bytes < 1:
             raise ValueError("invalid Windy image timeout or size configuration")
-        if request_delay_s < 0 or retry_count < 0 or retry_backoff_s < 0:
+        if (
+            request_delay_s < 0
+            or freshness_query_retry_count < 0
+            or download_retry_count < 0
+            or retry_backoff_s < 0
+        ):
             raise ValueError("invalid Windy image retry configuration")
         self._headers = {"X-Windy-API-KEY": api_key}
         self._request_timeout_s = request_timeout_s
         self._image_timeout_s = image_timeout_s
         self._max_image_bytes = max_image_bytes
         self._request_delay_s = request_delay_s
-        self._retry_count = retry_count
+        self._freshness_query_retry_count = freshness_query_retry_count
+        self._download_retry_count = download_retry_count
         self._retry_backoff_s = retry_backoff_s
         self._client = client or httpx.Client()
         self._owns_client = client is None
@@ -74,15 +81,25 @@ class WindyImageClient:
         self, provider_id: str, selected_rendition: str
     ) -> WindyImageReference:
         started = time.monotonic()
-        try:
-            result = self._get_current_image(provider_id, selected_rendition)
-        except Exception:
+        for attempt in range(self._freshness_query_retry_count + 1):
+            try:
+                result = self._get_current_image(provider_id, selected_rendition)
+            except Exception:
+                if attempt < self._freshness_query_retry_count:
+                    if self._retry_backoff_s:
+                        time.sleep(self._retry_backoff_s * (2**attempt))
+                    continue
+                if self._observer is not None:
+                    self._observer(
+                        "provider_refresh", "failure", time.monotonic() - started
+                    )
+                raise
             if self._observer is not None:
-                self._observer("provider_refresh", "failure", time.monotonic() - started)
-            raise
-        if self._observer is not None:
-            self._observer("provider_refresh", "success", time.monotonic() - started)
-        return result
+                self._observer(
+                    "provider_refresh", "success", time.monotonic() - started
+                )
+            return result
+        raise AssertionError("unreachable")
 
     def _get_current_image(
         self, provider_id: str, selected_rendition: str
@@ -113,6 +130,7 @@ class WindyImageClient:
                 headers=self._headers,
                 timeout=self._request_timeout_s,
                 operation="metadata refresh",
+                retry_count=0,
             )
         else:
             # Standalone callers retain their local pacing. Worker callers use
@@ -127,6 +145,7 @@ class WindyImageClient:
                     headers=self._headers,
                     timeout=self._request_timeout_s,
                     operation="metadata refresh",
+                    retry_count=0,
                 )
         try:
             payload = response.json()
@@ -164,7 +183,7 @@ class WindyImageClient:
 
     def _download(self, image_url: str) -> bytes:
         last_error: Exception | None = None
-        for attempt in range(self._retry_count + 1):
+        for attempt in range(self._download_retry_count + 1):
             try:
                 with self._client.stream(
                     "GET", image_url, timeout=self._image_timeout_s
@@ -191,7 +210,7 @@ class WindyImageClient:
                 raise
             except httpx.HTTPError as error:
                 last_error = error
-                if attempt < self._retry_count and self._retry_backoff_s:
+                if attempt < self._download_retry_count and self._retry_backoff_s:
                     time.sleep(self._retry_backoff_s * (2**attempt))
         raise WindyImageAccessError(
             "Windy image download failed", throttled=_is_throttled(last_error)
@@ -205,6 +224,7 @@ class WindyImageClient:
         headers: Mapping[str, str] | None = None,
         timeout: float,
         operation: str,
+        retry_count: int,
     ) -> httpx.Response:
         started = time.monotonic()
         try:
@@ -214,6 +234,7 @@ class WindyImageClient:
                 headers=headers,
                 timeout=timeout,
                 operation=operation,
+                retry_count=retry_count,
             )
         except Exception:
             if self._observer is not None:
@@ -231,9 +252,10 @@ class WindyImageClient:
         headers: Mapping[str, str] | None,
         timeout: float,
         operation: str,
+        retry_count: int,
     ) -> httpx.Response:
         last_error: Exception | None = None
-        for attempt in range(self._retry_count + 1):
+        for attempt in range(retry_count + 1):
             try:
                 response = self._client.get(
                     url, params=params, headers=headers, timeout=timeout
@@ -248,7 +270,7 @@ class WindyImageClient:
                 return response
             except httpx.HTTPError as error:
                 last_error = error
-                if attempt < self._retry_count and self._retry_backoff_s:
+                if attempt < retry_count and self._retry_backoff_s:
                     time.sleep(self._retry_backoff_s * (2**attempt))
         raise WindyImageAccessError(
             f"Windy {operation} failed", throttled=_is_throttled(last_error)

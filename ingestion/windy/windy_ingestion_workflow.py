@@ -125,7 +125,8 @@ def run_ingestion(
                 image_timeout_s=config.image_download_timeout_s,
                 max_image_bytes=config.image_max_bytes,
                 request_delay_s=config.request_delay_s,
-                retry_count=config.download_retry_count,
+                freshness_query_retry_count=config.freshness_query_retry_count,
+                download_retry_count=config.download_retry_count,
                 retry_backoff_s=config.retry_backoff_s,
             )
         )
