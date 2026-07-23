@@ -333,7 +333,11 @@ def _run_epoch(
             with pool.connection() as connection:
                 assert storage is not None and publisher is not None
                 deliveries = drain_publication_outbox(
-                    connection, storage, publisher, limit=worker.outbox_batch_size
+                    connection,
+                    storage,
+                    publisher,
+                    limit=worker.outbox_batch_size,
+                    network_id="win",
                 )
             metrics.outbox.labels("win").set(
                 sum(item.outcome != "published" for item in deliveries)

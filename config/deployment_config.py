@@ -275,9 +275,9 @@ class WindyIngestionConfig:
     request_timeout_s: float
     image_download_timeout_s: float
     image_max_bytes: int
+    request_delay_s: float
     minimum_ingestion_interval_s: float
     polling_interval_factor: float
-    request_delay_s: float
     freshness_query_retry_count: int
     download_retry_count: int
     retry_backoff_s: float
@@ -343,6 +343,87 @@ class WindyIngestionConfig:
         if not api_key:
             raise ValueError(f"Windy API key file is empty: {self.api_key_file}")
         return api_key
+
+
+@dataclass(frozen=True)
+class FintrafficIngestionConfig:
+    user_header: str
+    data_url: str
+    image_base_url: str
+    request_timeout_s: float
+    image_download_timeout_s: float
+    image_max_bytes: int
+    request_delay_s: float
+    minimum_ingestion_interval_s: float
+    polling_interval_factor: float
+    freshness_query_retry_count: int
+    download_retry_count: int
+    retry_backoff_s: float
+    ema_alpha: float
+    default_limit: int
+
+    @classmethod
+    def from_environment(cls) -> "FintrafficIngestionConfig":
+        config = cls(
+            user_header=os.getenv(
+                "FINTRAFFIC_USER_HEADER", "webcam-iot-ingest"
+            ).strip(),
+            data_url=os.getenv(
+                "FINTRAFFIC_STATIONS_DATA_URL",
+                "https://tie.digitraffic.fi/api/weathercam/v1/stations/data",
+            ).strip(),
+            image_base_url=os.getenv(
+                "FINTRAFFIC_IMAGE_BASE_URL",
+                "https://weathercam.digitraffic.fi",
+            ).rstrip("/"),
+            request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
+            image_download_timeout_s=float(
+                os.getenv("IMAGE_DOWNLOAD_TIMEOUT_S", "15")
+            ),
+            image_max_bytes=int(os.getenv("SOURCE_IMAGE_MAX_BYTES", "10000000")),
+            request_delay_s=float(
+                os.getenv("FINTRAFFIC_INGESTION_REQUEST_DELAY_S", "0.1")
+            ),
+            minimum_ingestion_interval_s=float(
+                os.getenv("MINIMUM_INGESTION_INTERVAL_S", "300")
+            ),
+            polling_interval_factor=float(
+                os.getenv("POLLING_INTERVAL_FACTOR", "0.7")
+            ),
+            freshness_query_retry_count=int(
+                os.getenv("FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT", "0")
+            ),
+            download_retry_count=int(
+                os.getenv("FINTRAFFIC_DOWNLOAD_RETRY_COUNT", "0")
+            ),
+            retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
+            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            default_limit=int(os.getenv("FINTRAFFIC_INGESTION_DEFAULT_LIMIT", "10")),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.user_header or "\n" in self.user_header or "\r" in self.user_header:
+            raise ValueError("invalid Fintraffic user header")
+        if not self.data_url.startswith("https://") or not self.image_base_url.startswith(
+            "https://"
+        ):
+            raise ValueError("Fintraffic ingestion URLs must use HTTPS")
+        if self.request_timeout_s <= 0 or self.image_download_timeout_s <= 0:
+            raise ValueError("Fintraffic ingestion timeouts must be positive")
+        if self.image_max_bytes < 1 or self.minimum_ingestion_interval_s < 0:
+            raise ValueError("invalid Fintraffic ingestion size or interval")
+        if (
+            self.polling_interval_factor < 0
+            or self.request_delay_s < 0
+            or self.retry_backoff_s < 0
+        ):
+            raise ValueError("invalid Fintraffic polling or retry backoff")
+        if self.freshness_query_retry_count < 0 or self.download_retry_count < 0:
+            raise ValueError("Fintraffic retry counts cannot be negative")
+        if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
+            raise ValueError("invalid Fintraffic EMA alpha or default limit")
 
 
 @dataclass(frozen=True)

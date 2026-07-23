@@ -290,20 +290,26 @@ Checkpoint 9 - Fintraffic ingestion
 Objectives:
 
 - Use Fintraffic full-JPEG image URLs.
-- Use conditional HTTP requests with If-None-Match.
-- Treat the ETag as the opaque provider image marker.
-- Treat HTTP 304 as an unchanged image without downloading or transforming.
+- Fetch the station-data endpoint once per epoch and use each preset's
+  `measuredTime` as both its opaque provider marker and provider timestamp.
+- Download a full JPEG only when that marker differs from the stored marker.
+- Validate the image response `Last-Modified` against the snapshot marker so a
+  metadata/image race is deferred safely to a later epoch.
 - Feed changed images through the shared validation, T0V0, S3, and N0V0 MQTT
   pipeline.
-- Add tests for changed, unchanged, missing, invalid, and transient responses.
+- Run a separate Fintraffic worker and metrics endpoint alongside Windy.
+- Default Fintraffic freshness and image retry counts to zero.
+- Support deterministic initial staggering over a 10-minute window.
+- Add tests for changed, unchanged, missing, invalid, race, and transient
+  responses.
 
 Expected validation:
 
     uv run pytest tests/ingestion/fintraffic -v
-    uv run python -m ingestion.fintraffic.fintraffic_ingestion_workflow --once --dry-run
-    uv run python -m ingestion.fintraffic.fintraffic_ingestion_workflow --once
+    just ingest-fintraffic --limit 10 --dry-run
+    just ingestion-test-fintraffic 20m staggered
 
-A repeated run must exercise the unchanged or HTTP 304 path without creating a
+A repeated run must exercise the unchanged path without creating a
 duplicate derived image for the same marker. Stop and wait for approval before
 beginning Skaping.
 
@@ -373,6 +379,11 @@ Objectives:
 - Add systemd services and timers only after the underlying commands have
   stable interfaces.
 - Add restart, failure, backup, and recovery drills.
+- Add standard infrastructure exporters and Prometheus scrape targets for
+  PostgreSQL, the host, and containers (postgres_exporter, node_exporter, and
+  cAdvisor), plus explicit `up`/health coverage for every provider worker.
+- Add an infrastructure-health Grafana dashboard and alerts for failed scrape
+  targets, unhealthy workers, PostgreSQL, MQTT, and storage reachability.
 - Document restoration as an explicitly approved maintenance operation.
 - Never automate destructive database restoration or volume deletion.
 

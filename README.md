@@ -90,6 +90,12 @@ Fintraffic discovery retrieves the complete station list and then paced details
 for every eligible station so descriptive station and preset metadata are
 retained in the registry.
 
+Run a bounded Fintraffic ingestion check without S3 or MQTT writes:
+
+```bash
+just ingest-fintraffic --limit 10 --dry-run
+```
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -106,6 +112,8 @@ retained in the registry.
 | `DATABASE_USER` | `webcam_ingestion` | PostgreSQL user |
 | `DATABASE_PASSWORD_FILE` | `.secrets/database_password` | Path to the database password file |
 | `FINTRAFFIC_USER_HEADER` | `webcam-iot-ingest` | Non-secret application identifier sent as `Digitraffic-User` |
+| `FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Fintraffic bulk freshness request |
+| `FINTRAFFIC_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Fintraffic JPEG request |
 | `WINDY_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Windy metadata/freshness HTTP request |
 | `WINDY_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Windy image-download HTTP request |
 | `BUCKET_NAME` | - | Bucket name |
@@ -145,6 +153,21 @@ configurable window instead of creating a synchronized cold-start peak:
 ```bash
 just ingestion-test FR,DE 20m staggered
 ```
+
+Fintraffic has a separate worker, metrics endpoint, and Grafana dashboard, so
+it can run concurrently with Windy. For example:
+
+```bash
+just ingestion-test-fintraffic 2h staggered
+```
+
+The Fintraffic staggered mode uses a fixed seed and a 600-second initial
+window. Each epoch uses one bulk preset `measuredTime` snapshot for freshness,
+then downloads only changed full-JPEG images.
+
+Both provider dashboards include source and derived image size, width, height,
+color depth, format, and color-mode observability. Size, width, height, and
+color-depth panels show rolling P50, P90, and P95 values over five minutes.
 
 This benchmark-only mode uses the fixed seed `windy-benchmark-v1` and a
 deterministic hash of each source-stream ID to assign a phase in `[0, 600)`

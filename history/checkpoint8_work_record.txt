@@ -197,4 +197,13 @@ Checkpoint decision
 
 Checkpoint 8 was accepted by the owner on 2026-07-23 after the detailed
 discovery was applied and its registry metadata verified. Checkpoint 9
-Fintraffic ingestion remains out of scope.
+Fintraffic ingestion remains outside checkpoint 8 and is recorded separately
+in `history/checkpoint9_work_record.txt`.
+
+Later checkpoint 9 live ingestion validation observed 2,263 presets with a
+non-null `measuredTime` in the provider station-data snapshot. This is a live
+freshness-snapshot count, not a correction to checkpoint 8's point-in-time
+2,255-stream eligible discovery result: discovery remains authoritative for
+which registered streams are scheduled, while ingestion may observe additional
+provider entries or entries whose collection eligibility has changed between
+discovery passes.

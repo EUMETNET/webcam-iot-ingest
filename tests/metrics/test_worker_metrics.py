@@ -23,8 +23,27 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         "transformation", {"version": "T0V0", "outcome": "success"}
     )
     metrics.observe_event(
+        "source_image",
+        {
+            "size_bytes": 54321,
+            "width": 1280,
+            "height": 720,
+            "format": "JPEG",
+            "color_mode": "RGB",
+            "color_depth_bits": 24,
+        },
+    )
+    metrics.observe_event(
         "derived_image",
-        {"version": "T0V0", "size_bytes": 12345, "width": 400, "height": 224},
+        {
+            "version": "T0V0",
+            "size_bytes": 12345,
+            "width": 400,
+            "height": 224,
+            "format": "JPEG",
+            "color_mode": "RGB",
+            "color_depth_bits": 24,
+        },
     )
     metrics.observe_event(
         "mqtt_payload", {"version": "T0V0", "size_bytes": 1024}
@@ -38,10 +57,17 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         b"webcam_ingestion_source_job_duration_seconds",
         b"webcam_ingestion_image_latency_seconds",
         b"webcam_ingestion_transformation_total",
+        b"webcam_ingestion_source_image_total",
+        b"webcam_ingestion_source_image_size_bytes",
+        b"webcam_ingestion_source_image_width_pixels",
+        b"webcam_ingestion_source_image_height_pixels",
+        b"webcam_ingestion_source_image_color_depth_bits",
         b"webcam_ingestion_derived_image_total",
         b"webcam_ingestion_derived_image_size_bytes",
         b"webcam_ingestion_derived_image_width_pixels",
         b"webcam_ingestion_derived_image_height_pixels",
+        b"webcam_ingestion_derived_image_color_depth_bits",
+        b"webcam_ingestion_derived_image_metadata_total",
         b"webcam_ingestion_mqtt_payload_size_bytes",
         b"webcam_ingestion_stage_failure_total",
     ):

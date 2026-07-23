@@ -1,0 +1,98 @@
+Checkpoint 9 work record - Fintraffic ingestion
+================================================
+
+Status: implemented; owner validation pending.
+
+Implementation
+--------------
+
+- Added a Fintraffic ingestion client and a separate long-lived worker that can
+  run in parallel with Windy.
+- Freshness is obtained with one station-data request per epoch. Each preset's
+  `measuredTime` is used as the opaque marker and provider timestamp.
+- Only changed full-JPEG images enter the shared validation, T0V0
+  transformation, S3 storage, durable outbox, and N0V0 MQTT path.
+- The JPEG `Last-Modified` header is checked against the snapshot marker. A
+  mismatch is treated as a controlled metadata/image race and left for a later
+  epoch rather than publishing an image under the wrong marker.
+- Fintraffic freshness and download retry counts are independent and both
+  default to zero.
+- Initial polling can be deterministically spread over 600 seconds. EMA
+  candidates from a stream's staggered first check are excluded, as for Windy.
+- Worker metrics carry `source_network="fin"` and are scraped independently on
+  port 8014. A separate Fintraffic Grafana dashboard uses the same relevant
+  job, stage, transformation, storage, MQTT, latency, and EMA metrics.
+- Shared Windy and Fintraffic metrics now also expose validated source and
+  produced derived image size, width, height, bounded format/color mode, and
+  color depth. Both dashboards display rolling P50, P90, and P95 distributions;
+  P90 image width and P90 image size are explicit series.
+
+Architecture decision
+---------------------
+
+The provider timestamp is required for latency measurement, and the live bulk
+station-data response supplies it for all presets at once. This implementation
+therefore uses `measuredTime` directly rather than issuing one conditional
+ETag request per camera. ETag is not a freshness dependency.
+
+Operational commands
+--------------------
+
+    just ingest-fintraffic --limit 10 --dry-run
+    just ingestion-test-fintraffic 20m staggered
+
+The bounded ingestion recipe runs on the host and explicitly connects to the
+host-published Mosquitto listener at `127.0.0.1`; containerized services may
+continue to use the Docker-internal hostname `mqtt`.
+
+Checkpoint 12 now explicitly owns postgres_exporter, node_exporter, cAdvisor,
+infrastructure health scraping, dashboards, and alerting. Application worker,
+Prometheus, and MQTT metrics remain available before that checkpoint.
+
+Validation evidence
+-------------------
+
+Focused shared, Windy-regression, Fintraffic, worker, and metrics tests:
+
+    40 passed, 1 skipped
+
+A bounded live dry run parsed 2,264 usable freshness markers and downloaded and
+transformed four selected Fintraffic images without S3 or MQTT writes. A
+subsequent one-image publication test successfully performed source
+validation, T0V0 transformation, S3 upload, durable outbox completion, and MQTT
+publication. The host-run just recipe required `MQTT_HOST=127.0.0.1`; the
+Docker-internal hostname `mqtt` is not resolvable by the host process, and the
+recipe and manual validation were corrected accordingly.
+
+A wider 200-stream read-only sample produced:
+
+- 189 successful downloads (94.5%);
+- 10 download errors (5%);
+- 1 provider/freshness error (0.5%).
+
+Six of the download errors were stale provider cameras whose JPEG endpoint
+returned a 720x576 grey "Image not available" placeholder without
+`Last-Modified`. Requiring a verifiable header correctly prevented those
+placeholders from entering transformation or storage. Four errors were
+metadata/image races around an update boundary; all four succeeded in a direct
+later check. With both Fintraffic retry counts at zero, these are intentionally
+left for a later epoch. The provider/freshness error represented a registered
+preset absent from the usable non-null-marker snapshot.
+
+A 12-second, 40-stream dry-run worker exposed the new metrics on a temporary
+Prometheus endpoint. The scrape occurred during the epoch and observed:
+
+- 11 validated source JPEG/RGB images: 3,799,253 total bytes, 14,080 total
+  width pixels, 7,920 total height pixels, and 264 total color-depth bits;
+- 9 completed T0V0 derived JPEG/RGB images: 416,944 total bytes, 4,608 total
+  width pixels, 2,592 total height pixels, and 216 total color-depth bits.
+
+These correspond to coherent per-image means of approximately 345,387 bytes,
+1280x720 and 24 bits for source images, and 46,327 bytes, 512x288 and 24 bits
+for derived images. The temporary 11-versus-9 count difference is expected
+because Prometheus scraped while two jobs were between source validation and
+completed transformation. The epoch ultimately completed 40 jobs in 1.215
+seconds: 34 downloaded and transformed, 6 rejected at image access, with no
+throttling. Both Grafana dashboards query these histograms for rolling P50,
+P90, and P95 size, width, height, and color depth, including explicit P90 width
+and size series.

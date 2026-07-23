@@ -11,7 +11,13 @@ from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, gene
 
 
 class WorkerMetrics:
-    def __init__(self, registry: CollectorRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: CollectorRegistry | None = None,
+        *,
+        source_network: str = "win",
+    ) -> None:
+        self.source_network = source_network
         self.registry = registry or CollectorRegistry()
         self.epochs = Counter(
             "webcam_ingestion_epoch_total", "Ingestion epochs", ["source_network", "result"], registry=self.registry
@@ -61,6 +67,40 @@ class WorkerMetrics:
             ["source_network", "transformation_version", "outcome"],
             registry=self.registry,
         )
+        self.source_images = Counter(
+            "webcam_ingestion_source_image_total",
+            "Validated source images by bounded format and color mode",
+            ["source_network", "format", "color_mode"],
+            registry=self.registry,
+        )
+        self.source_size = Histogram(
+            "webcam_ingestion_source_image_size_bytes",
+            "Validated source image size",
+            ["source_network"],
+            buckets=(5_000, 10_000, 25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000, 5_000_000, 10_000_000),
+            registry=self.registry,
+        )
+        self.source_width = Histogram(
+            "webcam_ingestion_source_image_width_pixels",
+            "Validated source image width",
+            ["source_network"],
+            buckets=(160, 320, 640, 1024, 1280, 1920, 2560, 3840),
+            registry=self.registry,
+        )
+        self.source_height = Histogram(
+            "webcam_ingestion_source_image_height_pixels",
+            "Validated source image height",
+            ["source_network"],
+            buckets=(120, 240, 288, 480, 576, 720, 1080, 1440, 2160),
+            registry=self.registry,
+        )
+        self.source_color_depth = Histogram(
+            "webcam_ingestion_source_image_color_depth_bits",
+            "Validated source image color depth in bits per pixel",
+            ["source_network"],
+            buckets=(1, 8, 16, 24, 32, 48, 64),
+            registry=self.registry,
+        )
         self.derived_images = Counter(
             "webcam_ingestion_derived_image_total",
             "Successfully produced derived images",
@@ -88,6 +128,19 @@ class WorkerMetrics:
             buckets=(120, 240, 288, 480, 720, 1080, 2160),
             registry=self.registry,
         )
+        self.derived_color_depth = Histogram(
+            "webcam_ingestion_derived_image_color_depth_bits",
+            "Produced derived image color depth in bits per pixel",
+            ["source_network", "transformation_version"],
+            buckets=(1, 8, 16, 24, 32, 48, 64),
+            registry=self.registry,
+        )
+        self.derived_metadata = Counter(
+            "webcam_ingestion_derived_image_metadata_total",
+            "Produced derived images by bounded format and color mode",
+            ["source_network", "transformation_version", "format", "color_mode"],
+            registry=self.registry,
+        )
         self.mqtt_payload_size = Histogram(
             "webcam_ingestion_mqtt_payload_size_bytes",
             "Built MQTT payload size",
@@ -103,35 +156,71 @@ class WorkerMetrics:
         )
 
     def observe_stage(self, stage: str, outcome: str, duration_s: float) -> None:
-        self.stage_duration.labels("win", stage, outcome).observe(duration_s)
+        self.stage_duration.labels(self.source_network, stage, outcome).observe(duration_s)
 
     def observe_event(self, event: str, values: dict[str, object]) -> None:
         if event == "job_completed":
-            self.job_duration.labels("win", str(values["outcome"])).observe(
+            self.job_duration.labels(self.source_network, str(values["outcome"])).observe(
                 float(values["duration_s"])
             )
         elif event == "image_latency":
-            self.image_latency.labels("win", str(values["measure"])).observe(
+            self.image_latency.labels(self.source_network, str(values["measure"])).observe(
                 float(values["duration_s"])
             )
         elif event == "transformation":
             self.transformations.labels(
-                "win", str(values["version"]), str(values["outcome"])
+                self.source_network, str(values["version"]), str(values["outcome"])
             ).inc()
+        elif event == "source_image":
+            self.source_images.labels(
+                self.source_network,
+                _bounded_format(values.get("format")),
+                _bounded_color_mode(values.get("color_mode")),
+            ).inc()
+            self.source_size.labels(self.source_network).observe(
+                float(values["size_bytes"])
+            )
+            self.source_width.labels(self.source_network).observe(float(values["width"]))
+            self.source_height.labels(self.source_network).observe(
+                float(values["height"])
+            )
+            self.source_color_depth.labels(self.source_network).observe(
+                float(values["color_depth_bits"])
+            )
         elif event == "derived_image":
-            labels = ("win", str(values["version"]))
+            labels = (self.source_network, str(values["version"]))
             self.derived_images.labels(*labels).inc()
             self.derived_size.labels(*labels).observe(float(values["size_bytes"]))
             self.derived_width.labels(*labels).observe(float(values["width"]))
             self.derived_height.labels(*labels).observe(float(values["height"]))
+            self.derived_color_depth.labels(*labels).observe(
+                float(values["color_depth_bits"])
+            )
+            self.derived_metadata.labels(
+                *labels,
+                _bounded_format(values.get("format")),
+                _bounded_color_mode(values.get("color_mode")),
+            ).inc()
         elif event == "mqtt_payload":
             self.mqtt_payload_size.labels(
-                "win", str(values["version"])
+                self.source_network, str(values["version"])
             ).observe(float(values["size_bytes"]))
         elif event == "failure":
             self.failures.labels(
-                "win", str(values["stage"]), str(values["reason"])
+                self.source_network, str(values["stage"]), str(values["reason"])
             ).inc()
+
+
+def _bounded_format(value: object) -> str:
+    normalized = str(value).upper()
+    return normalized if normalized in {"JPEG", "PNG", "WEBP", "GIF", "BMP", "TIFF"} else "OTHER"
+
+
+def _bounded_color_mode(value: object) -> str:
+    normalized = str(value)
+    return normalized if normalized in {
+        "1", "L", "LA", "P", "RGB", "RGBA", "CMYK", "YCbCr", "I", "F", "HSV"
+    } else "OTHER"
 
 
 @dataclass

@@ -33,8 +33,11 @@ def drain_publication_outbox(
     publisher: MqttPublisher,
     *,
     limit: int,
+    network_id: str | None = None,
 ) -> list[DeliveryResult]:
-    pending = get_pending_publications(connection, limit=limit)
+    pending = get_pending_publications(
+        connection, limit=limit, network_id=network_id
+    )
     return [deliver_publication(connection, storage, publisher, item) for item in pending]
 
 

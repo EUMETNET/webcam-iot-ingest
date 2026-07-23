@@ -176,6 +176,92 @@
       "description": "Five-minute smoothed throughput. Completed jobs include unchanged and failed checks as well as publications; published images completed both S3 upload and MQTT publication.",
       "title": "5-minute throughput",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "id": 12,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "source p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "source p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "source p95" },
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "derived p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "derived p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket[5m])) by (le))", "legendFormat": "derived p95" }
+      ],
+      "description": "P50, P90, and P95 source and derived image sizes among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "pixels" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "id": 13,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "source p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "source p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "source p95" },
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "derived p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "derived p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket[5m])) by (le))", "legendFormat": "derived p95" }
+      ],
+      "description": "P50, P90, and P95 source and derived widths among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image width",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "pixels" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "id": 14,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "source p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "source p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "source p95" },
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "derived p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "derived p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket[5m])) by (le))", "legendFormat": "derived p95" }
+      ],
+      "description": "P50, P90, and P95 source and derived heights among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image height",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "bits" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "id": 15,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "source p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "source p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "source p95" },
+        { "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "derived p50" },
+        { "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "derived p90" },
+        { "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket[5m])) by (le))", "legendFormat": "derived p95" }
+      ],
+      "description": "P50, P90, and P95 decoded bits per pixel among source and derived images observed during the trailing 5 minutes.",
+      "title": "Source and derived color depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 52 },
+      "id": 16,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        { "expr": "sum(rate(webcam_ingestion_source_image_total[5m])) by (format, color_mode)", "legendFormat": "source {{format}} · {{color_mode}}" },
+        { "expr": "sum(rate(webcam_ingestion_derived_image_metadata_total[5m])) by (format, color_mode)", "legendFormat": "derived {{format}} · {{color_mode}}" }
+      ],
+      "description": "Five-minute rates of validated source and produced derived images by bounded image format and color mode.",
+      "title": "Image formats and color modes",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

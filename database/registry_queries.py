@@ -555,21 +555,37 @@ def record_download_and_enqueue_publication(
 
 
 def get_pending_publications(
-    connection: psycopg.Connection[Any], *, limit: int = 100
+    connection: psycopg.Connection[Any],
+    *,
+    limit: int = 100,
+    network_id: str | None = None,
 ) -> list[PendingPublication]:
     if limit < 1:
         raise ValueError("publication limit must be positive")
     with connection.cursor(row_factory=dict_row) as cursor:
-        cursor.execute(
+        network_clause = (
             """
-            SELECT image_id, source_stream_id, provider_marker,
-                   download_timestamp, object_key, derived_content,
-                   notification, stage, attempt_count, last_error_code
-            FROM publication_outbox
-            ORDER BY created_at, image_id
+            JOIN source_stream ss USING (source_stream_id)
+            JOIN site s USING (site_id)
+            WHERE s.network_id = %s
+            """
+            if network_id is not None
+            else ""
+        )
+        parameters: tuple[Any, ...] = (
+            (network_id, limit) if network_id is not None else (limit,)
+        )
+        cursor.execute(
+            f"""
+            SELECT po.image_id, po.source_stream_id, po.provider_marker,
+                   po.download_timestamp, po.object_key, po.derived_content,
+                   po.notification, po.stage, po.attempt_count, po.last_error_code
+            FROM publication_outbox po
+            {network_clause}
+            ORDER BY po.created_at, po.image_id
             LIMIT %s
             """,
-            (limit,),
+            parameters,
         )
         return [PendingPublication(**dict(row)) for row in cursor.fetchall()]
 

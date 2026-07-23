@@ -177,7 +177,9 @@ def _process_job(
     defer_ema_update: bool = False,
 ) -> WindyIngestionJobResult:
     job_started = time.monotonic()
-    name_value = job.source_stream_metadata.get("title")
+    name_value = job.source_stream_metadata.get(
+        "title", job.source_stream_metadata.get("presentationName")
+    )
     name = name_value if isinstance(name_value, str) else None
     download_timestamp: datetime | None = None
     provider_update_timestamp: datetime | None = None
@@ -250,6 +252,18 @@ def _process_job(
             provider_marker=reference.marker,
             size_bytes=len(content),
         )
+    if event_observer is not None:
+        event_observer(
+            "source_image",
+            {
+                "size_bytes": source.size_bytes,
+                "width": source.width,
+                "height": source.height,
+                "format": source.format,
+                "color_mode": source.color_mode,
+                "color_depth_bits": _source_color_depth_bits(source.color_mode),
+            },
+        )
 
     download_timestamp = datetime.now(UTC)
     provider_update_timestamp = _parse_provider_timestamp(reference.marker)
@@ -319,7 +333,10 @@ def _process_job(
                     "version": selected_transformation.version,
                     "size_bytes": prepared.derived.size_bytes,
                     "width": prepared.derived.width,
-                    "height": prepared.derived.height,
+                "height": prepared.derived.height,
+                "format": prepared.derived.format,
+                "color_mode": prepared.derived.color_mode,
+                "color_depth_bits": prepared.derived.color_depth,
                 },
             )
             event_observer(
@@ -454,6 +471,9 @@ def _process_job(
                 "size_bytes": publication.derived.size_bytes,
                 "width": publication.derived.width,
                 "height": publication.derived.height,
+                "format": publication.derived.format,
+                "color_mode": publication.derived.color_mode,
+                "color_depth_bits": publication.derived.color_depth,
             },
         )
     return finish(
@@ -473,6 +493,22 @@ def _process_job(
         object_key=publication.object_key,
         mqtt_topic=publication.mqtt_topic,
     )
+
+
+def _source_color_depth_bits(color_mode: str) -> int:
+    return {
+        "1": 1,
+        "L": 8,
+        "P": 8,
+        "LA": 16,
+        "I": 32,
+        "F": 32,
+        "RGB": 24,
+        "YCbCr": 24,
+        "HSV": 24,
+        "RGBA": 32,
+        "CMYK": 32,
+    }.get(color_mode, 0)
 
 
 def _job_result(

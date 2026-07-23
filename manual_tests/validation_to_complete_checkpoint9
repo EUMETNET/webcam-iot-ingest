@@ -1,0 +1,69 @@
+Checkpoint 9 owner validation - Fintraffic ingestion
+====================================================
+
+Prerequisites
+-------------
+
+- Checkpoint 8 discovery has populated active `fin` streams.
+- PostgreSQL and local Mosquitto are running.
+- `.env` contains the S3 configuration and a meaningful
+  `FINTRAFFIC_USER_HEADER`. Never print that value.
+
+1. Focused automated tests
+--------------------------
+
+    uv run --env-file .env pytest -q \
+      tests/ingestion/fintraffic \
+      tests/ingestion/shared \
+      tests/metrics \
+      tests/worker
+
+Confirm that the bulk snapshot, null marker, changed image, metadata/image race,
+zero-retry, transformation, durable publication, metrics, and worker tests pass.
+
+2. Bounded read-only provider test
+----------------------------------
+
+    just ingest-fintraffic --limit 10 --dry-run
+
+Confirm that one bulk snapshot is reported, no more than ten registered streams
+are selected, provider markers are ISO timestamps, and no S3/MQTT write occurs.
+
+3. Bounded publication and registry uniqueness
+-----------------------------------------------
+
+Ensure the host-published PostgreSQL and MQTT services are running:
+
+    just infrastructure
+
+    just ingest-fintraffic --limit 4 --publish
+
+Confirm that changed images are validated, transformed, stored, and published.
+Do not use a second immediate bounded command as an idempotency test: streams
+that have never downloaded successfully remain due, while successful streams
+become temporarily not due, so the two samples need not contain the same
+cameras. Marker comparison, deterministic image IDs, and collision rejection
+are exercised by the automated tests. The continuous worker additionally
+enforces its 15-second minimum epoch period, which this one-shot command does
+not. The just recipe runs Python on the host and therefore selects
+`127.0.0.1` for the local Mosquitto broker rather than the Docker-internal
+hostname `mqtt`.
+
+4. Parallel monitored worker
+----------------------------
+
+    just ingestion-test-fintraffic 20m staggered
+
+The recipe prints the unique screen session and log path. Tunnel Grafana port
+3000 and open the Fintraffic ingestion dashboard. Confirm:
+
+- Prometheus target `fintraffic-worker-host-benchmark` is up on port 8014;
+- initial releases span the configured 600-second window;
+- one provider freshness snapshot is made per non-empty epoch;
+- metrics have `source_network="fin"` and do not merge with Windy;
+- freshness and download retry counts are zero unless explicitly overridden;
+- changed jobs expose relevant transformation, image size/dimensions, S3,
+  MQTT, source-job duration, derived-image count, and provider latency metrics.
+
+Stop after recording the results. Do not begin checkpoint 10 until checkpoint 9
+is accepted.
