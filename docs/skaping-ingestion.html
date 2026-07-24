@@ -3,38 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Skaping ingestion · webcam-iot-ingest</title>
+  <title>Skaping ingestion benchmark</title>
   <style>
-    :root { --ink:#14202b; --muted:#62717d; --line:#dce4e8; --paper:#f6f8f9; --card:#fff; --accent:#087e8b; --warm:#f2a541; }
-    * { box-sizing:border-box; }
-    body { margin:0; color:var(--ink); background:var(--paper); font:14px/1.35 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
-    nav { display:flex; gap:18px; align-items:center; padding:11px 4vw; background:#17242e; white-space:nowrap; overflow-x:auto; }
-    nav a { color:#c8d6dc; text-decoration:none; font-size:12px; letter-spacing:.02em; }
-    nav a[aria-current="page"] { color:white; font-weight:700; }
-    main { width:min(1180px,94vw); margin:22px auto 28px; }
-    header { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:18px; }
-    h1 { margin:0; font-size:30px; letter-spacing:-.04em; }
-    .subtitle,.note { color:var(--muted); }
-    .subtitle { margin:5px 0 0; }
-    .headline { color:var(--accent); font-size:20px; font-weight:800; white-space:nowrap; }
-    .layout { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; align-items:start; }
-    .stack { display:grid; gap:16px; }
-    section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:17px; box-shadow:0 2px 10px rgba(20,32,43,.04); }
-    h2 { margin:0 0 12px; font-size:15px; text-transform:uppercase; letter-spacing:.08em; }
-    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-bottom:13px; }
-    .card { min-height:72px; padding:11px; background:#f2f7f7; border-radius:9px; }
-    .card strong { display:block; color:var(--accent); font-size:20px; line-height:1.1; }
-    .card span { display:block; margin-top:6px; color:var(--muted); font-size:11px; }
-    table { width:100%; border-collapse:collapse; }
-    th,td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; }
-    th { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
-    td:last-child,th:last-child { text-align:right; }
-    tr:last-child td { border-bottom:0; }
-    .accent { color:var(--accent); font-weight:700; }
-    .detail { margin-top:12px; padding:10px 11px; border-left:3px solid var(--warm); background:#fff9ef; color:#485965; font-size:12px; }
-    .note { margin:10px 0 0; font-size:11px; }
-    footer { margin-top:14px; color:var(--muted); font-size:11px; text-align:right; }
-    @media (max-width:850px) { .layout { grid-template-columns:1fr; } .cards { grid-template-columns:repeat(2,1fr); } header { align-items:start; flex-direction:column; } }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #07111f; color: #edf5ff; }
+    main { width: min(1500px, 100%); min-height: 100vh; margin: auto; padding: 3vh 3vw; display: flex; flex-direction: column; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 2rem; margin-bottom: 2vh; }
+    h1 { margin: 0; font-size: clamp(2rem, 4vw, 4.5rem); letter-spacing: -.045em; }
+    h2 { margin: 0 0 .7rem; color: #70d7ff; font-size: clamp(1rem, 1.4vw, 1.4rem); }
+    .headline { color: #70d7ff; font-size: clamp(1.1rem, 2vw, 2rem); font-weight: 750; white-space: nowrap; }
+    .subtitle { margin: .45rem 0 0; color: #9fb2c8; font-size: clamp(.8rem, 1.15vw, 1.15rem); }
+    .layout { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 1.2rem; }
+    .stack { display: flex; flex-direction: column; gap: 1.2rem; }
+    section { border: 1px solid #294059; border-radius: 16px; background: #0c1a2b; padding: 1rem 1.2rem; }
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; margin-bottom: 1rem; }
+    .card { padding: .8rem; border-radius: 12px; background: #10263d; }
+    .card strong { display: block; color: #70d7ff; font-size: clamp(1.1rem, 1.8vw, 1.8rem); font-variant-numeric: tabular-nums; }
+    .card span { color: #9fb2c8; font-size: .73rem; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: clamp(.72rem, .9vw, .92rem); }
+    th { color: #91a8bf; text-align: left; font-weight: 600; }
+    th, td { padding: .4rem .38rem; border-bottom: 1px solid #1d3045; }
+    td:not(:first-child), th:not(:first-child) { text-align: right; }
+    tr:last-child td { border-bottom: 0; }
+    .accent { color: #70d7ff; font-weight: 700; }
+    .note { margin: .7rem 0 0; color: #91a8bf; font-size: clamp(.68rem, .82vw, .83rem); line-height: 1.42; }
+    .detail { margin-top: .7rem; padding: .65rem .75rem; border-left: 3px solid #70d7ff; background: #0a2137; color: #b8cbe0; font-size: .76rem; line-height: 1.4; }
+    nav { position: fixed; top: 1rem; right: 1rem; z-index: 2; display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+    nav a { padding: .4rem .66rem; border: 1px solid #294059; border-radius: 999px; background: #0c1a2b; color: #9fb2c8; text-decoration: none; font-size: .72rem; }
+    nav a[aria-current="page"], nav a:hover { color: #70d7ff; border-color: #70d7ff; }
+    footer { margin-top: 1.2vh; color: #71879d; font-size: .72rem; text-align: right; }
+    @media (max-width: 800px) {
+      header { align-items: start; flex-direction: column; gap: .3rem; }
+      .layout { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr; }
+      main { padding: 1.2rem; }
+    }
   </style>
 </head>
 <body>
