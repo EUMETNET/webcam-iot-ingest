@@ -552,3 +552,23 @@ validated 0.01-second request pacing on each VM and compares throughput,
 freshness failures, throttling, epoch duration, database contention, and
 provider-marker latency. This work is deliberately excluded from checkpoint
 13, which remains focused on single-VM production orchestration and recovery.
+
+### 2026-07-24 — Four-day full-scope checkpoint-13 observation
+
+**Affected component:** checkpoint-13 deployment validation.
+
+Before failure-injection and recovery drills, checkpoint 13 uses a dedicated
+four-day live-test target. It starts one full-scope worker for each provider,
+uses deterministic ten-minute initial staggering, and schedules sequential
+live discovery daily at 12:00 UTC. Cleanup uses the production 24-hour
+retention threshold and runs at 00:15 UTC; database backup runs at 01:00 UTC.
+An independent timer stops the test workers and schedules after four days but
+leaves monitoring infrastructure available for final inspection.
+
+The observation fixes provider freshness and download retry counts at zero,
+retains the validated 0.01-second Windy request pacing and 0.1-second pacing
+for Fintraffic and Skaping, and retains configured S3/MQTT retry behaviour.
+Systemd still uses `Restart=on-failure` for unattended continuity, but no
+failure is deliberately injected during this observation. Restart, recovery,
+outbox, reboot, and restore drills remain separate checkpoint-13 acceptance
+work.

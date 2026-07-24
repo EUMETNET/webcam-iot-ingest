@@ -332,6 +332,13 @@ journalctl -u webcam-checkpoint12-cycle.service
 Full-scale production scheduling and operational recovery drills belong to
 checkpoint 13.
 
+The dedicated command list for the four-day, full-scope checkpoint-13 live
+test is in
+[`manual_tests/run_checkpoint13_four_day_full_live_test`](manual_tests/run_checkpoint13_four_day_full_live_test).
+It includes unit installation, restricted sudo policy, start/inspection/stop
+commands, daily 12:00 UTC discovery, 24-hour spool retention, daily backup,
+and the automatic four-day deadline.
+
 ## Running tests
 
 ```bash

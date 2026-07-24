@@ -1,0 +1,14 @@
+[Unit]
+Description=Four-day full-scope webcam ingestion live test
+Requires=webcam-checkpoint13-infrastructure.service
+Wants=webcam-checkpoint13-ingestion@windy.service
+Wants=webcam-checkpoint13-ingestion@fintraffic.service
+Wants=webcam-checkpoint13-ingestion@skaping.service
+Wants=webcam-checkpoint13-discovery.timer
+Wants=webcam-checkpoint13-spool-cleanup.timer
+Wants=webcam-checkpoint13-db-backup.timer
+Wants=webcam-checkpoint13-four-day-stop.timer
+After=webcam-checkpoint13-infrastructure.service network-online.target
+
+[Install]
+WantedBy=multi-user.target

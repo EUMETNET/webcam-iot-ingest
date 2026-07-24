@@ -1,0 +1,127 @@
+Checkpoint 13 four-day full live test
+=====================================
+
+Purpose and boundaries
+----------------------
+
+This run exercises all registered streams for Windy, Fintraffic, and Skaping
+for four days. Initial polling is deterministically staggered over ten minutes.
+The three workers run independently and restart only after unexpected failure.
+This observation does not deliberately inject failures or perform restart,
+restore, or recovery drills.
+
+Discovery is live (not dry-run), sequentially ordered Windy, Fintraffic, then
+Skaping, and scheduled daily at 12:00 UTC. S3 cleanup runs daily at 00:15 UTC
+and removes canonical image objects older than 24 hours. A database backup
+runs daily at 01:00 UTC. The target stops its workers and timers automatically
+four days after it starts; monitoring infrastructure is deliberately left
+running so the final dashboards remain available.
+
+Provider freshness and image-download retries are explicitly zero for this
+test. The validated request pacing is 0.01 seconds for Windy and 0.1 seconds
+for Fintraffic and Skaping. S3 upload and MQTT publication retain their
+configuration from `.env` (both default to one retry).
+
+One-time installation from the administrator account
+-----------------------------------------------------
+
+    sudo cp \
+      /home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-four-day-live-test/webcam-checkpoint13-* \
+      /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemd-analyze verify \
+      /etc/systemd/system/webcam-checkpoint13-*.service \
+      /etc/systemd/system/webcam-checkpoint13-*.timer \
+      /etc/systemd/system/webcam-checkpoint13-*.target
+
+The administrator should install the narrow sudo policy shown after this
+runbook. Do not grant unrestricted `systemctl` or general root access.
+
+Preflight from the codexuser account
+------------------------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git status --short --branch
+    docker compose --env-file .env --profile monitoring config --quiet
+    systemd-analyze verify \
+      deployment/systemd/checkpoint13-four-day-live-test/*.service \
+      deployment/systemd/checkpoint13-four-day-live-test/*.timer \
+      deployment/systemd/checkpoint13-four-day-live-test/*.target
+    grep -E '^(S3_UPLOAD|MQTT_PUBLICATION)_RETRY_COUNT=' .env || true
+
+Start and inspect from the codexuser account
+--------------------------------------------
+
+    sudo -n systemctl start webcam-checkpoint13-four-day.target
+    sudo -n systemctl --no-pager --full status \
+      webcam-checkpoint13-four-day.target \
+      webcam-checkpoint13-ingestion@windy.service \
+      webcam-checkpoint13-ingestion@fintraffic.service \
+      webcam-checkpoint13-ingestion@skaping.service
+    sudo -n systemctl list-timers --all --no-pager \
+      'webcam-checkpoint13-*'
+
+The worker commands must contain no country restriction and no five-job
+checkpoint-12 bound. Confirm their metrics on ports 8013, 8014, and 8015:
+
+    for port in 8013 8014 8015; do
+      echo "Port $port"
+      curl -fsS "http://127.0.0.1:${port}/metrics" |
+        grep -E '^webcam_(ingestion_epoch_total|source_stream_due_count)'
+    done
+
+Follow operation and dashboards
+-------------------------------
+
+    sudo -n journalctl -f \
+      -u 'webcam-checkpoint13-ingestion@*.service' \
+      -u webcam-checkpoint13-discovery-sequence.service \
+      -u webcam-checkpoint13-spool-cleanup.service \
+      -u webcam-checkpoint13-db-backup.service
+
+Use the existing local tunnel to Grafana on port 3000. Review all three worker
+and discovery dashboards, Operational batch jobs, and Infrastructure health.
+
+Stop early or confirm the automatic stop
+----------------------------------------
+
+    sudo -n systemctl stop webcam-checkpoint13-four-day.target
+    sudo -n systemctl --no-pager --full status \
+      webcam-checkpoint13-four-day.target \
+      webcam-checkpoint13-ingestion@windy.service \
+      webcam-checkpoint13-ingestion@fintraffic.service \
+      webcam-checkpoint13-ingestion@skaping.service
+    sudo -n systemctl list-timers --all --no-pager \
+      'webcam-checkpoint13-*'
+
+Stopping the target stops the three workers and all four test timers. It does
+not stop the Compose monitoring infrastructure.
+
+Restricted sudo policy
+----------------------
+
+From the administrator account:
+
+    sudo visudo -f /etc/sudoers.d/webcam-checkpoint13
+
+Install the following policy (verify `/usr/bin/systemctl` and
+`/usr/bin/journalctl` with `command -v` on the host if they differ):
+
+    Cmnd_Alias WEBCAM_CP13 = \
+        /usr/bin/systemctl start webcam-checkpoint13-four-day.target, \
+        /usr/bin/systemctl stop webcam-checkpoint13-four-day.target, \
+        /usr/bin/systemctl --no-pager --full status webcam-checkpoint13-*, \
+        /usr/bin/systemctl list-timers --all --no-pager webcam-checkpoint13-*, \
+        /usr/bin/journalctl -f -u webcam-checkpoint13-*
+
+    codexuser ALL=(root) NOPASSWD: WEBCAM_CP13
+
+Then:
+
+    sudo chown root:root /etc/sudoers.d/webcam-checkpoint13
+    sudo chmod 0440 /etc/sudoers.d/webcam-checkpoint13
+    sudo visudo -c
+
+The shell quotes around `webcam-checkpoint13-*` are not passed to sudo. If the
+host's sudo command matching does not accept a requested multi-unit inspection,
+inspect one unit at a time using the same command form.

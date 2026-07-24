@@ -1,0 +1,8 @@
+[Unit]
+Description=Four-day deadline for checkpoint-13 live test
+PartOf=webcam-checkpoint13-four-day.target
+
+[Timer]
+OnActiveSec=4d
+AccuracySec=1min
+Unit=webcam-checkpoint13-four-day-stop.service

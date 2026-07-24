@@ -142,6 +142,68 @@ checkpoint12-ingest network limit="5":
         uv run --env-file .env python -m "$module" \
         --max-jobs "$limit" --stagger-initial-polling "${network_args[@]}"
 
+# Full-scope worker used by the checkpoint-13 four-day live test.
+checkpoint13-ingest network:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        windy)
+            module="ingestion.worker"
+            max_jobs=30000
+            threads=100
+            pool_size=64
+            port=8013
+            network_args=(--network win)
+            provider_env=(
+                WINDY_INGESTION_REQUEST_DELAY_S=0.01
+                WINDY_FRESHNESS_QUERY_RETRY_COUNT=0
+                WINDY_DOWNLOAD_RETRY_COUNT=0
+            )
+            ;;
+        fintraffic)
+            module="ingestion.fintraffic.worker"
+            max_jobs=3000
+            threads=100
+            pool_size=64
+            port=8014
+            network_args=()
+            provider_env=(
+                FINTRAFFIC_INGESTION_REQUEST_DELAY_S=0.1
+                FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT=0
+                FINTRAFFIC_DOWNLOAD_RETRY_COUNT=0
+            )
+            ;;
+        skaping)
+            module="ingestion.skaping.worker"
+            max_jobs=100
+            threads=16
+            pool_size=16
+            port=8015
+            network_args=()
+            provider_env=(
+                SKAPING_INGESTION_REQUEST_DELAY_S=0.1
+                SKAPING_FRESHNESS_QUERY_RETRY_COUNT=0
+                SKAPING_DOWNLOAD_RETRY_COUNT=0
+            )
+            ;;
+        *)
+            echo "network must be windy, fintraffic, or skaping" >&2
+            exit 2
+            ;;
+    esac
+    exec env \
+        MQTT_HOST=127.0.0.1 \
+        INGESTION_HEALTH_HOST=0.0.0.0 \
+        INGESTION_HEALTH_PORT="$port" \
+        INGESTION_WORKER_THREADS="$threads" \
+        INGESTION_DATABASE_POOL_SIZE="$pool_size" \
+        INGESTION_MAX_JOBS_PER_EPOCH="$max_jobs" \
+        INGESTION_IDLE_DELAY_S=0 \
+        UV_CACHE_DIR=/tmp/webcam-uv-cache \
+        "${provider_env[@]}" \
+        uv run --env-file .env python -m "$module" \
+        --max-jobs "$max_jobs" --stagger-initial-polling "${network_args[@]}"
+
 # Run a bounded Fintraffic ingestion sample. Add --dry-run to avoid S3/MQTT.
 ingest-fintraffic *args:
     #!/usr/bin/env bash

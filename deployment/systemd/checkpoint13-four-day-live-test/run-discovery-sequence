@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -u
+
+status=0
+for network in windy fintraffic skaping; do
+    systemctl start --wait "webcam-checkpoint13-discovery@${network}.service" ||
+        status=1
+done
+exit "$status"

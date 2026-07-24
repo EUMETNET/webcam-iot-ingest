@@ -1,0 +1,9 @@
+[Unit]
+Description=Sequential checkpoint-13 live discovery
+Requires=webcam-checkpoint13-infrastructure.service
+After=webcam-checkpoint13-infrastructure.service network-online.target
+PartOf=webcam-checkpoint13-four-day.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-four-day-live-test/run-discovery-sequence

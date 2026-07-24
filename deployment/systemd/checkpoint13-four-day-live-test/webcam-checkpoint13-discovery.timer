@@ -1,0 +1,9 @@
+[Unit]
+Description=Run checkpoint-13 discovery daily at 12:00 UTC
+PartOf=webcam-checkpoint13-four-day.target
+
+[Timer]
+OnCalendar=*-*-* 12:00:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=webcam-checkpoint13-discovery-sequence.service

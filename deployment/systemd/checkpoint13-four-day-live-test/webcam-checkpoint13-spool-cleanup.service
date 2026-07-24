@@ -1,0 +1,13 @@
+[Unit]
+Description=Checkpoint-13 cleanup of image objects older than 24 hours
+Requires=webcam-checkpoint13-infrastructure.service
+After=webcam-checkpoint13-infrastructure.service network-online.target
+PartOf=webcam-checkpoint13-four-day.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+Environment=PATH=/home/codexuser/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/home/codexuser/.local/bin/just cleanup-spool 24

@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop checkpoint-13 live test after four days
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl --no-block stop webcam-checkpoint13-four-day.target

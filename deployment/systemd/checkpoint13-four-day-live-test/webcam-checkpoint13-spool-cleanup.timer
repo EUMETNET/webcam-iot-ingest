@@ -1,0 +1,9 @@
+[Unit]
+Description=Run checkpoint-13 24-hour spool cleanup daily
+PartOf=webcam-checkpoint13-four-day.target
+
+[Timer]
+OnCalendar=*-*-* 00:15:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=webcam-checkpoint13-spool-cleanup.service

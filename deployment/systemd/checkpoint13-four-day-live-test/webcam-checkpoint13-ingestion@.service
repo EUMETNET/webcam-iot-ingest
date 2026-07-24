@@ -1,0 +1,17 @@
+[Unit]
+Description=Full-scope checkpoint-13 webcam ingestion worker for %i
+Requires=webcam-checkpoint13-infrastructure.service
+After=webcam-checkpoint13-infrastructure.service network-online.target
+PartOf=webcam-checkpoint13-four-day.target
+
+[Service]
+Type=simple
+User=codexuser
+Group=codexuser
+Environment=PATH=/home/codexuser/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/home/codexuser/.local/bin/just checkpoint13-ingest %i
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=65
+SuccessExitStatus=143 SIGTERM
