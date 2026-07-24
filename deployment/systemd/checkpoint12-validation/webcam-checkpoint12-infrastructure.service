@@ -5,6 +5,9 @@ After=docker.service network-online.target
 
 [Service]
 Type=oneshot
+User=codexuser
+Group=codexuser
+Environment=PATH=/home/codexuser/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
 ExecStart=/usr/bin/docker compose --env-file .env --profile monitoring up -d
 ExecStop=/usr/bin/docker compose --env-file .env --profile monitoring stop

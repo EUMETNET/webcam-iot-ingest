@@ -1,6 +1,8 @@
 Checkpoint 12 owner validation
 ==============================
 
+Status: accepted by the owner on 2026-07-24.
+
 1. Validate code, configuration, dashboards, and systemd syntax:
 
     UV_CACHE_DIR=/tmp/webcam-uv-cache uv run pytest -q tests \
@@ -53,6 +55,11 @@ is part of checkpoint 12.
     sudo systemctl start webcam-checkpoint12-ingestion@skaping.service
     sudo systemctl enable --now webcam-checkpoint12-cycle.timer
 
+The application units declare `User=codexuser`, `Group=codexuser`, and an
+explicit PATH containing `/home/codexuser/.local/bin`, where the pinned `just`
+and `uv` executables are installed. The administrator installs and controls
+the units but does not run application workflows as root.
+
 Confirm worker metrics appear on ports 8113, 8114, and 8115. Confirm Windy is
 restricted to Denmark and each worker selects at most five jobs per epoch.
 
@@ -71,6 +78,18 @@ cycle creates a timestamped database backup.
 
 Stop after validation and record owner approval. Full-scale production
 orchestration and recovery drills belong to checkpoint 13.
+
+Recorded result
+---------------
+
+The corrected units ran as `codexuser`; worker metrics were available on all
+three configured ports, no worker selected more than five jobs per epoch, and
+Windy was restricted to Denmark. Two corrected maintenance cycles completed
+successfully without overlap. The first removed a historical backlog of
+1,499,349 images (29,884,445,384 bytes); the next steady-state cleanup deleted
+four images (67,408 bytes) in 0.20 seconds. Both had zero deletion failures,
+and the cycles completed their database backups. The accelerated timer was
+then disabled and the bounded workers stopped.
 
 The legacy `tests/test_upload.py` suite is excluded because its fixture still
 patches the removed `api.main.IngestToPipeline` symbol. This is a pre-existing

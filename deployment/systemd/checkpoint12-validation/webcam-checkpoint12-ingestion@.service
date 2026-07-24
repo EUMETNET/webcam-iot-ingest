@@ -5,6 +5,9 @@ After=webcam-checkpoint12-infrastructure.service network-online.target
 
 [Service]
 Type=simple
+User=codexuser
+Group=codexuser
+Environment=PATH=/home/codexuser/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
 ExecStart=/home/codexuser/.local/bin/just checkpoint12-ingest %i 5
 Restart=on-failure

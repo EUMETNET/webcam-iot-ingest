@@ -59,10 +59,33 @@ Completed live validation
   skipped. Eleven legacy FastAPI upload tests remain independently stale:
   their fixture patches the removed `api.main.IngestToPipeline` attribute.
 
-Owner validation remaining
---------------------------
+Owner validation
+----------------
 
-The validation-only systemd units were syntax-checked but were not installed,
-started, or enabled. No partial installation occurred during the interrupted
-attempt. Installation and observation of two cycles remain exclusively in
-`manual_tests/validation_to_complete_checkpoint12`.
+The validation-only systemd units were installed and exercised by the owner.
+The first startup exposed systemd's restricted default PATH: `just` was found
+through its absolute path, but recipes exited with status 127 because `uv` was
+not discoverable. Validation application units now explicitly run as
+`codexuser` and set PATH to include `/home/codexuser/.local/bin`.
+Administrative privileges remain limited to unit installation and control.
+
+All three bounded ingestion services then ran continuously, exposed metrics on
+ports 8113, 8114, and 8115, and respected the five-job epoch limit. The Windy
+process command confirmed the additional Denmark-only restriction.
+
+The first corrected maintenance cycle completed successfully. Its cleanup
+removed an exceptional pre-existing backlog of 1,499,349 canonical images
+(29,884,445,384 bytes) in 2,652.75 seconds with no failures, after which the
+database backup completed successfully:
+
+    backups/postgresql/2026/07/24/webcam_ingestion_20260724T133250Z.dump
+
+The following maintenance cycle also completed successfully and without
+overlap. Once the backlog was absent, cleanup examined 290 objects and deleted
+four eligible images (67,408 bytes) in 0.20 seconds with no failures. This
+confirmed the expected steady-state cleanup behaviour.
+
+The owner accepted checkpoint 12 on 2026-07-24. The accelerated timer was
+disabled and the three bounded ingestion workers were stopped. Production
+orchestration, graceful worker-stop policy, restoration, and recovery drills
+remain checkpoint 13 work.
