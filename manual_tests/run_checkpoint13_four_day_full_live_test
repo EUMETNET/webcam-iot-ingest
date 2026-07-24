@@ -25,9 +25,8 @@ configuration from `.env` (both default to one retry).
 One-time installation from the administrator account
 -----------------------------------------------------
 
-    sudo cp \
-      /home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-four-day-live-test/webcam-checkpoint13-* \
-      /etc/systemd/system/
+    sudo bash -c \
+      'cp /home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-four-day-live-test/webcam-checkpoint13-* /etc/systemd/system/'
     sudo systemctl daemon-reload
     sudo systemd-analyze verify \
       /etc/systemd/system/webcam-checkpoint13-*.service \
