@@ -8,6 +8,7 @@ from config.deployment_config import (
     DiscoveryMetricsConfig,
     FintrafficConfig,
     SkapingConfig,
+    SkapingIngestionConfig,
     WindyConfig,
     WindyIngestionConfig,
     TransformationConfig,
@@ -206,6 +207,16 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.minimum_ingestion_interval_s == 300
     assert config.polling_interval_factor == 0.7
     assert WorkerConfig.from_environment().initial_stagger_window_s == 600
+
+
+def test_skaping_ingestion_config_has_zero_retry_defaults() -> None:
+    config = SkapingIngestionConfig.from_environment()
+
+    assert config.default_limit == 10
+    assert config.freshness_query_retry_count == 0
+    assert config.download_retry_count == 0
+    assert config.minimum_ingestion_interval_s == 300
+    assert config.polling_interval_factor == 0.7
 
 
 def test_checkpoint6_configuration_defaults(monkeypatch) -> None:

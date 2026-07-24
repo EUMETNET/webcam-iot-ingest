@@ -398,3 +398,78 @@ to successful S3 PUT object sizes. The page therefore labels the p90
 transformed-image size for images subsequently uploaded to S3; successful S3 and transformed-image
 counts were nearly identical in the observed window. This limitation must not
 be hidden or presented as an exact S3-only percentile.
+
+### 2026-07-23 — Skaping freshness uses final-object ETag
+
+**Affected component:** Skaping ingestion (checkpoint 11).
+
+The initial design preferred the documented `media/getArchives` endpoint while
+leaving resolved `latest_media` as an experiment. A bounded comparison found
+that archives return the complete 24-hour image/video history, can be tens of
+kilobytes per camera, and do not directly identify a point of view. By
+contrast, all 41 active image points of view returned a body-free HTTP 302
+whose final object exposed an ETag and `Last-Modified`; mean HEAD resolution
+time was 0.126 seconds.
+
+Checkpoint 11 therefore follows the stored `latest_media/mini` pointer and
+uses the final object's ETag as the opaque marker. A changed image is accepted
+only when its GET response repeats that ETag. `Last-Modified` is retained as
+the provider-availability timestamp for latency observability, without claiming
+that it is physical capture time. This avoids depending on the undocumented
+timestamp components of the final URL and keeps freshness bandwidth below an
+archive response. The trade-off is that one of ten compared cameras had an
+archive entry five minutes newer than its latest-media pointer.
+
+### 2026-07-23 — Skaping adaptive polling uses download time
+
+**Affected component:** shared due selection and Skaping ingestion.
+
+The initial adaptive formula uses a timestamp-shaped provider marker as its
+second scheduling anchor. Skaping deliberately stores an opaque ETag instead,
+and adding a separate persistent provider-timestamp column is deferred while
+the small network is evaluated.
+
+The shared query now accepts an explicit adaptive anchor. Its default remains
+`provider_marker`, preserving Windy and Fintraffic behavior byte-for-byte at
+their call sites. Only Skaping selects `download_timestamp`, for which a stream
+is due when both conditions hold:
+
+    now >= last_freshness_query_timestamp + minimum_ingestion_interval
+
+    now >= last_download_timestamp
+           + max(minimum_ingestion_interval,
+                 polling_interval_factor * ema_download_period)
+
+A missing freshness or download timestamp makes only its corresponding guard
+immediately eligible. Consequently, a never-successful stream may be tried
+initially, but any failed freshness/download attempt delays its next selection
+by the minimum ingestion interval. This prevents a failing Skaping stream from
+being queried in every short epoch. No schema migration is introduced.
+
+The architecture document should distinguish the provider-marker and
+download-timestamp anchor strategies, state that the former remains the
+Windy/Fintraffic default, and record this Skaping policy as an explicit pilot
+experiment rather than a provider-timestamp claim.
+
+### 2026-07-24 — Ingestion presentation terminology
+
+**Affected component:** static ingestion benchmark pages.
+
+The externally presented outcome previously called `provider error` is now
+called `freshness query error` for Windy, Fintraffic, and Skaping. This is a
+presentation label for the existing `provider_error` metric outcome; metric
+names and database behavior are unchanged. The term more directly identifies
+the stage that failed without implying that every such outcome is a confirmed
+provider-side fault.
+
+### 2026-07-24 — Windy benchmark pacing experiment
+
+**Affected component:** detached Windy benchmark recipe.
+
+The benchmark-only `WINDY_INGESTION_REQUEST_DELAY_S` override is reduced from
+0.01 to 0.001 seconds for the next 40-minute full-network experiment. This
+raises the request-start pacing ceiling from approximately 100 to 1,000
+requests per second while retaining 100 worker threads. Production defaults
+are unchanged. The experiment must be evaluated through throttling, controlled
+errors, epoch duration, provider latency, database-pool waiting, and payload
+throughput before any operational default is changed.

@@ -286,6 +286,9 @@ def get_due_source_streams(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
+    adaptive_polling_anchor: Literal[
+        "provider_marker", "download_timestamp"
+    ] = "provider_marker",
     now: datetime | None = None,
     countries: Sequence[str] | None = None,
     limit: int | None = None,
@@ -295,6 +298,11 @@ def get_due_source_streams(
         raise ValueError("minimum ingestion interval cannot be negative")
     if polling_interval_factor < 0:
         raise ValueError("polling interval factor cannot be negative")
+    if adaptive_polling_anchor not in {
+        "provider_marker",
+        "download_timestamp",
+    }:
+        raise ValueError("unsupported adaptive polling anchor")
     now = now or datetime.now(timezone.utc)
     _require_aware_datetime(now, "now")
     if countries is not None and (
@@ -325,25 +333,46 @@ def get_due_source_streams(
             WHERE s.network_id = %s
               AND ss.status = 'active'
               AND (%s::text[] IS NULL OR s.country = ANY(%s::text[]))
-              AND (
-                  ss.last_download_timestamp IS NULL
-                  OR (
-                      ss.last_download_timestamp
-                          + %s::double precision * interval '1 second' <= %s
-                      AND CASE
-                          WHEN ss.ema_download_period IS NULL
-                            OR ss.last_provider_image_marker IS NULL
-                            OR NOT pg_input_is_valid(
-                                ss.last_provider_image_marker,
-                                'timestamp with time zone'
-                            )
-                          THEN TRUE
-                          ELSE ss.last_provider_image_marker::timestamptz
-                              + (ss.ema_download_period * %s::double precision)
-                                * interval '1 second' <= %s
-                      END
-                  )
-              )
+              AND CASE
+                  WHEN %s = 'download_timestamp' THEN
+                      (
+                          ss.last_freshness_query_timestamp IS NULL
+                          OR ss.last_freshness_query_timestamp
+                              + %s::double precision * interval '1 second' <= %s
+                      )
+                      AND (
+                          ss.last_download_timestamp IS NULL
+                          OR ss.last_download_timestamp
+                              + GREATEST(
+                                  %s::double precision,
+                                  COALESCE(
+                                      ss.ema_download_period
+                                          * %s::double precision,
+                                      %s::double precision
+                                  )
+                              ) * interval '1 second' <= %s
+                      )
+                  ELSE
+                      ss.last_download_timestamp IS NULL
+                      OR (
+                          ss.last_download_timestamp
+                              + %s::double precision * interval '1 second' <= %s
+                          AND CASE
+                              WHEN ss.ema_download_period IS NULL
+                                OR ss.last_provider_image_marker IS NULL
+                                OR NOT pg_input_is_valid(
+                                    ss.last_provider_image_marker,
+                                    'timestamp with time zone'
+                                )
+                              THEN TRUE
+                              ELSE ss.last_provider_image_marker::timestamptz
+                                  + (
+                                      ss.ema_download_period
+                                          * %s::double precision
+                                    ) * interval '1 second' <= %s
+                          END
+                      )
+              END
             ORDER BY ss.last_download_timestamp NULLS FIRST,
                      ss.source_stream_id
             LIMIT %s
@@ -352,6 +381,13 @@ def get_due_source_streams(
                 network_id,
                 normalized_countries,
                 normalized_countries,
+                adaptive_polling_anchor,
+                minimum_ingestion_interval.total_seconds(),
+                now,
+                minimum_ingestion_interval.total_seconds(),
+                polling_interval_factor,
+                minimum_ingestion_interval.total_seconds(),
+                now,
                 minimum_ingestion_interval.total_seconds(),
                 now,
                 polling_interval_factor,

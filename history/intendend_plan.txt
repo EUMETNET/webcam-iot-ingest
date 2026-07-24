@@ -381,22 +381,28 @@ Checkpoint 11 - Skaping ingestion
 
 Objectives:
 
-- Begin with the documented media/getArchives freshness method.
-- Do not enable the unresolved latest_media redirect optimization by default.
-- Normalize provider-local timestamps using the camera timezone.
+- Resolve the selected `latest_media/mini` pointer with a body-free HEAD.
+- Use the final object's ETag as the opaque freshness marker.
+- Treat final-object `Last-Modified` as provider availability time, not as a
+  guaranteed physical capture timestamp.
+- Verify that the downloaded object's ETag still matches the freshness check.
 - Select the mini rendition.
-- Treat the selected archive identity and timestamp as an opaque freshness
-  marker.
+- Use a Skaping-only download-timestamp adaptive-polling anchor. Require both
+  a minimum interval since the last freshness attempt and, after a successful
+  download, `max(minimum interval, lambda * EMA)` since that download.
+- Keep the shared provider-marker anchor as the unchanged default for Windy
+  and Fintraffic.
 - Feed changed images through the shared validation, T0V0, S3, and N0V0 MQTT
   pipeline.
-- Keep any resolved-latest-media experiment behind a disabled configuration
-  option until its behavior is measured and validated.
+- Reuse adaptive polling, deferred EMA updates, durable publication, worker
+  health, Prometheus metrics, and a provider-filtered Grafana dashboard.
 
 Expected validation:
 
     uv run pytest tests/ingestion/skaping -v
-    uv run python -m ingestion.skaping.skaping_ingestion_workflow --once --dry-run
-    uv run python -m ingestion.skaping.skaping_ingestion_workflow --once
+    just ingest-skaping --limit 10 --dry-run
+    just ingest-skaping --limit 4 --publish
+    just ingestion-test-skaping 20m staggered
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'ska' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 20;"
 

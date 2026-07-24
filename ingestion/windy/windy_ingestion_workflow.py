@@ -223,7 +223,9 @@ def _process_job(
 
     try:
         reference = client.get_current_image(
-            job.provider_source_stream_id, job.selected_rendition
+            job.provider_source_stream_id,
+            job.selected_rendition,
+            job.source_stream_metadata,
         )
     except WindyImageAccessError as error:
         if not dry_run:
@@ -271,7 +273,9 @@ def _process_job(
         )
 
     download_timestamp = datetime.now(UTC)
-    provider_update_timestamp = _parse_provider_timestamp(reference.marker)
+    provider_update_timestamp = getattr(reference, "provider_update_timestamp", None)
+    if provider_update_timestamp is None:
+        provider_update_timestamp = _parse_provider_timestamp(reference.marker)
     if provider_update_timestamp is not None:
         candidate_latency = (download_timestamp - provider_update_timestamp).total_seconds()
         if candidate_latency >= 0:

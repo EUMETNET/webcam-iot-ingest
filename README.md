@@ -10,7 +10,8 @@ The slide set also includes dedicated pages for
 [Fintraffic discovery](https://nanopiero.github.io/webcam-iot-ingest/fintraffic.html),
 [Skaping discovery](https://nanopiero.github.io/webcam-iot-ingest/skaping.html),
 [Windy ingestion](https://nanopiero.github.io/webcam-iot-ingest/ingestion.html),
-and [Fintraffic ingestion](https://nanopiero.github.io/webcam-iot-ingest/fintraffic-ingestion.html).
+[Fintraffic ingestion](https://nanopiero.github.io/webcam-iot-ingest/fintraffic-ingestion.html),
+and [Skaping ingestion](https://nanopiero.github.io/webcam-iot-ingest/skaping-ingestion.html).
 
 Missing site altitudes may be enriched with the
 [Open-Meteo Elevation API](https://open-meteo.com/en/docs/elevation-api),
@@ -52,9 +53,15 @@ install -m 700 -d .secrets
 touch .secrets/database_password
 chmod 600 .secrets/database_password
 # Open .secrets/database_password in an editor and enter the local password.
-docker compose --env-file .env up -d postgres mqtt
+just infrastructure
 uv run python -m database.healthcheck
 ```
+
+`just infrastructure` runs
+`docker compose --env-file .env up -d postgres mqtt`. It starts, or keeps
+running, only the local PostgreSQL database and Mosquitto MQTT broker. It does
+not start Prometheus, Grafana, discovery, or ingestion workers, and normal
+invocations preserve the existing PostgreSQL volume and its data.
 
 The `.env` and `.secrets/` paths are ignored by Git. Do not put provider,
 database, MQTT, or S3 credentials in committed configuration. The local
@@ -102,6 +109,14 @@ Run a bounded Fintraffic ingestion check without S3 or MQTT writes:
 just ingest-fintraffic --limit 10 --dry-run
 ```
 
+Run the equivalent ETag-based Skaping check, or explicitly exercise the full
+T0V0/S3/MQTT path:
+
+```bash
+just ingest-skaping --limit 10 --dry-run
+just ingest-skaping --limit 4 --publish
+```
+
 ## Environment variables
 
 | Variable | Default | Description |
@@ -120,6 +135,8 @@ just ingest-fintraffic --limit 10 --dry-run
 | `FINTRAFFIC_USER_HEADER` | `webcam-iot-ingest` | Non-secret application identifier sent as `Digitraffic-User` |
 | `FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Fintraffic bulk freshness request |
 | `FINTRAFFIC_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Fintraffic JPEG request |
+| `SKAPING_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Skaping HEAD/ETag request |
+| `SKAPING_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Skaping mini-image request |
 | `WINDY_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Windy metadata/freshness HTTP request |
 | `WINDY_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Windy image-download HTTP request |
 | `BUCKET_NAME` | - | Bucket name |
@@ -171,7 +188,23 @@ The Fintraffic staggered mode uses a fixed seed and a 600-second initial
 window. Each epoch uses one bulk preset `measuredTime` snapshot for freshness,
 then downloads only changed full-JPEG images.
 
-Both provider dashboards include source and derived image size, width, height,
+Skaping has its own worker on metrics port 8015 and can run beside both other
+providers:
+
+```bash
+just ingestion-test-skaping 2h staggered
+```
+
+It obtains the final mini object's ETag with a followed HEAD request, downloads
+only changed objects, and validates that the GET response has the same ETag.
+The final object's HTTP `Last-Modified` value is retained as the
+provider-availability timestamp; it is not claimed to be the physical capture
+time. For the pilot, Skaping alone anchors adaptive polling to the last
+successful download and also requires 300 seconds since the last freshness
+attempt. Windy and Fintraffic retain the shared provider-marker timestamp
+strategy. The deterministic stagger window is 600 seconds.
+
+All provider ingestion dashboards include source and derived image size, width, height,
 color depth, format, and color-mode observability. Size, width, height, and
 color-depth panels show rolling P50, P90, and P95 values over five minutes.
 They also show one-minute-smoothed external image-download and successful S3
@@ -210,8 +243,8 @@ The Compose image tags make monitoring recreation deterministic at the release
 version level. For byte-identical container images, deployments may additionally
 lock the resolved image digests in their deployment manifest.
 
-Pre-built dashboards for FastAPI, MQTT, ingestion workers, and Skaping
-discovery are provisioned automatically. Short-lived discovery jobs publish
+Pre-built dashboards for FastAPI, MQTT, all three ingestion workers, and all
+three discovery providers are provisioned automatically. Short-lived discovery jobs publish
 their persistent batch metrics to the locally bound Pushgateway on port 9091;
 Prometheus scrapes it and Grafana displays the retained results after the
 discovery process exits.

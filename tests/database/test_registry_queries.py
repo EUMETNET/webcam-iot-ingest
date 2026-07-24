@@ -333,6 +333,101 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
     assert [item.source_stream_id for item in due] == [due_stream]
 
 
+def test_download_timestamp_polling_is_isolated_and_backs_off_freshness(
+    connection, identifiers
+) -> None:
+    site_id, successful_stream, never_downloaded_stream = identifiers
+    now = datetime(2026, 7, 14, 12, 0, tzinfo=timezone.utc)
+    apply_discovery_update(
+        connection,
+        "win",
+        [site(site_id)],
+        [
+            stream(successful_stream, site_id),
+            stream(never_downloaded_stream, site_id),
+        ],
+    )
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_download_timestamp = %s,
+            last_freshness_query_timestamp = %s,
+            last_provider_image_marker = '"etag-value"',
+            ema_download_period = 1200
+        WHERE source_stream_id = %s
+        """,
+        (
+            now - timedelta(minutes=15),
+            now - timedelta(minutes=4),
+            successful_stream,
+        ),
+    )
+    record_freshness_query(
+        connection, never_downloaded_stream, now - timedelta(minutes=2)
+    )
+
+    selected = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        adaptive_polling_anchor="download_timestamp",
+        now=now,
+    )
+    assert selected == []
+
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_freshness_query_timestamp = %s
+        WHERE source_stream_id IN (%s, %s)
+        """,
+        (
+            now - timedelta(minutes=6),
+            successful_stream,
+            never_downloaded_stream,
+        ),
+    )
+    selected = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        adaptive_polling_anchor="download_timestamp",
+        now=now,
+    )
+    assert {item.source_stream_id for item in selected} == {
+        successful_stream,
+        never_downloaded_stream,
+    }
+
+    # The default provider-marker strategy is unchanged: an opaque ETag skips
+    # only its timestamp guard and does not enable the new freshness backoff.
+    default_selected = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        now=now,
+    )
+    assert {item.source_stream_id for item in default_selected} == {
+        successful_stream,
+        never_downloaded_stream,
+    }
+
+
+def test_due_stream_selection_rejects_unknown_polling_anchor(
+    connection,
+) -> None:
+    with pytest.raises(ValueError, match="polling anchor"):
+        get_due_source_streams(
+            connection,
+            "win",
+            timedelta(minutes=5),
+            adaptive_polling_anchor="unknown",
+        )
+
+
 def test_ingestion_state_updates_respect_workflow_stages(
     connection, identifiers
 ) -> None:
@@ -391,7 +486,12 @@ def test_publication_outbox_lifecycle_is_durable(connection, identifiers) -> Non
         derived_content=b"jpeg",
         notification={"derived_stream": {"transformation_version": "T0V0"}},
     )
-    pending = get_pending_publications(connection, limit=10)
+    image_id = f"image{stream_id}.jpg"
+    pending = [
+        item
+        for item in get_pending_publications(connection, limit=100)
+        if item.image_id == image_id
+    ]
 
     assert ema == 300.0
     assert len(pending) == 1
@@ -400,13 +500,19 @@ def test_publication_outbox_lifecycle_is_durable(connection, identifiers) -> Non
 
     mark_publication_uploaded(connection, pending[0].image_id)
     record_publication_failure(connection, pending[0].image_id, "mqtt_publish")
-    replay = get_pending_publications(connection, limit=10)[0]
+    replay = next(
+        item
+        for item in get_pending_publications(connection, limit=100)
+        if item.image_id == image_id
+    )
     assert replay.stage == "pending_mqtt"
     assert replay.attempt_count == 1
     assert replay.last_error_code == "mqtt_publish"
 
     complete_publication(connection, replay.image_id)
-    assert get_pending_publications(connection, limit=10) == []
+    assert image_id not in {
+        item.image_id for item in get_pending_publications(connection, limit=100)
+    }
 
 
 def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:

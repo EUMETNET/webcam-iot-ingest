@@ -86,7 +86,10 @@ class FintrafficImageClient:
         return len(references)
 
     def get_current_image(
-        self, provider_id: str, selected_rendition: str
+        self,
+        provider_id: str,
+        selected_rendition: str,
+        source_metadata: dict[str, object] | None = None,
     ) -> FintrafficImageReference:
         if selected_rendition != "full_jpeg":
             raise FintrafficImageAccessError("unsupported Fintraffic rendition")

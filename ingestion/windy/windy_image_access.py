@@ -78,7 +78,10 @@ class WindyImageClient:
             self._client.close()
 
     def get_current_image(
-        self, provider_id: str, selected_rendition: str
+        self,
+        provider_id: str,
+        selected_rendition: str,
+        source_metadata: dict[str, object] | None = None,
     ) -> WindyImageReference:
         started = time.monotonic()
         for attempt in range(self._freshness_query_retry_count + 1):

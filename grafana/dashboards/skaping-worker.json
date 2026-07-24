@@ -1,0 +1,777 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "hidden"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(webcam_ingestion_epoch_total{source_network=\"ska\",result=\"success\"})",
+          "legendFormat": "completed epochs"
+        }
+      ],
+      "description": "Cumulative successful epochs since the worker process started. Each upward step is an epoch completion; flat sections show time spent inside longer epochs.",
+      "title": "Completed epochs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(webcam_source_stream_due_count{source_network=\"ska\"})",
+          "legendFormat": "selected"
+        }
+      ],
+      "title": "Streams selected",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(irate(webcam_ingestion_job_total{source_network=\"ska\"}[1m]))",
+          "legendFormat": "jobs/s"
+        }
+      ],
+      "description": "Near-instantaneous completion rate calculated with Prometheus irate over the trailing 1 minute.",
+      "title": "Completion rate",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(webcam_publication_outbox_pending_count{source_network=\"ska\"})",
+          "legendFormat": "pending"
+        }
+      ],
+      "title": "Publication outbox",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(irate(webcam_ingestion_job_total{source_network=\"ska\"}[1m])) by (result)",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "description": "Near-instantaneous outcome rates calculated with Prometheus irate over the trailing 1 minute. Unlike a 5-minute rate, these series return to zero soon after activity stops.",
+      "title": "Job outcomes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_stage_duration_seconds_sum{source_network=\"ska\",outcome=\"success\"}[5m])) by (stage) / sum(rate(webcam_ingestion_stage_duration_seconds_count{source_network=\"ska\",outcome=\"success\"}[5m])) by (stage)",
+          "legendFormat": "mean {{stage}}"
+        }
+      ],
+      "description": "Rolling means use samples observed during the trailing 5 minutes. provider_refresh is total metadata time; provider_rate_gate_wait and provider_http split its controlled queueing and HTTP components.",
+      "title": "Mean stage duration (refresh = gate + HTTP)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_stage_duration_seconds_bucket{source_network=\"ska\",outcome=\"success\"}[5m])) by (le, stage))",
+          "legendFormat": "p50 {{stage}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_stage_duration_seconds_bucket{source_network=\"ska\",outcome=\"success\"}[5m])) by (le, stage))",
+          "legendFormat": "p95 {{stage}}"
+        }
+      ],
+      "description": "Approximate p50 and p95 values from Prometheus histogram samples observed during the trailing 5 minutes.",
+      "title": "P50 and P95 stage duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 8,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(irate(webcam_ingestion_job_total{source_network=\"ska\",result=\"throttled\"}[1m]))",
+          "legendFormat": "throttled/s"
+        },
+        {
+          "expr": "sum(irate(webcam_ingestion_stage_failure_total{source_network=\"ska\"}[1m])) by (stage, reason)",
+          "legendFormat": "{{stage}} · {{reason}}/s"
+        }
+      ],
+      "description": "Near-instantaneous throttling and controlled-failure rates calculated with Prometheus irate over the trailing 1 minute.",
+      "title": "Controlled failures and throttling",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_image_latency_seconds_bucket{source_network=\"ska\"}[5m])) by (le, measure))",
+          "legendFormat": "p50 {{measure}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_image_latency_seconds_bucket{source_network=\"ska\"}[5m])) by (le, measure))",
+          "legendFormat": "p95 {{measure}}"
+        }
+      ],
+      "description": "Approximate p50 and p95 image-latency values from Prometheus histogram samples observed during the trailing 5 minutes.",
+      "title": "Provider → download → completed MQTT latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_source_job_duration_seconds_sum{source_network=\"ska\"}[5m])) by (outcome) / sum(rate(webcam_ingestion_source_job_duration_seconds_count{source_network=\"ska\"}[5m])) by (outcome)",
+          "legendFormat": "mean {{outcome}}"
+        }
+      ],
+      "description": "Rolling mean source-job duration by outcome, using samples observed during the trailing 5 minutes.",
+      "title": "Mean source-job duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_job_total{source_network=\"ska\"}[5m]))",
+          "legendFormat": "completed jobs/s"
+        },
+        {
+          "expr": "sum(rate(webcam_ingestion_job_total{source_network=\"ska\",result=\"published\"}[5m]))",
+          "legendFormat": "published images/s"
+        }
+      ],
+      "description": "Five-minute smoothed throughput. Completed jobs include unchanged and failed checks as well as publications; published images completed both S3 upload and MQTT publication.",
+      "title": "5-minute throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 36
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_size_bytes_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p95"
+        }
+      ],
+      "description": "P50, P90, and P95 source and derived image sizes among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image size",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pixels"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_width_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p95"
+        }
+      ],
+      "description": "P50, P90, and P95 source and derived widths among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image width",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pixels"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 44
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_height_pixels_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p95"
+        }
+      ],
+      "description": "P50, P90, and P95 source and derived heights among images observed during the trailing 5 minutes.",
+      "title": "Source and derived image height",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bits"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_source_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "source p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p90"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_derived_image_color_depth_bits_bucket{source_network=\"ska\"}[5m])) by (le))",
+          "legendFormat": "derived p95"
+        }
+      ],
+      "description": "P50, P90, and P95 decoded bits per pixel among source and derived images observed during the trailing 5 minutes.",
+      "title": "Source and derived color depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 52
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_source_image_total{source_network=\"ska\"}[5m])) by (format, color_mode)",
+          "legendFormat": "source {{format}} · {{color_mode}}"
+        },
+        {
+          "expr": "sum(rate(webcam_ingestion_derived_image_metadata_total{source_network=\"ska\"}[5m])) by (format, color_mode)",
+          "legendFormat": "derived {{format}} · {{color_mode}}"
+        }
+      ],
+      "description": "Five-minute rates of validated source and produced derived images by bounded image format and color mode.",
+      "title": "Image formats and color modes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 60
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(webcam_ingestion_source_download_bytes_total{source_network=\"ska\"}[1m]))",
+          "legendFormat": "external image downloads"
+        },
+        {
+          "expr": "sum(rate(webcam_ingestion_s3_upload_bytes_total{source_network=\"ska\"}[1m]))",
+          "legendFormat": "successful S3 PUT"
+        }
+      ],
+      "description": "One-minute-smoothed payload throughput in bytes per second. Source download bytes count completed image HTTP responses; S3 bytes count only data transferred by successful PUT requests and exclude immutable-object reuse.",
+      "title": "External download and S3 throughput",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": [
+    "skaping",
+    "worker",
+    "benchmark"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "label": "Prometheus",
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "Skaping ingestion worker",
+  "uid": "skaping-ingestion-worker",
+  "version": 1
+}

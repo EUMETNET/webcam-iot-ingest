@@ -536,6 +536,79 @@ class FintrafficIngestionConfig:
 
 
 @dataclass(frozen=True)
+class SkapingIngestionConfig:
+    api_key_file: Path
+    request_timeout_s: float
+    image_download_timeout_s: float
+    image_max_bytes: int
+    request_delay_s: float
+    minimum_ingestion_interval_s: float
+    polling_interval_factor: float
+    freshness_query_retry_count: int
+    download_retry_count: int
+    retry_backoff_s: float
+    ema_alpha: float
+    default_limit: int
+
+    @classmethod
+    def from_environment(cls) -> "SkapingIngestionConfig":
+        config = cls(
+            api_key_file=Path(
+                os.getenv("SKAPING_API_KEY_FILE", ".secrets/skaping_api_key")
+            ),
+            request_timeout_s=float(os.getenv("PROVIDER_REQUEST_TIMEOUT_S", "15")),
+            image_download_timeout_s=float(
+                os.getenv("IMAGE_DOWNLOAD_TIMEOUT_S", "15")
+            ),
+            image_max_bytes=int(os.getenv("SOURCE_IMAGE_MAX_BYTES", "10000000")),
+            request_delay_s=float(
+                os.getenv("SKAPING_INGESTION_REQUEST_DELAY_S", "0.1")
+            ),
+            minimum_ingestion_interval_s=float(
+                os.getenv("MINIMUM_INGESTION_INTERVAL_S", "300")
+            ),
+            polling_interval_factor=float(
+                os.getenv("POLLING_INTERVAL_FACTOR", "0.7")
+            ),
+            freshness_query_retry_count=int(
+                os.getenv("SKAPING_FRESHNESS_QUERY_RETRY_COUNT", "0")
+            ),
+            download_retry_count=int(
+                os.getenv("SKAPING_DOWNLOAD_RETRY_COUNT", "0")
+            ),
+            retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
+            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            default_limit=int(os.getenv("SKAPING_INGESTION_DEFAULT_LIMIT", "10")),
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if self.request_timeout_s <= 0 or self.image_download_timeout_s <= 0:
+            raise ValueError("Skaping ingestion timeouts must be positive")
+        if self.image_max_bytes < 1 or self.minimum_ingestion_interval_s < 0:
+            raise ValueError("invalid Skaping ingestion size or interval")
+        if (
+            self.polling_interval_factor < 0
+            or self.request_delay_s < 0
+            or self.retry_backoff_s < 0
+        ):
+            raise ValueError("invalid Skaping polling or retry backoff")
+        if self.freshness_query_retry_count < 0 or self.download_retry_count < 0:
+            raise ValueError("Skaping retry counts cannot be negative")
+        if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
+            raise ValueError("invalid Skaping EMA alpha or default limit")
+
+    def read_api_key(self) -> str:
+        api_key = self.api_key_file.read_text(encoding="utf-8").strip()
+        if not api_key:
+            raise ValueError(
+                f"Skaping API key file is empty: {self.api_key_file}"
+            )
+        return api_key
+
+
+@dataclass(frozen=True)
 class TransformationConfig:
     version: str
     max_height_px: int

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skaping ingestion · webcam-iot-ingest</title>
+  <style>
+    :root { --ink:#14202b; --muted:#62717d; --line:#dce4e8; --paper:#f6f8f9; --card:#fff; --accent:#087e8b; --warm:#f2a541; }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--paper); font:14px/1.35 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    nav { display:flex; gap:18px; align-items:center; padding:11px 4vw; background:#17242e; white-space:nowrap; overflow-x:auto; }
+    nav a { color:#c8d6dc; text-decoration:none; font-size:12px; letter-spacing:.02em; }
+    nav a[aria-current="page"] { color:white; font-weight:700; }
+    main { width:min(1180px,94vw); margin:22px auto 28px; }
+    header { display:flex; justify-content:space-between; align-items:end; gap:24px; margin-bottom:18px; }
+    h1 { margin:0; font-size:30px; letter-spacing:-.04em; }
+    .subtitle,.note { color:var(--muted); }
+    .subtitle { margin:5px 0 0; }
+    .headline { color:var(--accent); font-size:20px; font-weight:800; white-space:nowrap; }
+    .layout { display:grid; grid-template-columns:1.2fr .8fr; gap:16px; align-items:start; }
+    .stack { display:grid; gap:16px; }
+    section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:17px; box-shadow:0 2px 10px rgba(20,32,43,.04); }
+    h2 { margin:0 0 12px; font-size:15px; text-transform:uppercase; letter-spacing:.08em; }
+    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin-bottom:13px; }
+    .card { min-height:72px; padding:11px; background:#f2f7f7; border-radius:9px; }
+    .card strong { display:block; color:var(--accent); font-size:20px; line-height:1.1; }
+    .card span { display:block; margin-top:6px; color:var(--muted); font-size:11px; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; }
+    th { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+    td:last-child,th:last-child { text-align:right; }
+    tr:last-child td { border-bottom:0; }
+    .accent { color:var(--accent); font-weight:700; }
+    .detail { margin-top:12px; padding:10px 11px; border-left:3px solid var(--warm); background:#fff9ef; color:#485965; font-size:12px; }
+    .note { margin:10px 0 0; font-size:11px; }
+    footer { margin-top:14px; color:var(--muted); font-size:11px; text-align:right; }
+    @media (max-width:850px) { .layout { grid-template-columns:1fr; } .cards { grid-template-columns:repeat(2,1fr); } header { align-items:start; flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a><a href="fintraffic-ingestion.html">Fintraffic ingestion</a><a href="skaping-ingestion.html" aria-current="page">Skaping ingestion</a></nav>
+  <main>
+    <header>
+      <div>
+        <h1>Skaping webcam ingestion</h1>
+        <p class="subtitle">One-hour full-network run · final 30-minute window · ETag freshness · complete EWC S3 and MQTT pipeline</p>
+      </div>
+      <div class="headline">37 checks / 5 min</div>
+    </header>
+    <div class="layout">
+      <section>
+        <h2>Throughput</h2>
+        <div class="cards">
+          <div class="card"><strong>37</strong><span>completed freshness checks / 5 min</span></div>
+          <div class="card"><strong>14</strong><span>MQTT publications / 5 min</span></div>
+          <div class="card"><strong>2.47 s</strong><span>p90 epoch duration</span></div>
+          <div class="card"><strong>0.00188 MB/s</strong><span>mean external image payload · 30 min</span></div>
+          <div class="card"><strong>0.00250 MB/s</strong><span>mean successful S3 PUT payload · 30 min</span></div>
+          <div class="card"><strong>97.2 kB</strong><span>p90 transformed image size uploaded to S3 · 30 min</span></div>
+        </div>
+        <table aria-label="Five-minute Skaping ingestion throughput">
+          <thead><tr><th>Pipeline stage or outcome</th><th>Per 5 min</th></tr></thead>
+          <tbody>
+            <tr><td>Source image validated</td><td>14</td></tr>
+            <tr><td>Image transformation completed</td><td>14</td></tr>
+            <tr><td>S3 storage completed</td><td>14</td></tr>
+            <tr><td>MQTT publication completed</td><td class="accent">14</td></tr>
+            <tr><td>Provider marker unchanged</td><td>23</td></tr>
+            <tr><td>Freshness query error</td><td>0</td></tr>
+            <tr><td>Image download error</td><td>0</td></tr>
+          </tbody>
+        </table>
+        <p class="note">The complete run contained 240 epochs, 430 completed checks, 185 publications and 245 unchanged ETags.</p>
+      </section>
+      <div class="stack">
+        <section>
+          <h2>Latency per published image</h2>
+          <div class="cards">
+            <div class="card"><strong>1.72 min</strong><span>p50 provider availability → download</span></div>
+            <div class="card"><strong>4.69 min</strong><span>p95 provider availability → download</span></div>
+            <div class="card"><strong>2.97 s</strong><span>p95 download → job end</span></div>
+          </div>
+          <div class="detail"><strong>Timestamp meaning.</strong> Provider availability is the final Skaping object's HTTP <code>Last-Modified</code> time. The ETag remains the authoritative opaque freshness marker.</div>
+        </section>
+        <section>
+          <h2>Current EMA and image profile</h2>
+          <div class="cards">
+            <div class="card"><strong>9.68 min</strong><span>median EMA</span></div>
+            <div class="card"><strong>12.96 min</strong><span>p90 EMA</span></div>
+            <div class="card"><strong>12.96 min</strong><span>p95 EMA</span></div>
+          </div>
+          <table aria-label="Skaping image profile">
+            <thead><tr><th>Characteristic</th><th>p90</th></tr></thead>
+            <tbody>
+              <tr><td>Downloaded source image size</td><td>86.1 kB</td></tr>
+              <tr><td>Downloaded source image width</td><td>2,343 px</td></tr>
+              <tr><td>Transformed image size uploaded to S3</td><td>97.2 kB</td></tr>
+              <tr><td>Derived image width</td><td>1,776 px</td></tr>
+            </tbody>
+          </table>
+          <div class="detail"><strong>EMA interpretation.</strong> Statistics come from gaps between successful downloads, not from provider timestamps.</div>
+          <p class="note">Current database values cover 39 Skaping streams with a learned EMA; mean 9.82 min.</p>
+        </section>
+      </div>
+    </div>
+    <footer>Skaping ingestion benchmark · one-hour run completed 23 July 2026</footer>
+  </main>
+</body>
+</html>

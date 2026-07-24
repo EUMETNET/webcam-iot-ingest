@@ -42,70 +42,73 @@
   </style>
 </head>
 <body>
-  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html" aria-current="page">Windy ingestion</a><a href="fintraffic-ingestion.html">Fintraffic ingestion</a></nav>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html" aria-current="page">Windy ingestion</a><a href="fintraffic-ingestion.html">Fintraffic ingestion</a><a href="skaping-ingestion.html">Skaping ingestion</a></nav>
   <main>
     <header>
       <div>
         <h1>Windy webcam ingestion</h1>
-        <p class="subtitle">100-minute full-scale run · all 33 EUMETNET countries · final 30-minute steady window · complete S3 and MQTT pipeline</p>
+        <p class="subtitle">Two-hour full-scale run · all 33 EUMETNET countries · final 30-minute steady window · complete S3 and MQTT pipeline</p>
       </div>
-      <div class="headline">18,615 checks / 5 min</div>
+      <div class="headline">17,527 checks / 5 min</div>
     </header>
     <div class="layout">
       <section>
         <h2>Throughput</h2>
         <div class="cards">
-          <div class="card"><strong>18,615</strong><span>completed camera checks / 5 min</span></div>
-          <div class="card"><strong>10,269</strong><span>MQTT publications / 5 min</span></div>
+          <div class="card"><strong>17,527</strong><span>completed camera checks / 5 min</span></div>
+          <div class="card"><strong>10,013</strong><span>MQTT publications / 5 min</span></div>
           <div class="card"><strong>0</strong><span>Windy throttling responses</span></div>
-          <div class="card"><strong>4.87 min</strong><span>p90 epoch duration</span></div>
+          <div class="card"><strong>4.86 min</strong><span>p90 epoch duration</span></div>
+          <div class="card"><strong>0.520 MB/s</strong><span>mean external image payload · 30 min</span></div>
+          <div class="card"><strong>0.590 MB/s</strong><span>mean successful S3 PUT payload · 30 min</span></div>
+          <div class="card"><strong>30.0 kB</strong><span>p90 transformed image size uploaded to S3 · 30 min</span></div>
         </div>
         <table aria-label="Five-minute ingestion pipeline throughput">
           <thead><tr><th>Pipeline stage or outcome</th><th>Per 5 min</th></tr></thead>
           <tbody>
-            <tr><td>Image download completed</td><td>10,271</td></tr>
-            <tr><td>Image transformation completed</td><td>10,271</td></tr>
-            <tr><td>S3 storage completed</td><td>10,269</td></tr>
-            <tr><td>MQTT publication completed</td><td class="accent">10,269</td></tr>
-            <tr><td>Provider marker unchanged</td><td>7,849</td></tr>
-            <tr><td>Provider error</td><td>497</td></tr>
+            <tr><td>Image download completed</td><td>10,010</td></tr>
+            <tr><td>Image transformation completed</td><td>10,010</td></tr>
+            <tr><td>S3 storage completed</td><td>10,012</td></tr>
+            <tr><td>MQTT publication completed</td><td class="accent">10,013</td></tr>
+            <tr><td>Provider marker unchanged</td><td>7,494</td></tr>
+            <tr><td>Freshness query error</td><td>20</td></tr>
             <tr><td>Image download error</td><td>0.5</td></tr>
           </tbody>
         </table>
-        <div class="detail"><strong>Provider error.</strong> The Windy metadata/current-image-reference request failed or returned an unusable response: for example an HTTP failure, invalid JSON, missing webcam or marker, mismatched ID, or missing rendition URL. It excludes a valid unchanged marker, image-download failures, and throttling.</div>
-        <p class="note">Counts are averages over six consecutive five-minute windows from the final 30 minutes. Epoch p90 uses the nine epochs completed in the same steady window. Pipeline-stage counts describe the same images progressing through successive stages and must not be added together.</p>
+        <div class="detail"><strong>Freshness query error.</strong> The Windy metadata/current-image-reference request failed or returned an unusable response: for example an HTTP failure, invalid JSON, missing webcam or marker, mismatched ID, or missing rendition URL. It excludes a valid unchanged marker, image-download failures, and throttling.</div>
+        <p class="note">Counts are averages over the final 30 minutes. Small differences between transformation, S3 and MQTT counts come from durable outbox replay across the measurement boundary.</p>
       </section>
       <div class="stack">
         <section>
           <h2>Latency per published image</h2>
           <div class="cards">
-            <div class="card"><strong>2.31 min</strong><span>p50 provider marker → download</span></div>
-            <div class="card"><strong>5.95 min</strong><span>p95 provider marker → download</span></div>
+            <div class="card"><strong>4.05 min</strong><span>p50 provider marker → download</span></div>
+            <div class="card"><strong>9.35 min</strong><span>p95 provider marker → download</span></div>
             <div class="card"><strong>0.98 s</strong><span>p95 download → MQTT</span></div>
           </div>
           <table aria-label="Published image latency percentiles">
             <thead><tr><th>Latency measure</th><th>p50</th><th>p95</th></tr></thead>
             <tbody>
-              <tr><td>Provider marker → download</td><td>2.31 min</td><td>5.95 min</td></tr>
+              <tr><td>Provider marker → download</td><td>4.05 min</td><td>9.35 min</td></tr>
               <tr><td>Download → completed MQTT</td><td>0.51 s</td><td>0.98 s</td></tr>
             </tbody>
           </table>
           <div class="detail"><strong>Interpretation.</strong> Windy <code>lastUpdatedOn</code> is the provider marker known at metadata refresh, not a guaranteed physical acquisition timestamp for the exact downloaded bytes. These values therefore measure provider-marker age at ingestion. Internal download-to-MQTT processing remains below one second at p95.</div>
-          <p class="note">Prometheus histogram estimates for 06:48:20–07:18:20 UTC on 23 July 2026. Configuration: 100 worker threads, 64 PostgreSQL connections, 0.01 s request-start pacing, a deterministic 0–600 s initial stagger, EWC S3, and MQTT QoS 1.</p>
+          <p class="note">Prometheus estimates for 18:51–19:21 UTC on 23 July 2026. Configuration: 100 worker threads, 64 PostgreSQL connections, 0.01 s request-start pacing, a deterministic 0–600 s initial stagger, EWC S3, and MQTT QoS 1.</p>
         </section>
         <section>
           <h2>Current EMA distribution</h2>
           <div class="cards">
-            <div class="card"><strong>10.10 min</strong><span>median EMA</span></div>
-            <div class="card"><strong>19.65 min</strong><span>p90 EMA</span></div>
-            <div class="card"><strong>26.44 min</strong><span>p95 EMA</span></div>
+            <div class="card"><strong>10.28 min</strong><span>median EMA</span></div>
+            <div class="card"><strong>22.80 min</strong><span>p90 EMA</span></div>
+            <div class="card"><strong>30.35 min</strong><span>p95 EMA</span></div>
           </div>
           <div class="detail"><strong>Be careful.</strong> These statistics are estimated from gaps between effective download events, not from provider timestamps.</div>
-          <p class="note">Current registry values for all 25,055 Windy source streams on 23 July 2026. Mean EMA: 14.95 min.</p>
+          <p class="note">Current registry values for 25,280 Windy source streams with a learned EMA. Mean EMA: 15.99 min.</p>
         </section>
       </div>
     </div>
-    <footer>Windy ingestion benchmark · final steady window of the 100-minute full-domain run completed 23 July 2026</footer>
+    <footer>Windy ingestion benchmark · final steady window of the two-hour full-domain run completed 23 July 2026</footer>
   </main>
 </body>
 </html>

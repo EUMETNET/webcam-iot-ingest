@@ -1,0 +1,83 @@
+Checkpoint 11 owner validation - Skaping ingestion
+===================================================
+
+Status: ready for owner validation.
+
+1. Automated tests
+------------------
+
+    uv run --env-file .env pytest -q \
+      tests/ingestion/skaping tests/ingestion/windy \
+      tests/ingestion/fintraffic tests/ingestion/shared \
+      tests/metrics tests/storage tests/notification
+
+Confirm ETag extraction, body-free followed HEAD, `Last-Modified` conversion,
+HEAD/GET race rejection, image limits, shared transformation/publication, and
+provider regressions pass.
+
+Run the real registry scheduling tests:
+
+    RUN_DATABASE_TESTS=1 uv run --env-file .env pytest -q \
+      tests/database/test_registry_queries.py
+
+Confirm the default provider-marker policy still passes its Windy/Fintraffic
+tests, while only `adaptive_polling_anchor="download_timestamp"` applies the
+Skaping download-time and freshness-attempt guards.
+
+2. Bounded read-only provider check
+-----------------------------------
+
+    just ingest-skaping --limit 10 --dry-run
+
+Confirm at most ten active `ska` streams are selected. Changed streams may be
+downloaded and validated in memory, but no database, S3, or MQTT write occurs.
+Provider markers must be ETags; do not expect a timestamp-shaped marker.
+
+3. Bounded complete pipeline
+----------------------------
+
+    just infrastructure
+    just ingest-skaping --limit 4 --publish
+
+Confirm changed images report `published`, an S3 object key under
+`T0V0/ska/`, and an MQTT topic. In PostgreSQL, inspect without printing full
+provider metadata:
+
+    docker compose exec postgres psql \
+      -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
+      "SELECT source_stream_id, last_provider_image_marker,
+              last_download_timestamp, ema_download_period
+       FROM source_stream ss JOIN site s USING (site_id)
+       WHERE s.network_id='ska'
+       ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 10;"
+
+After a failed HEAD or download, verify the same stream is not selected again
+until at least 300 seconds after `last_freshness_query_timestamp`. An unchanged
+successful stream is governed by both that freshness-query guard and
+`last_download_timestamp + max(300 seconds, 0.7 * ema_download_period)`.
+
+4. Monitored worker
+-------------------
+
+    just ingestion-test-skaping 20m staggered
+
+The recipe prints its screen session and log. Confirm Prometheus target
+`skaping-worker-host-benchmark` is up on port 8015 and open the provisioned
+`Skaping ingestion worker` dashboard through the existing Grafana tunnel.
+Confirm all displayed worker queries are filtered to `source_network="ska"`.
+
+Check provider refresh and download outcomes, job and five-minute throughput,
+source/derived metadata percentiles, external/S3 MB/s, provider-to-download
+latency, transformation, S3, MQTT, and controlled failures. `Last-Modified`
+represents provider storage availability, not guaranteed capture time.
+
+5. Acceptance
+-------------
+
+Review:
+
+    git diff --check
+    git status --short
+
+Accept checkpoint 11 only after the bounded publication and provider-filtered
+dashboard behave as described.

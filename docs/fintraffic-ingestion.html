@@ -42,7 +42,7 @@
   </style>
 </head>
 <body>
-  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a><a href="fintraffic-ingestion.html" aria-current="page">Fintraffic ingestion</a></nav>
+  <nav aria-label="Slides"><a href="./">Windy discovery</a><a href="fintraffic.html">Fintraffic discovery</a><a href="skaping.html">Skaping discovery</a><a href="ingestion.html">Windy ingestion</a><a href="fintraffic-ingestion.html" aria-current="page">Fintraffic ingestion</a><a href="skaping-ingestion.html">Skaping ingestion</a></nav>
   <main>
     <header>
       <div>
@@ -72,11 +72,9 @@
             <tr><td>Provider marker unchanged</td><td>11,736</td></tr>
             <tr><td>Image download error</td><td>1,488</td></tr>
             <tr><td>Invalid image</td><td>26</td></tr>
-            <tr><td>Provider preset missing/error</td><td>11</td></tr>
+            <tr><td>Freshness query error</td><td>11</td></tr>
           </tbody>
         </table>
-        <div class="detail"><strong>Failure interpretation.</strong> A provider error means a due registered preset was absent from the current bulk freshness snapshot. A download error occurs later, when its current Fintraffic JPEG URL cannot be retrieved or its <code>Last-Modified</code> value cannot validate the bulk marker. These failures renew the freshness-attempt timestamp and are retried only when the stream becomes due again.</div>
-        <p class="note">Values are Prometheus estimates over 15:13:45–15:43:45 UTC. MB/s uses decimal megabytes of completed HTTP image bodies and successful S3 PUT payloads, excluding protocol overhead. Pipeline stages describe the same images and must not be added.</p>
         <p class="note">Image sizes must not be confused: the p90 downloaded source image is 497 kB, whereas 47.6 kB is the p90 transformed image subsequently uploaded to S3. The historical metrics contain a transformed-image size histogram rather than a histogram restricted to successful S3 PUTs; only about 0.17 fewer S3 uploads than transformed images occurred per five minutes.</p>
       </section>
       <div class="stack">
