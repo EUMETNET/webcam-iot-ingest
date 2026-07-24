@@ -10,6 +10,10 @@ The three workers run independently and restart only after unexpected failure.
 This observation does not deliberately inject failures or perform restart,
 restore, or recovery drills.
 
+Database pools are limited to 64 connections for Windy, 24 for Fintraffic,
+and 8 for Skaping. The combined ceiling of 96 leaves a small PostgreSQL
+reserve for monitoring, discovery, maintenance, and administrative access.
+
 Discovery is live (not dry-run), sequentially ordered Windy, Fintraffic, then
 Skaping, and scheduled daily at 12:00 UTC. S3 cleanup runs daily at 00:15 UTC
 and removes canonical image objects older than 24 hours. A database backup

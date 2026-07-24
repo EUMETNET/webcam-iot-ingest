@@ -572,3 +572,9 @@ Systemd still uses `Restart=on-failure` for unattended continuity, but no
 failure is deliberately injected during this observation. Restart, recovery,
 outbox, reboot, and restore drills remain separate checkpoint-13 acceptance
 work.
+
+The first launch used database-pool ceilings of 64, 64, and 16 for Windy,
+Fintraffic, and Skaping. Their combined capacity exhausted PostgreSQL
+connections and caused repeated ingestion epoch `OperationalError` failures.
+The run was stopped and the ceilings were corrected to 64, 24, and 8 before
+restarting the four-day observation.

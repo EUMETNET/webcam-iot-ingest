@@ -164,7 +164,7 @@ checkpoint13-ingest network:
             module="ingestion.fintraffic.worker"
             max_jobs=3000
             threads=100
-            pool_size=64
+            pool_size=24
             port=8014
             network_args=()
             provider_env=(
@@ -177,7 +177,7 @@ checkpoint13-ingest network:
             module="ingestion.skaping.worker"
             max_jobs=100
             threads=16
-            pool_size=16
+            pool_size=8
             port=8015
             network_args=()
             provider_env=(
