@@ -78,6 +78,32 @@ class DiscoveryMetricsConfig:
 
 
 @dataclass(frozen=True)
+class BatchMetricsConfig:
+    enabled: bool
+    gateway_url: str
+    push_timeout_s: float
+
+    @classmethod
+    def from_environment(cls) -> "BatchMetricsConfig":
+        enabled_value = os.getenv("BATCH_METRICS_ENABLED", "true").lower()
+        if enabled_value not in {"true", "false"}:
+            raise ValueError("BATCH_METRICS_ENABLED must be true or false")
+        config = cls(
+            enabled=enabled_value == "true",
+            gateway_url=os.getenv(
+                "BATCH_METRICS_GATEWAY_URL",
+                os.getenv("DISCOVERY_METRICS_GATEWAY_URL", "http://localhost:9091"),
+            ).rstrip("/"),
+            push_timeout_s=float(os.getenv("BATCH_METRICS_PUSH_TIMEOUT_S", "5")),
+        )
+        if not config.gateway_url.startswith(("http://", "https://")):
+            raise ValueError("batch metrics gateway URL must use HTTP or HTTPS")
+        if config.push_timeout_s <= 0:
+            raise ValueError("batch metrics push timeout must be positive")
+        return config
+
+
+@dataclass(frozen=True)
 class AltitudeConfig:
     enabled: bool
     provider_url: str

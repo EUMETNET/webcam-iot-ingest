@@ -1,0 +1,48 @@
+groups:
+  - name: webcam-infrastructure
+    rules:
+      - alert: WebcamScrapeTargetDown
+        expr: up{job=~"postgres-exporter|node-exporter|cadvisor|mqtt-exporter"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Infrastructure scrape target {{ $labels.job }} is down"
+      - alert: WebcamCheckpointWorkerDown
+        expr: up{job=~"checkpoint12-.*-worker"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Checkpoint-12 worker {{ $labels.job }} is down"
+      - alert: WebcamHostDiskSpaceLow
+        expr: |
+          (
+            node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+            /
+            node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}
+          ) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host filesystem has less than 10% free space"
+      - alert: WebcamPostgreSQLDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL exporter cannot reach PostgreSQL"
+      - alert: WebcamCleanupFailed
+        expr: increase(webcam_batch_run_total{batch_job="spool_cleanup",result="failure"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "The S3 spool cleanup job failed"
+      - alert: WebcamDatabaseBackupFailed
+        expr: increase(webcam_batch_run_total{batch_job="database_backup",result="failure"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "The PostgreSQL S3 backup job failed"

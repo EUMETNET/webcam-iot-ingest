@@ -120,6 +120,51 @@ services:
     depends_on:
       - mqtt
 
+  postgres-exporter:
+    profiles: ["monitoring"]
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.19.1
+    # Compose secrets are bind-mounted with the source file's 0600 mode.
+    # Root is used only so the exporter can read that file without duplicating
+    # the database password into a less restricted credential.
+    user: "0:0"
+    environment:
+      DATA_SOURCE_URI: postgres:5432/${DATABASE_NAME:-webcam_ingestion}?sslmode=disable
+      DATA_SOURCE_USER: ${DATABASE_USER:-webcam_ingestion}
+      DATA_SOURCE_PASS_FILE: /run/secrets/database_password
+    secrets:
+      - database_password
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  node-exporter:
+    profiles: ["monitoring"]
+    image: quay.io/prometheus/node-exporter:v1.11.1
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    restart: unless-stopped
+
+  cadvisor:
+    profiles: ["monitoring"]
+    image: ghcr.io/google/cadvisor:v0.57.0
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    restart: unless-stopped
+
   prometheus:
     profiles: ["monitoring"]
     image: prom/prometheus:v3.13.1
@@ -127,11 +172,15 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - pushgateway
+      - postgres-exporter
+      - node-exporter
+      - cadvisor
 
   pushgateway:
     profiles: ["monitoring"]

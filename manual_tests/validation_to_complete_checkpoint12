@@ -1,0 +1,78 @@
+Checkpoint 12 owner validation
+==============================
+
+1. Validate code, configuration, dashboards, and systemd syntax:
+
+    UV_CACHE_DIR=/tmp/webcam-uv-cache uv run pytest -q tests \
+      --ignore=tests/test_upload.py
+    docker compose --env-file .env --profile monitoring config --quiet
+    systemd-analyze verify \
+      deployment/systemd/checkpoint12-validation/*.service \
+      deployment/systemd/checkpoint12-validation/*.timer
+    git diff --check
+
+2. Start monitoring and confirm infrastructure exporters:
+
+    just monitoring
+    docker compose --env-file .env --profile monitoring ps
+
+Open Grafana through the existing port-3000 tunnel. Confirm the
+Infrastructure health dashboard shows PostgreSQL, node, cAdvisor, and MQTT
+targets up.
+
+3. Inspect cleanup without deleting:
+
+    just cleanup-spool 1 --dry-run
+    just cleanup-spool 24 --dry-run --limit 10 --show-keys
+
+Confirm backup/unknown objects are reported only as skipped and that eligible
+counts and volumes are plausible. Perform a bounded deletion only after
+reviewing its scope:
+
+    just cleanup-spool 24 --limit 10
+
+Confirm the Operational batch jobs dashboard records the run.
+
+4. Create and verify a database backup:
+
+    just backup-database --dry-run
+    just backup-database
+
+Confirm the returned key starts with `backups/postgresql/`, size is non-zero,
+SHA-256 is present, and the dashboard records a successful backup. No restore
+is part of checkpoint 12.
+
+5. Review and install only the validation units:
+
+    sudo cp deployment/systemd/checkpoint12-validation/webcam-checkpoint12-* \
+      /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemctl start webcam-checkpoint12-infrastructure.service
+    sudo systemctl start webcam-checkpoint12-ingestion@windy.service
+    sudo systemctl start webcam-checkpoint12-ingestion@fintraffic.service
+    sudo systemctl start webcam-checkpoint12-ingestion@skaping.service
+    sudo systemctl enable --now webcam-checkpoint12-cycle.timer
+
+Confirm worker metrics appear on ports 8113, 8114, and 8115. Confirm Windy is
+restricted to Denmark and each worker selects at most five jobs per epoch.
+
+6. Observe at least two completed maintenance cycles:
+
+    systemctl list-timers webcam-checkpoint12-cycle.timer
+    systemctl status webcam-checkpoint12-cycle.service
+    journalctl -u webcam-checkpoint12-cycle.service
+    journalctl -u 'webcam-checkpoint12-discovery@*.service'
+    journalctl -u webcam-checkpoint12-spool-cleanup.service
+    journalctl -u webcam-checkpoint12-db-backup.service
+
+Confirm cycles do not overlap, discovery is Windy then Fintraffic then
+Skaping, failures do not suppress later jobs, cleanup uses one hour, and each
+cycle creates a timestamped database backup.
+
+Stop after validation and record owner approval. Full-scale production
+orchestration and recovery drills belong to checkpoint 13.
+
+The legacy `tests/test_upload.py` suite is excluded because its fixture still
+patches the removed `api.main.IngestToPipeline` symbol. This is a pre-existing
+test-maintenance issue in the legacy FastAPI upload path, not a checkpoint-12
+failure.

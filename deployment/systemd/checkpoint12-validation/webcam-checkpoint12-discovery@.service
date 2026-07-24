@@ -1,0 +1,9 @@
+[Unit]
+Description=Checkpoint-12 dry-run discovery for %i
+Requires=webcam-checkpoint12-infrastructure.service
+After=webcam-checkpoint12-infrastructure.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/home/codexuser/.local/bin/just checkpoint12-discover %i

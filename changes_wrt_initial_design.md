@@ -473,3 +473,82 @@ requests per second while retaining 100 worker threads. Production defaults
 are unchanged. The experiment must be evaluated through throttling, controlled
 errors, epoch duration, provider latency, database-pool waiting, and payload
 throughput before any operational default is changed.
+
+### 2026-07-24 — Exact-age spool cleanup
+
+**Affected component:** S3 image retention and checkpoint 12.
+
+The initial design describes a daily deletion of complete date prefixes older
+than the previous UTC day, giving an effective retention between roughly 24
+and 48 hours. The implemented cleanup accepts an exact positive age in hours
+and compares it with the download timestamp encoded in each canonical image
+key. This permits the one-hour accelerated checkpoint validation while a
+24-hour production invocation remains available.
+
+Cleanup only recognizes the configured S3 prefix followed by the canonical
+transformation/network/date/image layout. Unknown objects, malformed keys, and
+the database-backup namespace are skipped. Dry-run and bounded deletion are
+implementation safety controls not stated in the initial design.
+
+### 2026-07-24 — PostgreSQL backups use the image-spool S3 tenancy
+
+**Affected component:** database backup.
+
+The initial design requires timestamped full PostgreSQL dumps in configured
+backup storage but does not select a concrete storage backend or key layout.
+The pilot stores custom-format dumps in the configured EWC S3 bucket under:
+
+    backups/postgresql/YYYY/MM/DD/webcam_ingestion_YYYYMMDDTHHMMSSZ.dump
+
+The namespace cannot match a canonical image key and is therefore excluded
+from spool cleanup. Each upload records SHA-256 metadata and is verified by
+content length and checksum metadata with a subsequent HEAD request.
+
+For local validation, `pg_dump` runs inside the PostgreSQL 16 container so its
+major version matches the server. The dump bytes are then uploaded by the
+host-side Python command. Restoration is not automated.
+
+### 2026-07-24 — Checkpoint-12 orchestration is deliberately bounded
+
+**Affected component:** checkpoint sequencing and systemd.
+
+Checkpoint 12 validates non-overlapping systemd scheduling with a ten-minute
+cycle rather than installing the initial daily production policy. Discovery
+is dry-run and sequential in Windy, Fintraffic, Skaping order; Windy is
+restricted to Denmark. Ingestion remains continuous but each provider worker
+selects at most five jobs per epoch. Real cleanup uses a one-hour cutoff and a
+full database backup is created after every discovery sequence.
+
+These accelerated units are kept in a validation-only directory. Full
+provider scope, daily production schedules, secret-file deployment, and
+operational recovery drills move to checkpoint 13.
+
+### 2026-07-24 — Windy benchmark pacing restored after experiment
+
+**Affected component:** detached Windy benchmark recipe.
+
+The 0.001-second request-start pacing experiment produced no explicit HTTP 429
+throttling and shortened mean epoch duration by about 10 percent relative to
+the comparable 0.01-second run. Median provider-marker-to-download latency
+improved, but p95 latency changed little, while controlled freshness-query
+errors increased from roughly 20 to 127 per five minutes.
+
+The benchmark override is therefore restored to 0.01 seconds. The normal
+environment/production default remains unchanged at 0.1 seconds.
+
+### 2026-07-24 — Distributed Windy scaling deferred to checkpoint 14
+
+**Affected component:** deployment scaling and checkpoint sequencing.
+
+The single-VM benchmarks do not establish whether the remaining Windy
+constraint is per token, per source IP, per VM, or provider-wide. A separate
+checkpoint 14 will compare the single-VM baseline with at least two VMs using
+distinct authorized tokens and source IP addresses.
+
+Windy cameras must be partitioned deterministically and exclusively: one
+active owner per stream, with no implicit duplicate processing. PostgreSQL
+remains the shared authoritative state store. The experiment begins with the
+validated 0.01-second request pacing on each VM and compares throughput,
+freshness failures, throttling, epoch duration, database contention, and
+provider-marker latency. This work is deliberately excluded from checkpoint
+13, which remains focused on single-VM production orchestration and recovery.

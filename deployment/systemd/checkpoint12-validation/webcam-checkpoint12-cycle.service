@@ -1,0 +1,8 @@
+[Unit]
+Description=Accelerated checkpoint-12 maintenance validation cycle
+Requires=webcam-checkpoint12-infrastructure.service
+After=webcam-checkpoint12-infrastructure.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint12-validation/run-cycle

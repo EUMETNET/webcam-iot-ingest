@@ -1,0 +1,97 @@
+{
+  "annotations": {"list": []},
+  "description": "Persistent Pushgateway metrics for S3 spool cleanup and PostgreSQL backup.",
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Last successful completion of each operational batch job.",
+      "fieldConfig": {"defaults": {"unit": "dateTimeFromNow"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
+      "id": 1,
+      "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "webcam_batch_last_success_unixtime * 1000", "legendFormat": "{{batch_job}}"}],
+      "title": "Last successful runs",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Latest successful end-to-end duration.",
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
+      "id": 2,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "webcam_batch_last_duration_seconds", "legendFormat": "{{batch_job}}"}],
+      "title": "Latest run duration",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Configured exact image-age cutoff and latest verified dump size.",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 4, "w": 8, "x": 16, "y": 0},
+      "id": 3,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "webcam_spool_cleanup_retention_hours", "legendFormat": "retention hours"},
+        {"expr": "webcam_database_backup_last_size_bytes", "legendFormat": "backup bytes"}
+      ],
+      "title": "Current batch state",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Counters persisted across runs. A dry-run reports eligible objects but no deleted objects.",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "id": 4,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "webcam_batch_items_total", "legendFormat": "{{batch_job}} · {{outcome}}"}],
+      "title": "Objects and backups processed",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Cumulative eligible/deleted image volume and produced/stored backup volume.",
+      "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "id": 5,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "webcam_batch_bytes_total", "legendFormat": "{{batch_job}} · {{outcome}}"}],
+      "title": "Processed volume",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Listing/deletion for cleanup and dump/upload for backup.",
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "id": 6,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (batch_job,stage,le) (webcam_batch_stage_duration_seconds_bucket))", "legendFormat": "{{batch_job}} · {{stage}}"}],
+      "title": "Batch-stage duration p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Success and failure counters accumulated through the Pushgateway.",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "id": 7,
+      "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+      "targets": [{"expr": "webcam_batch_run_total", "legendFormat": "{{batch_job}} · {{result}}"}],
+      "title": "Batch outcomes",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["webcam", "operations", "cleanup", "backup"],
+  "templating": {"list": [{"current": {"text": "Prometheus", "value": "Prometheus"}, "hide": 2, "name": "DS_PROMETHEUS", "query": "prometheus", "type": "datasource"}]},
+  "time": {"from": "now-24h", "to": "now"},
+  "timezone": "browser",
+  "title": "Operational batch jobs",
+  "uid": "webcam-operational-batches",
+  "version": 1
+}

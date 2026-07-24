@@ -408,35 +408,79 @@ Expected validation:
 
 Stop after validation and wait for approval.
 
-Checkpoint 12 - Pilot orchestration, backup, cleanup, and recovery
------------------------------------------------------------------
+Checkpoint 12 - Bounded orchestration, backup, cleanup, and infrastructure
+-----------------------------------------------------------------------------
 
 Objectives:
 
-- Run discovery sequentially in the order Windy, Fintraffic, Skaping.
-- Run separate long-lived ingestion workers per provider.
-- Add scheduled S3 spool cleanup.
-- Add timestamped PostgreSQL backup commands and metrics.
-- Add production secret-file paths and deployment documentation.
-- Add systemd services and timers only after the underlying commands have
-  stable interfaces.
-- Add restart, failure, backup, and recovery drills.
+- Run dry-run discovery sequentially in the order Windy, Fintraffic, Skaping,
+  restricting Windy to Denmark during accelerated validation.
+- Run separate continuous but five-job-bounded ingestion workers per provider.
+- Add exact-age S3 spool cleanup, safety controls, metrics, and dashboard.
+- Add timestamped full PostgreSQL backup to S3, metrics, and dashboard.
+- Add validation-only systemd services and a non-overlapping ten-minute timer.
 - Add standard infrastructure exporters and Prometheus scrape targets for
   PostgreSQL, the host, and containers (postgres_exporter, node_exporter, and
   cAdvisor), plus explicit `up`/health coverage for every provider worker.
 - Add an infrastructure-health Grafana dashboard and alerts for failed scrape
   targets, unhealthy workers, PostgreSQL, MQTT, and storage reachability.
-- Document restoration as an explicitly approved maintenance operation.
-- Never automate destructive database restoration or volume deletion.
+- Document that the one-hour cleanup and ten-minute schedule are validation
+  policy only. Production orchestration and recovery are deferred.
 
 Expected validation:
 
     docker compose --env-file .env config
-    uv run pytest
+    uv run pytest tests --ignore=tests/test_upload.py
     uv run python -m database.database_backup --help
-    systemd-analyze verify deployment/systemd/*.service deployment/systemd/*.timer
+    systemd-analyze verify deployment/systemd/checkpoint12-validation/*.service deployment/systemd/checkpoint12-validation/*.timer
     git diff --check
     git status --short
+
+Checkpoint 13 - Production orchestration and operational recovery
+----------------------------------------------------------------
+
+Objectives:
+
+- Replace bounded validation workers with full configured provider scopes.
+- Replace accelerated timers and retention with production schedules.
+- Add production secret-file paths and deployment documentation.
+- Exercise restart, failure, outbox, reboot, backup, and recovery drills.
+- Restore a selected dump only as an explicitly approved maintenance action.
+- Never automate destructive database restoration or volume deletion.
+
+Checkpoint 14 - Distributed Windy worker scaling
+------------------------------------------------
+
+Objectives:
+
+- Evaluate whether Windy throughput is constrained per API token, source IP,
+  or VM rather than by a provider-wide backend.
+- Run Windy ingestion from at least two VMs with distinct source IP addresses
+  and distinct authorized Windy tokens.
+- Partition the Windy source-stream set deterministically so that one active
+  worker owns each camera and no camera is processed concurrently by two VMs.
+- Keep PostgreSQL as the shared authoritative registry and ingestion-state
+  store.
+- Give each worker a stable identity and separate health/metrics target.
+- Retain the validated 0.01-second request-start pacing per VM initially.
+- Bound and compare database connection pressure across the single-VM and
+  multi-VM configurations.
+- Compare aggregate epoch duration, completed checks, publications,
+  freshness-query errors, explicit throttling, external/S3 throughput, and
+  provider-marker-to-download P50/P95 latency.
+- Accept distributed operation only if aggregate throughput or latency
+  improves materially without duplicate ownership, higher failure rates,
+  database contention, or provider-policy violations.
+
+Expected validation:
+
+- Demonstrate that the configured partitions are disjoint and cover the
+  intended Windy scope.
+- Stop one VM and confirm that its partition is not silently processed by
+  another worker unless an explicit reassignment is performed.
+- Compare an equivalent single-VM baseline and two-VM run over the same
+  observation duration and workload.
+- Record token/API-policy assumptions without committing credentials.
 
 Final pilot acceptance criteria
 -------------------------------

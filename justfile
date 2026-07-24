@@ -57,6 +57,91 @@ discover-skaping *args:
     exec uv run --env-file .env python -m \
         discovery.skaping.skaping_discovery_workflow "$@"
 
+# Inspect or delete canonical derived-image objects older than an exact age.
+# Example: just cleanup-spool 24 --dry-run
+cleanup-spool older_than_hours *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    older_than_hours="$1"
+    shift
+    exec env UV_CACHE_DIR=/tmp/webcam-uv-cache \
+        uv run --env-file .env python -m storage.s3_spool_cleanup \
+        --older-than-hours "$older_than_hours" "$@"
+
+# Create a timestamped full PostgreSQL dump in the configured S3 bucket.
+# Add --dry-run to validate configuration and inspect the future key.
+backup-database *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec env UV_CACHE_DIR=/tmp/webcam-uv-cache PG_DUMP_MODE=docker-compose \
+        uv run --env-file .env python -m database.database_backup "$@"
+
+# One dry-run discovery used by the accelerated checkpoint-12 systemd chain.
+checkpoint12-discover network:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "$1" in
+        windy)
+            exec env WINDY_MEMBER_COUNTRIES=DK \
+                UV_CACHE_DIR=/tmp/webcam-uv-cache \
+                uv run --env-file .env python -m \
+                discovery.windy.windy_discovery_workflow --dry-run
+            ;;
+        fintraffic)
+            exec env UV_CACHE_DIR=/tmp/webcam-uv-cache \
+                uv run --env-file .env python -m \
+                discovery.fintraffic.fintraffic_discovery_workflow --dry-run
+            ;;
+        skaping)
+            exec env UV_CACHE_DIR=/tmp/webcam-uv-cache \
+                uv run --env-file .env python -m \
+                discovery.skaping.skaping_discovery_workflow --dry-run
+            ;;
+        *)
+            echo "network must be windy, fintraffic, or skaping" >&2
+            exit 2
+            ;;
+    esac
+
+# Checkpoint-12 validation worker: deliberately bounded, not production policy.
+checkpoint12-ingest network limit="5":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    network="$1"
+    limit="$2"
+    case "$network" in
+        windy)
+            module="ingestion.worker"
+            network_args=(--network win --countries DK)
+            port=8113
+            ;;
+        fintraffic)
+            module="ingestion.fintraffic.worker"
+            network_args=()
+            port=8114
+            ;;
+        skaping)
+            module="ingestion.skaping.worker"
+            network_args=()
+            port=8115
+            ;;
+        *)
+            echo "network must be windy, fintraffic, or skaping" >&2
+            exit 2
+            ;;
+    esac
+    exec env \
+        MQTT_HOST=127.0.0.1 \
+        INGESTION_HEALTH_HOST=0.0.0.0 \
+        INGESTION_HEALTH_PORT="$port" \
+        INGESTION_WORKER_THREADS="$limit" \
+        INGESTION_DATABASE_POOL_SIZE="$limit" \
+        INGESTION_MAX_JOBS_PER_EPOCH="$limit" \
+        INGESTION_IDLE_DELAY_S=0 \
+        UV_CACHE_DIR=/tmp/webcam-uv-cache \
+        uv run --env-file .env python -m "$module" \
+        --max-jobs "$limit" --stagger-initial-polling "${network_args[@]}"
+
 # Run a bounded Fintraffic ingestion sample. Add --dry-run to avoid S3/MQTT.
 ingest-fintraffic *args:
     #!/usr/bin/env bash
@@ -136,7 +221,7 @@ _ingestion-test-foreground scope run_seconds mode="":
     fi
     exec env \
         MQTT_HOST=127.0.0.1 \
-        WINDY_INGESTION_REQUEST_DELAY_S=0.001 \
+        WINDY_INGESTION_REQUEST_DELAY_S=0.01 \
         INGESTION_WORKER_THREADS=100 \
         INGESTION_DATABASE_POOL_SIZE=64 \
         INGESTION_MAX_JOBS_PER_EPOCH=30000 \

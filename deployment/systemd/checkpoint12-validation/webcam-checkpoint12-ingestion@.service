@@ -1,0 +1,15 @@
+[Unit]
+Description=Bounded checkpoint-12 webcam ingestion worker for %i
+Requires=webcam-checkpoint12-infrastructure.service
+After=webcam-checkpoint12-infrastructure.service network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/home/codexuser/.local/bin/just checkpoint12-ingest %i 5
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

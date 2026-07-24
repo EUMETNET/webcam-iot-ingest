@@ -73,6 +73,38 @@ The PostgreSQL container initializes the pilot `network`, `site`, and
 data volume. Normal container restarts preserve the volume and its schema.
 Avoid `just destroy` unless deleting all local service data is intentional.
 
+## Spool cleanup and database backup
+
+Inspect canonical derived-image objects older than an exact number of hours:
+
+```bash
+just cleanup-spool 24 --dry-run
+```
+
+Remove the qualifying image objects:
+
+```bash
+just cleanup-spool 24
+```
+
+Only keys matching the configured prefix and canonical
+`T0V0/{network}/{YYYY}/{MM}/{DD}/{HH}/...jpg` layout are eligible. Unknown
+keys and database backups are never deleted. Use `--limit N` for a bounded
+validation deletion, and combine it with `--show-keys` during dry-run to
+inspect the exact bounded scope.
+
+Create a full PostgreSQL custom-format dump and upload it to the configured S3
+bucket:
+
+```bash
+just backup-database --dry-run
+just backup-database
+```
+
+Backups use timestamped keys below
+`backups/postgresql/YYYY/MM/DD/`. The command verifies the stored length and
+SHA-256 metadata after upload. It does not implement restoration.
+
 ## Webcam discovery
 
 Run a complete provider discovery pass with:
@@ -144,6 +176,10 @@ just ingest-skaping --limit 4 --publish
 | `BUCKET_SECRET_ACCESS_KEY` | — | S3 secret key |
 | `BUCKET_ENDPOINT_URL` | — | S3 endpoint URL |
 | `BUCKET_OBJECT_URL` | — | S3 object URL |
+| `BATCH_METRICS_ENABLED` | `true` | Publish cleanup and backup metrics through Pushgateway |
+| `BATCH_METRICS_GATEWAY_URL` | `http://localhost:9091` | Operational batch Pushgateway |
+| `DATABASE_BACKUP_S3_PREFIX` | `backups/postgresql` | S3 namespace for timestamped database dumps |
+| `PG_DUMP_MODE` | `docker-compose` in `.env.example` | Run the server-matched `pg_dump` inside the PostgreSQL container |
 
 ## Monitoring
 
@@ -237,6 +273,9 @@ The benchmark keeps two independent timing controls explicit:
 | Prometheus | 3.13.1 | `docker-compose.yml` image tag |
 | Prometheus Pushgateway | 1.11.3 | `docker-compose.yml` image tag |
 | Grafana OSS | 11.2.0 | `docker-compose.yml` image tag |
+| postgres_exporter | 0.19.1 | `docker-compose.yml` image tag |
+| node_exporter | 1.11.1 | `docker-compose.yml` image tag |
+| cAdvisor | 0.57.0 | `docker-compose.yml` image tag |
 | just | 1.57.0 | `justfile` and `install-just.sh` |
 
 The Compose image tags make monitoring recreation deterministic at the release
@@ -248,6 +287,50 @@ three discovery providers are provisioned automatically. Short-lived discovery j
 their persistent batch metrics to the locally bound Pushgateway on port 9091;
 Prometheus scrapes it and Grafana displays the retained results after the
 discovery process exits.
+
+The monitoring profile also starts PostgreSQL, host, and container exporters.
+Grafana provisions an **Infrastructure health** dashboard and an
+**Operational batch jobs** dashboard. Alert rules cover unavailable
+infrastructure targets, unavailable checkpoint workers, low host disk space,
+PostgreSQL failure, and cleanup or backup failures.
+
+## Checkpoint-12 systemd validation
+
+The units in `deployment/systemd/checkpoint12-validation/` are deliberately
+accelerated validation material, not production policy. They run:
+
+- three continuous ingestion workers, bounded to five selected jobs per epoch;
+- Windy ingestion and discovery restricted to Denmark;
+- sequential dry-run discovery for Windy, Fintraffic, and Skaping;
+- real cleanup of canonical image objects older than one hour;
+- a real full PostgreSQL backup to S3;
+- a maintenance cycle every ten minutes, measured from completion so cycles
+  cannot overlap.
+
+Install the units only on the current pilot VM after reviewing their absolute
+working-directory and executable paths:
+
+```bash
+sudo cp deployment/systemd/checkpoint12-validation/webcam-checkpoint12-* \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl start webcam-checkpoint12-infrastructure.service
+sudo systemctl start webcam-checkpoint12-ingestion@windy.service
+sudo systemctl start webcam-checkpoint12-ingestion@fintraffic.service
+sudo systemctl start webcam-checkpoint12-ingestion@skaping.service
+sudo systemctl enable --now webcam-checkpoint12-cycle.timer
+```
+
+Inspect the accelerated cycle with:
+
+```bash
+systemctl list-timers webcam-checkpoint12-cycle.timer
+systemctl status webcam-checkpoint12-cycle.service
+journalctl -u webcam-checkpoint12-cycle.service
+```
+
+Full-scale production scheduling and operational recovery drills belong to
+checkpoint 13.
 
 ## Running tests
 

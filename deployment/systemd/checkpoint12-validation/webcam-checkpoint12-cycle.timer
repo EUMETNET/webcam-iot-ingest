@@ -1,0 +1,11 @@
+[Unit]
+Description=Run checkpoint-12 validation cycle every ten minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+Persistent=true
+Unit=webcam-checkpoint12-cycle.service
+
+[Install]
+WantedBy=timers.target
