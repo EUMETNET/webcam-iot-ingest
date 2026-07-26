@@ -46,3 +46,4 @@ data/
 
 # macOS
 .DS_Store
+/changes_wrt_initial_design.md
