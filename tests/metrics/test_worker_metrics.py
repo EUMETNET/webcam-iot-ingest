@@ -57,6 +57,18 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     metrics.observe_event(
         "failure", {"stage": "s3_upload", "reason": "s3_upload"}
     )
+    metrics.observe_event(
+        "freshness_batch",
+        {
+            "requested_streams": 51,
+            "returned_streams": 50,
+            "missing_streams": 1,
+            "successful_requests": 1,
+            "failed_requests": 1,
+            "throttled_requests": 1,
+            "batch_size": 50,
+        },
+    )
 
     body = generate_latest(metrics.registry)
     for metric_name in (
@@ -78,6 +90,9 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         b"webcam_ingestion_derived_image_metadata_total",
         b"webcam_ingestion_mqtt_payload_size_bytes",
         b"webcam_ingestion_stage_failure_total",
+        b"webcam_ingestion_freshness_batch_total",
+        b"webcam_ingestion_freshness_batch_stream_total",
+        b"webcam_ingestion_freshness_batch_size",
     ):
         assert metric_name in body
     assert b"source_stream_id" not in body

@@ -83,6 +83,113 @@ def test_refresh_observability_separates_gate_http_and_total() -> None:
     assert all(duration >= 0 for _, _, duration in events)
 
 
+def test_primes_fifty_id_batches_and_serves_cached_references() -> None:
+    requested_batches: list[list[str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested = request.url.params["webcamIds"].split(",")
+        requested_batches.append(requested)
+        return httpx.Response(
+            200,
+            json={
+                "total": len(requested),
+                "webcams": [
+                    {
+                        "webcamId": provider_id,
+                        "lastUpdatedOn": f"marker-{provider_id}",
+                        "images": {
+                            "current": {
+                                "preview": f"https://images.example/{provider_id}.jpg"
+                            }
+                        },
+                    }
+                    for provider_id in requested
+                ],
+            },
+        )
+
+    client = client_for(handler)
+    result = client.refresh(
+        [(str(index), "preview") for index in range(51)],
+        max_workers=2,
+    )
+
+    assert sorted(map(len, requested_batches)) == [1, 50]
+    assert result.requested_streams == 51
+    assert result.returned_streams == 51
+    assert result.successful_requests == 2
+    assert result.failed_requests == 0
+    assert client.get_current_image("50", "preview").marker == "marker-50"
+
+
+def test_missing_batched_id_becomes_a_controlled_provider_error() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"total": 0, "webcams": []})
+
+    client = client_for(handler)
+    result = client.refresh([("42", "preview")], max_workers=1)
+
+    assert result.missing_streams == 1
+    with pytest.raises(WindyImageAccessError, match="absent"):
+        client.get_current_image("42", "preview")
+
+
+def test_failed_batch_does_not_prevent_other_batches_from_being_cached() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested = request.url.params["webcamIds"].split(",")
+        if "0" in requested:
+            return httpx.Response(503)
+        return httpx.Response(
+            200,
+            json={
+                "total": len(requested),
+                "webcams": [
+                    {
+                        "webcamId": provider_id,
+                        "lastUpdatedOn": "marker",
+                        "images": {
+                            "current": {
+                                "preview": "https://images.example/current.jpg"
+                            }
+                        },
+                    }
+                    for provider_id in requested
+                ],
+            },
+        )
+
+    client = client_for(handler)
+    result = client.refresh(
+        [(str(index), "preview") for index in range(51)],
+        max_workers=2,
+    )
+
+    assert result.successful_requests == 1
+    assert result.failed_requests == 1
+    assert result.returned_streams == 1
+    assert client.get_current_image("50", "preview").marker == "marker"
+    with pytest.raises(WindyImageAccessError, match="request failed"):
+        client.get_current_image("0", "preview")
+
+
+def test_retries_invalid_batched_freshness_response_when_configured() -> None:
+    attempts = 0
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(200, json={"webcams": "invalid"})
+        return httpx.Response(200, json={"total": 0, "webcams": []})
+
+    client = client_for(handler, freshness_query_retry_count=1)
+    result = client.refresh([("42", "preview")], max_workers=1)
+
+    assert attempts == 2
+    assert result.successful_requests == 1
+    assert result.missing_streams == 1
+
+
 @pytest.mark.parametrize(
     "payload",
     [metadata(99), {"webcams": []}, {"webcamId": 42}, []],

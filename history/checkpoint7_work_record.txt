@@ -216,6 +216,34 @@ Future controlled benchmarks can explicitly enable them. Persistent provider
 failures incur one additional request and the configured backoff only when a
 retry count is nonzero. Image-download errors remain separately observable.
 
+Explicit-ID batch freshness experiment
+--------------------------------------
+
+The isolated `codex-windy-batched-freshness` branch adds an opt-in
+Fintraffic-style epoch snapshot. After due-job selection and optional initial
+staggering, the worker partitions the exact registered provider IDs into
+groups of at most 50 and requests Windy listings with the `webcamIds` filter
+and `include=images`. It does not use discovery countries or geographic discs.
+Each response supplies `lastUpdatedOn` and the current rendition URL; ordinary
+source jobs then read those references from the in-memory snapshot. An omitted
+ID becomes a controlled provider error for that epoch.
+
+The individual per-camera refresh remains the default. The alternative is
+enabled with `--batch-freshness`, or with the `batched` and
+`staggered-batched` just modes. Existing `provider_refresh` and `provider_http`
+metrics retain the same stage meanings as Fintraffic. Additional bounded
+metrics count batch requests, returned and missing streams, and batch sizes.
+
+A complete read-only probe over the pre-discovery registry selected 25,061
+due streams and resolved them with 502 successful requests in 5.377 seconds
+using 20 threads. It returned 24,551 references and omitted 510 IDs; a bounded
+comparison found that omitted IDs were unavailable from individual endpoints
+as well. A subsequent full discovery inactivated 519 old streams, supporting
+that interpretation. Live worker dry runs after discovery resolved 43 of 43
+Denmark streams in one batch and 200 of 200 France streams in four batches.
+Their complete image-validation epochs took 0.685 and 2.100 seconds,
+respectively, with no missing, failed, or throttled request.
+
 Checkpoint decision
 -------------------
 

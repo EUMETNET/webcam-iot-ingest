@@ -47,6 +47,25 @@ class WorkerMetrics:
             buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
             registry=self.registry,
         )
+        self.freshness_batches = Counter(
+            "webcam_ingestion_freshness_batch_total",
+            "Batched provider freshness requests",
+            ["source_network", "result"],
+            registry=self.registry,
+        )
+        self.freshness_batch_streams = Counter(
+            "webcam_ingestion_freshness_batch_stream_total",
+            "Streams represented in batched freshness results",
+            ["source_network", "result"],
+            registry=self.registry,
+        )
+        self.freshness_batch_size = Histogram(
+            "webcam_ingestion_freshness_batch_size",
+            "Number of requested streams per provider freshness batch",
+            ["source_network"],
+            buckets=(1, 5, 10, 20, 30, 40, 50),
+            registry=self.registry,
+        )
         self.job_duration = Histogram(
             "webcam_ingestion_source_job_duration_seconds",
             "End-to-end source job duration",
@@ -229,6 +248,33 @@ class WorkerMetrics:
             self.failures.labels(
                 self.source_network, str(values["stage"]), str(values["reason"])
             ).inc()
+        elif event == "freshness_batch":
+            successful = int(values["successful_requests"])
+            failed = int(values["failed_requests"])
+            throttled = int(values["throttled_requests"])
+            self.freshness_batches.labels(
+                self.source_network, "success"
+            ).inc(successful)
+            self.freshness_batches.labels(
+                self.source_network, "failure"
+            ).inc(max(0, failed - throttled))
+            self.freshness_batches.labels(
+                self.source_network, "throttled"
+            ).inc(throttled)
+            self.freshness_batch_streams.labels(
+                self.source_network, "returned"
+            ).inc(int(values["returned_streams"]))
+            self.freshness_batch_streams.labels(
+                self.source_network, "missing"
+            ).inc(int(values["missing_streams"]))
+            request_count = successful + failed
+            requested_streams = int(values["requested_streams"])
+            batch_size = int(values["batch_size"])
+            for request_index in range(request_count):
+                remaining = requested_streams - request_index * batch_size
+                self.freshness_batch_size.labels(self.source_network).observe(
+                    min(batch_size, remaining)
+                )
 
 
 def _bounded_format(value: object) -> str:

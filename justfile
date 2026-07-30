@@ -244,8 +244,8 @@ ingestion-test scope duration mode="":
         echo "duration must be a positive number followed by s, m, or h (for example 20m)" >&2
         exit 2
     fi
-    if [[ -n "$mode" && "$mode" != "staggered" ]]; then
-        echo "optional mode must be 'staggered'" >&2
+    if [[ -n "$mode" && "$mode" != "staggered" && "$mode" != "batched" && "$mode" != "staggered-batched" ]]; then
+        echo "optional mode must be 'staggered', 'batched', or 'staggered-batched'" >&2
         exit 2
     fi
     value="${duration::-1}"
@@ -275,11 +275,15 @@ _ingestion-test-foreground scope run_seconds mode="":
     mode="$3"
     countries=()
     stagger=()
+    batching=()
     if [[ "$scope" != "all_windy" ]]; then
         countries=(--countries "${scope^^}")
     fi
-    if [[ "$mode" == "staggered" ]]; then
+    if [[ "$mode" == "staggered" || "$mode" == "staggered-batched" ]]; then
         stagger=(--stagger-initial-polling)
+    fi
+    if [[ "$mode" == "batched" || "$mode" == "staggered-batched" ]]; then
+        batching=(--batch-freshness)
     fi
     exec env \
         MQTT_HOST=127.0.0.1 \
@@ -301,6 +305,7 @@ _ingestion-test-foreground scope run_seconds mode="":
             --run-for-seconds "$2" \
             --verbose \
             "${stagger[@]}" \
+            "${batching[@]}" \
             "${countries[@]}"
 
 # Run the Fintraffic worker for a duration in a detached, monitored screen.

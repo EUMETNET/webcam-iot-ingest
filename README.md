@@ -197,6 +197,7 @@ Run a detached, monitored Windy benchmark with
 
 ```bash
 just ingestion-test all_windy 20m
+just ingestion-test all_windy 100m staggered-batched
 ```
 
 `all_windy` selects every configured EUMETNET country and `20m` runs for 20
@@ -212,6 +213,13 @@ configurable window instead of creating a synchronized cold-start peak:
 ```bash
 just ingestion-test FR,DE 20m staggered
 ```
+
+Use `batched` to request freshness metadata for up to 50 explicitly selected
+Windy webcam IDs per listing request. Use `staggered-batched` to combine that
+path with the deterministic initial spread. The batch response supplies both
+`lastUpdatedOn` and the current image URL; an ID omitted by Windy becomes a
+controlled provider error for that epoch. The individual freshness path
+remains the default.
 
 Fintraffic has a separate worker, metrics endpoint, and Grafana dashboard, so
 it can run concurrently with Windy. For example:

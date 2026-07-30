@@ -16,6 +16,7 @@ from ingestion.worker import (
     run_worker,
 )
 from ingestion.worker_metrics import WorkerMetrics
+from ingestion.windy.windy_image_access import WindyBatchFreshnessResult
 from tests.ingestion.windy.test_windy_ingestion_workflow import job
 
 
@@ -60,6 +61,57 @@ def test_stopped_epoch_does_not_start_jobs(monkeypatch) -> None:
 
     assert summary == {"selected": 1, "outcomes": {}}
     process.assert_not_called()
+
+
+def test_epoch_can_prime_batched_freshness_before_jobs(monkeypatch) -> None:
+    selected = job()
+    connection = Mock(closed=False)
+    monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
+    monkeypatch.setattr(
+        "ingestion.worker.get_due_source_streams", lambda *a, **k: [selected]
+    )
+    result = Mock(outcome="unchanged", ema_update_candidate=None)
+    monkeypatch.setattr(
+        "ingestion.worker._process_due_job", lambda *a, **k: result
+    )
+    refresh = Mock(
+        return_value=WindyBatchFreshnessResult(
+            requested_streams=1,
+            returned_streams=1,
+            missing_streams=0,
+            successful_requests=1,
+            failed_requests=0,
+            throttled_requests=0,
+        )
+    )
+    monkeypatch.setattr(
+        "ingestion.worker.WindyImageClient.refresh", refresh
+    )
+
+    summary = _run_epoch(
+        ("DK",),
+        1,
+        True,
+        WorkerConfig(2, 1, 0, 0, 1, "127.0.0.1", 0, 10),
+        WindyIngestionConfig.from_environment(),
+        lambda: None,
+        Event(),
+        WorkerMetrics(),
+        batch_freshness=True,
+    )
+
+    refresh.assert_called_once_with(
+        [(selected.provider_source_stream_id, selected.selected_rendition)],
+        max_workers=2,
+    )
+    assert summary["freshness_batch"] == {
+        "requested_streams": 1,
+        "returned_streams": 1,
+        "missing_streams": 0,
+        "successful_requests": 1,
+        "failed_requests": 0,
+        "throttled_requests": 0,
+    }
 
 
 def test_verbose_progress_counts_download_upload_and_throttling() -> None:

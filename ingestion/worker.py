@@ -190,6 +190,7 @@ def run_worker(
     epochs: int | None = None,
     run_for_seconds: float | None = None,
     initial_stagger_seed: str | None = None,
+    batch_freshness: bool = False,
     dry_run: bool = False,
     stop_event: threading.Event | None = None,
     verbose: bool = False,
@@ -244,6 +245,7 @@ def run_worker(
                     epoch_index + 1,
                     verbose,
                     initial_stagger,
+                    batch_freshness,
                 )
                 health.last_epoch_success_monotonic = time.monotonic()
                 metrics.epochs.labels("win", "success").inc()
@@ -293,6 +295,7 @@ def _run_epoch(
     epoch_number: int = 1,
     verbose: bool = False,
     initial_stagger: InitialPollingStagger | None = None,
+    batch_freshness: bool = False,
 ) -> dict[str, object]:
     epoch_started = time.monotonic()
     database = DatabaseConfig.from_environment()
@@ -368,6 +371,23 @@ def _run_epoch(
             if initial_stagger is not None:
                 summary["stagger_deferred"] = stagger_deferred
             return summary
+        batch_summary: dict[str, int] | None = None
+        if batch_freshness:
+            batch_result = client.refresh(
+                [
+                    (job.provider_source_stream_id, job.selected_rendition)
+                    for job in jobs
+                ],
+                max_workers=worker.threads,
+            )
+            batch_summary = asdict(batch_result)
+            metrics.observe_event(
+                "freshness_batch",
+                {
+                    **batch_summary,
+                    "batch_size": 50,
+                },
+            )
         results = []
         with ThreadPoolExecutor(max_workers=worker.threads, thread_name_prefix="windy") as executor:
             futures: set[Future] = {
@@ -429,6 +449,8 @@ def _run_epoch(
         "ema_candidates": len(candidates),
         "ema_updates_applied": ema_updates_applied,
     }
+    if batch_summary is not None:
+        summary["freshness_batch"] = batch_summary
     if initial_stagger is not None:
         summary["stagger_deferred"] = stagger_deferred
         summary["ema_candidates_deferred_initial"] = len(candidates) - len(
@@ -522,6 +544,11 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
+        "--batch-freshness",
+        action="store_true",
+        help="resolve due Windy streams using listings of up to 50 explicit IDs",
+    )
+    parser.add_argument(
         "--verbose", action="store_true", help="print epoch progress once per second"
     )
     args = parser.parse_args()
@@ -554,6 +581,7 @@ def main() -> None:
         epochs=args.epochs,
         run_for_seconds=args.run_for_seconds,
         initial_stagger_seed=initial_stagger_seed,
+        batch_freshness=args.batch_freshness,
         dry_run=args.dry_run,
         stop_event=stop,
         verbose=args.verbose,
