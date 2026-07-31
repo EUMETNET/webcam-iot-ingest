@@ -1,0 +1,104 @@
+First code review after checkpoint 12 - work record
+===================================================
+
+Scope
+-----
+
+This correction set prepares the final containerized deployment before
+checkpoint 13 operational drills. It supersedes the temporary host-Python
+worker and durable-publication-outbox choices without rewriting the historical
+checkpoint records that describe what was validated at the time.
+
+Implemented corrections
+-----------------------
+
+- Ingestion state is reduced to five fields: observed provider timestamp,
+  observed marker, local download-decision timestamp, the timestamp used in
+  the successfully published image name, and EMA. Source jobs return state for one epoch-end
+  batch; they no longer write state individually.
+- Windy uses `lastUpdatedOn` as timestamp-only freshness. Fintraffic uses the
+  bulk timestamp and captures JPEG ETag after GET. Skaping uses ETag and
+  `Last-Modified`, and its sanitized resolved target path enters MQTT
+  source-image provider metadata.
+- The publication outbox, replay command, worker drain, configuration, metric,
+  and dashboard panel are removed. S3 and MQTT run synchronously and ambiguous
+  retries may duplicate delivery.
+- S3 image uploads use direct PUT without preliminary HEAD. Definitive S3 and
+  MQTT operation counters increment once after their complete retry loop.
+- Pooled database connections are rolled back before reuse or discarded when
+  they cannot return to IDLE. Unexpected future exceptions become isolated
+  `internal_error` job outcomes.
+- Image cleanup defaults to one explicit transformation prefix and supports an
+  explicit all-prefixes mode.
+- A verified PostgreSQL backup triggers conservative same-month daily cleanup.
+  Previous-month finals and unexpected keys are retained.
+- One application image now supports all continuous workers and short-lived
+  discovery or maintenance jobs. Compose owns long-lived services and
+  restarts; systemd owns VM boot and daily schedules.
+
+Schema migrations
+-----------------
+
+`006_simplify_ingestion_state.sql` migrates useful legacy values into the five
+retained fields and removes redundant freshness-query and processed-marker
+columns. It is idempotent and is the only ingestion-state migration replayed
+by the Compose migration gate.
+
+`005_remove_publication_outbox.sql` drops the obsolete outbox. The Compose
+schema-migration service applies migrations 005 and 006 before workers start.
+
+Validation status
+-----------------
+
+Focused unit suites for ingestion, workers, metrics, notification, storage,
+backup cleanup, and container deployment pass. All 25 PostgreSQL integration
+tests pass after applying the two migrations. Compose configuration parses
+with application, monitoring, and short-lived-job profiles enabled, and the
+four application images build successfully. Container start, live provider
+checks, S3/MQTT delivery, and systemd operational drills remain explicit
+manual validation steps.
+
+Validation run - 2026-07-31
+---------------------------
+
+The focused suite passed with 67 tests and one optional integration skip; all
+25 PostgreSQL integration tests passed. Both migrations were reapplied
+idempotently. The expected freshness columns exist and the publication-outbox
+table is absent. Compose configuration parsed and all four application images
+built with PostgreSQL 16.9 `pg_dump`.
+
+Bounded container dry-runs succeeded for all three discovery and ingestion
+providers. A twenty-stream Windy Denmark sample downloaded sixteen images and
+returned four controlled provider errors, all belonging to the same Kalø Vig
+camera cluster. Fintraffic and Skaping completed bounded image downloads,
+apart from two currently unavailable Fintraffic JPEGs in one three-stream
+container sample.
+
+The validation found and corrected two Compose job-environment names:
+containerized discovery and maintenance now use
+`DISCOVERY_METRICS_GATEWAY_URL` and `BATCH_METRICS_GATEWAY_URL`, both targeting
+the Compose Pushgateway service. Subsequent Skaping discovery and database
+backup-cleanup dry-runs published successfully and were visible through
+Prometheus.
+
+Transformation-scoped and all-transformation-prefix spool-cleanup dry-runs
+examined 211,468 and 211,474 objects respectively, selected no objects older
+than 24 hours, and deleted nothing. The all-prefix pass conservatively skipped
+six non-image keys. Backup cleanup examined six canonical dumps and selected
+nothing because the verified July 24 dump had no preceding backup day in the
+same month.
+
+Installing and enabling the production-oriented systemd units remains an
+administrator action after the deployment checkout is placed at
+`/opt/webcam-ingestion`. Static unit verification is otherwise clean; its only
+warnings in the development checkout are the intentionally absent `/opt`
+deployment paths.
+
+Operational Just recipes were then switched to the Compose `webcam-job`
+service: database health, all discoveries, bounded ingestion for all three
+networks, image cleanup, and database backup. Discovery arguments are
+forwarded into the container and an optional host
+`WINDY_MEMBER_COUNTRIES` override supports bounded Windy validation. Historical
+checkpoint and detached benchmark recipes remain host-based intentionally.
+Every rewritten public command was exercised successfully using dry-run or
+read-only arguments.

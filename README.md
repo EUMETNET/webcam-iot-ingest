@@ -88,10 +88,11 @@ just cleanup-spool 24
 ```
 
 Only keys matching the configured prefix and canonical
-`T0V0/{network}/{YYYY}/{MM}/{DD}/{HH}/...jpg` layout are eligible. Unknown
+`T0V0/{network}/{YYYY}/{MM}/{DD}/{HH}/...jpg` layout are eligible by default.
+Select another version with `--transformation-prefix T1V0`, or explicitly use
+`--all-transformation-prefixes` to clean every recognized version. Unknown
 keys and database backups are never deleted. Use `--limit N` for a bounded
-validation deletion, and combine it with `--show-keys` during dry-run to
-inspect the exact bounded scope.
+validation deletion, and combine it with `--show-keys` during dry-run.
 
 Create a full PostgreSQL custom-format dump and upload it to the configured S3
 bucket:
@@ -103,7 +104,61 @@ just backup-database
 
 Backups use timestamped keys below
 `backups/postgresql/YYYY/MM/DD/`. The command verifies the stored length and
-SHA-256 metadata after upload. It does not implement restoration.
+SHA-256 metadata after upload. Only after that verification, it removes the
+latest preceding available daily dump when it belongs to the same month. The
+last dump of each preceding month and every malformed key are retained.
+
+## Containerized pilot deployment
+
+Build and start PostgreSQL, MQTT, monitoring, and the three continuous
+provider workers:
+
+```bash
+just container-stack-up
+```
+
+Run short-lived jobs through the same application image:
+
+```bash
+just discover-windy --dry-run
+just discover-fintraffic --dry-run
+just discover-skaping --dry-run
+
+just ingest-windy --countries DK --limit 3 --dry-run
+just ingest-fintraffic --limit 3 --dry-run
+just ingest-skaping --limit 3 --dry-run
+
+just cleanup-spool 24 --dry-run
+just backup-database --dry-run
+```
+
+These ordinary operational recipes use the `webcam-job` Compose service.
+Their `container-*` equivalents remain available for explicit administrative
+use. Historical checkpoint-12/checkpoint-13 and detached benchmark recipes
+remain host-based where necessary to reproduce earlier validation procedures;
+the new checkpoint-13 quiet baseline uses the containerized workers.
+
+For a bounded Windy discovery dry-run, an operator may override the configured
+member-country scope without changing `.env`:
+
+```bash
+WINDY_MEMBER_COUNTRIES=DK just discover-windy --dry-run
+```
+
+Stop the stack without deleting persistent volumes:
+
+```bash
+just container-stack-stop
+```
+
+The production-oriented units in `deployment/systemd/pilot/` let systemd start
+the Compose stack at VM boot and schedule sequential discovery daily at
+12:00 UTC plus backup/cleanup maintenance daily at 01:00 UTC. Compose owns
+worker restart policies; systemd does not launch host Python workers.
+The worker health and Prometheus endpoints use internal ports 8002 (Windy),
+8003 (Fintraffic), and 8004 (Skaping). CPU, memory, and graceful-stop limits
+are configurable through the deployment environment; reproducible defaults
+are listed in `.env.example`.
 
 ## Webcam discovery
 
@@ -179,7 +234,7 @@ just ingest-skaping --limit 4 --publish
 | `BATCH_METRICS_ENABLED` | `true` | Publish cleanup and backup metrics through Pushgateway |
 | `BATCH_METRICS_GATEWAY_URL` | `http://localhost:9091` | Operational batch Pushgateway |
 | `DATABASE_BACKUP_S3_PREFIX` | `backups/postgresql` | S3 namespace for timestamped database dumps |
-| `PG_DUMP_MODE` | `docker-compose` in `.env.example` | Run the server-matched `pg_dump` inside the PostgreSQL container |
+| `PG_DUMP_MODE` | `docker-compose` in `.env.example` | Host-side legacy mode; the operational container recipe forces direct execution with its bundled PostgreSQL 16.9 client |
 
 ## Monitoring
 
@@ -243,31 +298,40 @@ It obtains the final mini object's ETag with a followed HEAD request, downloads
 only changed objects, and validates that the GET response has the same ETag.
 The final object's HTTP `Last-Modified` value is retained as the
 provider-availability timestamp; it is not claimed to be the physical capture
-time. For the pilot, Skaping alone anchors adaptive polling to the last
-successful download and also requires 300 seconds since the last freshness
-attempt. Windy and Fintraffic retain the shared provider-marker timestamp
-strategy. The deterministic stagger window is 600 seconds.
+time. Its sanitized resolved target path is included in MQTT source-image
+provider metadata without treating the timestamp-like path component as
+authoritative.
+
+All networks use the provider timestamp for adaptive polling when it is
+available. Freshness comparison uses the timestamp, opaque marker, or both,
+according to what the provider exposes at assessment time. Only a freshness
+snapshot that causes a download decision is retained. Source jobs return these
+state transitions to the epoch coordinator, which writes them in one batch.
+The processed timestamp advances only after MQTT publication succeeds, so a
+failed pipeline remains eligible for retry. The deterministic stagger window
+is 600 seconds.
 
 All provider ingestion dashboards include source and derived image size, width, height,
 color depth, format, and color-mode observability. Size, width, height, and
 color-depth panels show rolling P50, P90, and P95 values over five minutes.
 They also show one-minute-smoothed external image-download and successful S3
-PUT payload throughput. S3 throughput excludes objects reused after immutable
-identity verification because no object bytes are retransmitted.
+PUT payload throughput. S3 uploads are direct PUT operations without a
+preliminary HEAD request.
 
 This benchmark-only mode uses the fixed seed `windy-benchmark-v1` and a
 deterministic hash of each source-stream ID to assign a phase in `[0, 600)`
 seconds by default. `INITIAL_STAGGER_WINDOW_S` configures this window, and the
 benchmark recipe sets it explicitly to 600 seconds. The initial phase is
-independent of EMA. The mode changes neither
-registry timestamps nor EMA values; normal adaptive scheduling takes over after
-a stream's first check. As with a direct run's first epoch, EMA candidates from
+independent of EMA and does not fabricate database timestamps. Normal adaptive
+scheduling takes over after a stream's first check. As with a direct run's
+first epoch, EMA candidates from
 each stream's staggered first check are discarded to avoid cold-start bias. The
 worker prints the seed and phase window in its log.
 
 The benchmark keeps two independent timing controls explicit:
 
-- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam download-time guard;
+- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam successful-publication
+  guard;
 - after a download, normal selection also waits until the stored provider
   timestamp plus `POLLING_INTERVAL_FACTOR * ema_download_period`;
 - `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
@@ -339,6 +403,13 @@ journalctl -u webcam-checkpoint12-cycle.service
 
 Full-scale production scheduling and operational recovery drills belong to
 checkpoint 13.
+
+Before injecting checkpoint-13 failures, run the containerized quiet baseline
+described in
+[`manual_tests/run_checkpoint13_30min_quiet_baseline`](manual_tests/run_checkpoint13_30min_quiet_baseline).
+It starts all three workers, triggers one sequential discovery/backup/cleanup
+workflow after ten minutes, and stops ingestion after thirty minutes while
+allowing an active workflow to finish.
 
 The dedicated command list for the four-day, full-scope checkpoint-13 live
 test is in

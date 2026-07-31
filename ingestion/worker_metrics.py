@@ -34,11 +34,8 @@ class WorkerMetrics:
         self.active = Gauge(
             "webcam_ingestion_active_jobs", "Currently active jobs", ["source_network"], registry=self.registry
         )
-        self.outbox = Gauge(
-            "webcam_publication_outbox_pending_count", "Pending durable publications", ["source_network"], registry=self.registry
-        )
         self.retries = Counter(
-            "webcam_image_retry_total", "Controlled retry/future replay events", ["source_network", "operation", "reason"], registry=self.registry
+            "webcam_image_retry_total", "Controlled retry attempts", ["source_network", "operation", "reason"], registry=self.registry
         )
         self.stage_duration = Histogram(
             "webcam_ingestion_stage_duration_seconds",
@@ -102,6 +99,18 @@ class WorkerMetrics:
             "webcam_ingestion_s3_upload_bytes_total",
             "Derived-image bytes transferred by successful S3 PUT requests",
             ["source_network"],
+            registry=self.registry,
+        )
+        self.s3_uploads = Counter(
+            "webcam_s3_upload_total",
+            "Completed high-level S3 upload operations",
+            ["source_network", "result"],
+            registry=self.registry,
+        )
+        self.mqtt_publications = Counter(
+            "webcam_mqtt_publication_total",
+            "Completed high-level MQTT publication operations",
+            ["source_network", "transformation_version", "result"],
             registry=self.registry,
         )
         self.source_size = Histogram(
@@ -185,6 +194,12 @@ class WorkerMetrics:
             ["source_network", "stage", "reason"],
             registry=self.registry,
         )
+        self.marker_unchanged_skips = Counter(
+            "webcam_ingestion_marker_unchanged_skip_total",
+            "Images skipped because the available provider marker was unchanged",
+            ["source_network"],
+            registry=self.registry,
+        )
 
     def observe_stage(self, stage: str, outcome: str, duration_s: float) -> None:
         self.stage_duration.labels(self.source_network, stage, outcome).observe(duration_s)
@@ -226,6 +241,24 @@ class WorkerMetrics:
             self.s3_upload_bytes.labels(self.source_network).inc(
                 float(values["size_bytes"])
             )
+        elif event == "s3_operation":
+            self.s3_uploads.labels(
+                self.source_network, str(values["result"])
+            ).inc()
+        elif event == "mqtt_operation":
+            self.mqtt_publications.labels(
+                self.source_network,
+                str(values["version"]),
+                str(values["result"]),
+            ).inc()
+        elif event == "retry":
+            self.retries.labels(
+                self.source_network,
+                str(values["operation"]),
+                str(values["reason"]),
+            ).inc()
+        elif event == "marker_unchanged_skip":
+            self.marker_unchanged_skips.labels(self.source_network).inc()
         elif event == "derived_image":
             labels = (self.source_network, str(values["version"]))
             self.derived_images.labels(*labels).inc()

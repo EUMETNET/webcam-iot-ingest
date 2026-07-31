@@ -5,7 +5,7 @@ import psycopg
 from config.deployment_config import DatabaseConfig
 
 
-EXPECTED_TABLES = {"network", "site", "source_stream", "publication_outbox"}
+EXPECTED_TABLES = {"network", "site", "source_stream"}
 
 
 def check_database(config: DatabaseConfig | None = None) -> set[str]:

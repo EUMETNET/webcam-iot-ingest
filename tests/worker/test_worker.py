@@ -2,13 +2,15 @@ from threading import Event
 from unittest.mock import Mock
 
 import pytest
+from psycopg.pq import TransactionStatus
 
 from config.deployment_config import WindyIngestionConfig, WorkerConfig
 from ingestion.worker import (
     DEFAULT_INITIAL_STAGGER_SEED,
     DatabaseConnectionPool,
     InitialPollingStagger,
-    LazyPooledConnection,
+    _completed_future_result,
+    _ema_update_allowed,
     _epoch_wait_s,
     _initial_phase_s,
     _progress,
@@ -24,6 +26,7 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
     jobs = [job(), job()]
     jobs[1] = jobs[1].__class__(**{**jobs[1].__dict__, "source_stream_id": "win43"})
     connection = Mock(closed=False)
+    connection.info.transaction_status = TransactionStatus.IDLE
     monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
     monkeypatch.setattr("ingestion.worker.get_due_source_streams", lambda *a, **k: jobs)
     result = Mock(outcome="downloaded")
@@ -39,6 +42,7 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
         "selected": 2,
         "outcomes": {"downloaded": 2},
         "ema_candidates": 0,
+        "state_updates_applied": 0,
         "ema_updates_applied": 0,
     }
     connection.close.assert_called_once()
@@ -46,6 +50,7 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
 
 def test_stopped_epoch_does_not_start_jobs(monkeypatch) -> None:
     connection = Mock(closed=False)
+    connection.info.transaction_status = TransactionStatus.IDLE
     monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
     monkeypatch.setattr("ingestion.worker.get_due_source_streams", lambda *a, **k: [job()])
     process = Mock()
@@ -66,6 +71,7 @@ def test_stopped_epoch_does_not_start_jobs(monkeypatch) -> None:
 def test_epoch_can_prime_batched_freshness_before_jobs(monkeypatch) -> None:
     selected = job()
     connection = Mock(closed=False)
+    connection.info.transaction_status = TransactionStatus.IDLE
     monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
     monkeypatch.setattr(
         "ingestion.worker.get_due_source_streams", lambda *a, **k: [selected]
@@ -136,30 +142,141 @@ def test_verbose_progress_counts_download_upload_and_throttling() -> None:
     }
 
 
-def test_lazy_connection_is_not_borrowed_until_database_use(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "initial_status",
+    [TransactionStatus.INTRANS, TransactionStatus.INERROR],
+)
+def test_pool_rolls_back_non_idle_connection(monkeypatch, initial_status) -> None:
     connection = Mock(closed=False)
+    connection.info.transaction_status = initial_status
+
+    def rollback() -> None:
+        connection.info.transaction_status = TransactionStatus.IDLE
+
+    connection.rollback.side_effect = rollback
     connector = Mock(return_value=connection)
     monkeypatch.setattr("ingestion.worker._connect", connector)
     pool = DatabaseConnectionPool(Mock(), 1)
 
-    with LazyPooledConnection(pool):
-        connector.assert_not_called()
-    with LazyPooledConnection(pool) as lazy:
-        lazy.commit()
-    with LazyPooledConnection(pool) as lazy:
-        lazy.rollback()
+    with pool.connection():
+        pass
+    with pool.connection() as reused:
+        assert reused is connection
 
     connector.assert_called_once()
-    connection.commit.assert_called_once()
     connection.rollback.assert_called_once()
     pool.close()
-    connection.close.assert_called_once()
+
+
+def test_pool_returns_idle_connection_without_rollback(monkeypatch) -> None:
+    connection = Mock(closed=False)
+    connection.info.transaction_status = TransactionStatus.IDLE
+    connector = Mock(return_value=connection)
+    monkeypatch.setattr("ingestion.worker._connect", connector)
+    pool = DatabaseConnectionPool(Mock(), 1)
+
+    with pool.connection():
+        pass
+    with pool.connection() as reused:
+        assert reused is connection
+
+    connection.rollback.assert_not_called()
+    connector.assert_called_once()
+    pool.close()
+
+
+def test_pool_replaces_connection_closed_by_borrower(monkeypatch) -> None:
+    closed = Mock(closed=False)
+    closed.info.transaction_status = TransactionStatus.IDLE
+    replacement = Mock(closed=False)
+    replacement.info.transaction_status = TransactionStatus.IDLE
+    connector = Mock(side_effect=[closed, replacement])
+    monkeypatch.setattr("ingestion.worker._connect", connector)
+    pool = DatabaseConnectionPool(Mock(), 1)
+
+    with pool.connection():
+        closed.closed = True
+    with pool.connection() as connection:
+        assert connection is replacement
+
+    assert connector.call_count == 2
+    pool.close()
+
+
+def test_pool_discards_connection_when_rollback_fails(monkeypatch) -> None:
+    broken = Mock(closed=False)
+    broken.info.transaction_status = TransactionStatus.INERROR
+    broken.rollback.side_effect = RuntimeError("rollback failed")
+    replacement = Mock(closed=False)
+    replacement.info.transaction_status = TransactionStatus.IDLE
+    connector = Mock(side_effect=[broken, replacement])
+    monkeypatch.setattr("ingestion.worker._connect", connector)
+    pool = DatabaseConnectionPool(Mock(), 1)
+
+    with pool.connection() as connection:
+        assert connection is broken
+    with pool.connection() as connection:
+        assert connection is replacement
+
+    broken.close.assert_called_once()
+    assert connector.call_count == 2
+    pool.close()
+
+
+def test_pool_observes_discard_and_replacement(monkeypatch) -> None:
+    broken = Mock(closed=False)
+    broken.info.transaction_status = TransactionStatus.INERROR
+    broken.rollback.side_effect = RuntimeError("rollback failed")
+    replacement = Mock(closed=False)
+    replacement.info.transaction_status = TransactionStatus.IDLE
+    monkeypatch.setattr(
+        "ingestion.worker._connect", Mock(side_effect=[broken, replacement])
+    )
+    events = []
+    pool = DatabaseConnectionPool(
+        Mock(), 1, lambda stage, outcome, duration: events.append((stage, outcome))
+    )
+
+    with pool.connection():
+        pass
+    with pool.connection():
+        pass
+
+    assert ("database_pool_cleanup", "discard") in events
+    assert ("database_pool_cleanup", "replacement") in events
+    pool.close()
+
+
+def test_unexpected_future_error_is_accounted_without_raising(caplog) -> None:
+    future = Mock()
+    future.result.side_effect = RuntimeError("unexpected")
+    metrics = WorkerMetrics()
+    stream = job()
+
+    result = _completed_future_result(
+        future,
+        stream,
+        network_id="win",
+        epoch_number=7,
+        metrics=metrics,
+    )
+
+    assert result.outcome == "internal_error"
+    assert result.source_stream_id == stream.source_stream_id
+    assert "source_stream_id=win42 network=win epoch=7" in caplog.text
 
 
 def test_epoch_wait_enforces_period_and_idle_floor() -> None:
     assert _epoch_wait_s(4, 15, 5) == 11
     assert _epoch_wait_s(14, 15, 5) == 5
     assert _epoch_wait_s(20, 15, 5) == 5
+
+
+def test_ema_update_keeps_first_epoch_and_overlong_epoch_guards() -> None:
+    assert not _ema_update_allowed(1, 10, 300)
+    assert _ema_update_allowed(2, 299.999, 300)
+    assert not _ema_update_allowed(2, 300, 300)
+    assert not _ema_update_allowed(9, 301, 300)
 
 
 def test_worker_rejects_conflicting_or_invalid_time_limits() -> None:

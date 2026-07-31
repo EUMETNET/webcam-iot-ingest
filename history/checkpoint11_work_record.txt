@@ -1,6 +1,11 @@
 Checkpoint 11 work record - Skaping ingestion
 ==============================================
 
+Post-checkpoint note (2026-07-30): Skaping now participates in the common
+provider-timestamp polling rule while retaining ETag comparison. Its sanitized
+resolved target path is included in MQTT source-image provider metadata. The
+durable outbox described below was removed after checkpoint 12.
+
 Status
 ------
 

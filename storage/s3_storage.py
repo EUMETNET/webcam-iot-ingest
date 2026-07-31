@@ -10,7 +10,6 @@ from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
 
 from config.deployment_config import S3Config
 
@@ -55,37 +54,30 @@ class S3Storage:
     def upload(self, object_key: str, content: bytes) -> StoredObject:
         started = time.monotonic()
         try:
-            result, transferred = self._upload(object_key, content)
+            result = self._upload(object_key, content)
         except Exception:
             if self._observer is not None:
                 self._observer("s3_upload", "failure", time.monotonic() - started)
+            if self._event_observer is not None:
+                self._event_observer("s3_operation", {"result": "failure"})
             raise
         if self._observer is not None:
             self._observer("s3_upload", "success", time.monotonic() - started)
-        if transferred and self._event_observer is not None:
+        if self._event_observer is not None:
+            self._event_observer("s3_operation", {"result": "success"})
             self._event_observer(
                 "s3_upload_bytes",
                 {"size_bytes": len(content)},
             )
         return result
 
-    def _upload(self, object_key: str, content: bytes) -> tuple[StoredObject, bool]:
+    def _upload(self, object_key: str, content: bytes) -> StoredObject:
         if not object_key or not content:
             raise ValueError("S3 object key and content are required")
         last_error: Exception | None = None
         digest = hashlib.sha256(content).hexdigest()
         for attempt in range(self._config.retry_count + 1):
             try:
-                existing = self._existing_object(object_key)
-                if existing is not None:
-                    if (
-                        existing.get("ContentLength") == len(content)
-                        and existing.get("Metadata", {}).get("sha256") == digest
-                    ):
-                        return self.reference(object_key), False
-                    raise S3StorageError(
-                        "immutable S3 object key already contains different content"
-                    )
                 self._client.put_object(
                     Bucket=self._config.bucket,
                     Key=object_key,
@@ -93,26 +85,18 @@ class S3Storage:
                     ContentType="image/jpeg",
                     Metadata={"sha256": digest},
                 )
-                return self.reference(object_key), True
+                return self.reference(object_key)
             except Exception as error:  # SDK providers expose several subclasses.
-                if isinstance(error, S3StorageError):
-                    raise
                 last_error = error
-                if attempt < self._config.retry_count and self._config.retry_backoff_s:
-                    self._sleep(self._config.retry_backoff_s * (2**attempt))
+                if attempt < self._config.retry_count:
+                    if self._event_observer is not None:
+                        self._event_observer(
+                            "retry",
+                            {"operation": "s3_upload", "reason": "request_failure"},
+                        )
+                    if self._config.retry_backoff_s:
+                        self._sleep(self._config.retry_backoff_s * (2**attempt))
         raise S3StorageError("S3 derived-image upload failed") from last_error
-
-    def _existing_object(self, object_key: str) -> dict[str, Any] | None:
-        try:
-            return self._client.head_object(
-                Bucket=self._config.bucket, Key=object_key
-            )
-        except ClientError as error:
-            code = str(error.response.get("Error", {}).get("Code", ""))
-            status = error.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
-            if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
-                return None
-            raise
 
 
 def create_s3_client(config: S3Config) -> Any:

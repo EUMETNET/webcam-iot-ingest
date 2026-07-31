@@ -28,6 +28,16 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     metrics.observe_event(
         "s3_upload_bytes", {"size_bytes": 12000}
     )
+    metrics.observe_event("s3_operation", {"result": "success"})
+    metrics.observe_event(
+        "mqtt_operation",
+        {"version": "T0V0", "result": "success"},
+    )
+    metrics.observe_event(
+        "retry",
+        {"operation": "mqtt_publish", "reason": "request_failure"},
+    )
+    metrics.observe_event("marker_unchanged_skip", {})
     metrics.observe_event(
         "source_image",
         {
@@ -78,6 +88,10 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         b"webcam_ingestion_source_image_total",
         b"webcam_ingestion_source_download_bytes_total",
         b"webcam_ingestion_s3_upload_bytes_total",
+        b"webcam_s3_upload_total",
+        b"webcam_mqtt_publication_total",
+        b"webcam_image_retry_total",
+        b"webcam_ingestion_marker_unchanged_skip_total",
         b"webcam_ingestion_source_image_size_bytes",
         b"webcam_ingestion_source_image_width_pixels",
         b"webcam_ingestion_source_image_height_pixels",

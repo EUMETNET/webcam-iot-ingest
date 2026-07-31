@@ -1,6 +1,10 @@
 Checkpoint 7 validation - operational Windy worker
 ==================================================
 
+Historical validation notice: outbox and replay checks below describe the
+checkpoint-7 implementation and were superseded by
+`validation_first_code_review_after_step12`.
+
 Status
 ------
 

@@ -89,3 +89,32 @@ def test_cleanup_deletes_only_old_canonical_images():
         "T0V0/win/2026/07/23/10/20260723T103000Z_win1T0V0.jpg"
     ]
     assert metrics.kwargs["success"] is True
+
+
+def test_cleanup_is_scoped_to_one_transformation_by_default():
+    class TwoVersionPaginator:
+        def paginate(self, **kwargs):
+            assert kwargs["Prefix"] == "T0V0/"
+            return [
+                {
+                    "Contents": [
+                        {
+                            "Key": "T0V0/win/2026/07/23/10/20260723T103000Z_win1T0V0.jpg",
+                            "Size": 100,
+                        }
+                    ]
+                }
+            ]
+
+    client = Client()
+    client.get_paginator = lambda _name: TwoVersionPaginator()
+    result = cleanup_spool(
+        config=config(),
+        older_than_hours=24,
+        dry_run=True,
+        now=datetime(2026, 7, 24, 12, tzinfo=timezone.utc),
+        client=client,
+        metrics=Metrics(),
+        transformation_prefix="T0V0",
+    )
+    assert result.eligible == 1

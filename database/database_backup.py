@@ -17,6 +17,7 @@ from typing import Any
 from botocore.exceptions import ClientError
 
 from config.deployment_config import DatabaseConfig, S3Config
+from database.database_backup_cleanup import cleanup_database_backups
 from storage.batch_metrics import BatchJobMetrics
 from storage.s3_storage import create_s3_client
 
@@ -31,6 +32,8 @@ class BackupResult:
     dump_duration_seconds: float = 0.0
     upload_duration_seconds: float = 0.0
     metrics_published: bool = False
+    cleanup_deleted: int = 0
+    cleanup_deleted_bytes: int = 0
 
 
 def backup_object_key(timestamp: datetime, prefix: str) -> str:
@@ -145,6 +148,14 @@ def create_database_backup(
                 or stored.get("Metadata", {}).get("sha256") != result.sha256
             ):
                 raise RuntimeError("stored database backup verification failed")
+            cleanup = cleanup_database_backups(
+                config=storage,
+                current_key=key,
+                backup_prefix=backup_prefix,
+                client=s3,
+            )
+            result.cleanup_deleted = cleanup.deleted
+            result.cleanup_deleted_bytes = cleanup.deleted_bytes
             result.upload_duration_seconds = time.monotonic() - upload_started
     except Exception:
         result.duration_seconds = time.monotonic() - started

@@ -46,6 +46,7 @@ def prepare_publication(
     provider_update_timestamp: datetime | None,
     transformation: TransformationConfig,
     storage: S3Storage,
+    source_image_provider_metadata: dict[str, object] | None = None,
 ) -> PreparedPublication:
     derived = transform(source, transformation)
     derived_stream_id = build_derived_stream_id(job.source_stream_id, transformation.version)
@@ -67,6 +68,7 @@ def prepare_publication(
         stored=stored,
         download_timestamp=download_timestamp,
         provider_update_timestamp=provider_update_timestamp,
+        source_image_provider_metadata=source_image_provider_metadata,
     )
     return PreparedPublication(
         derived, derived_stream_id, image_id, object_key, notification
@@ -80,6 +82,7 @@ def process_source_image(
     download_timestamp: datetime,
     provider_update_timestamp: datetime | None,
     transformation: TransformationConfig,
+    source_image_provider_metadata: dict[str, object] | None = None,
     storage: S3Storage | None = None,
     publisher: MqttPublisher | None = None,
 ) -> PublicationResult:
@@ -99,6 +102,7 @@ def process_source_image(
         source=source,
         download_timestamp=download_timestamp,
         provider_update_timestamp=provider_update_timestamp,
+        source_image_provider_metadata=source_image_provider_metadata,
         transformation=transformation,
         storage=storage,
     )

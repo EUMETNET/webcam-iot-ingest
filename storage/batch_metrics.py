@@ -13,7 +13,11 @@ from config.deployment_config import BatchMetricsConfig
 
 class BatchJobMetrics:
     def __init__(self, job_name: str, config: BatchMetricsConfig) -> None:
-        if job_name not in {"spool_cleanup", "database_backup"}:
+        if job_name not in {
+            "spool_cleanup",
+            "database_backup",
+            "database_backup_cleanup",
+        }:
             raise ValueError("unsupported operational batch job")
         self.job_name = job_name
         self.config = config

@@ -1,0 +1,130 @@
+Checkpoint 2 validation runbook
+================================
+
+Checkpoint outcome
+------------------
+
+Checkpoint 2 adds the provider-independent PostgreSQL registry access layer.
+It does not perform provider discovery or image ingestion.
+
+The tests generate unique temporary registry records. They run in transactions
+and roll back their data. This runbook does not delete Docker volumes or
+existing registry records.
+
+1. Confirm branch and review local state
+----------------------------------------
+
+Run from the repository root:
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    git branch --show-current
+    git status --short
+    git diff --check
+
+The branch must be codex. Do not discard or overwrite unrelated local changes.
+
+2. Confirm local configuration remains protected
+------------------------------------------------
+
+    git check-ignore -v .env .secrets/database_password
+    stat -c '%a %n' .secrets .secrets/database_password
+
+Both paths must be ignored. The secrets directory should have mode 700 and the
+password file should have mode 600. Do not print the password.
+
+3. Start PostgreSQL without deleting existing data
+--------------------------------------------------
+
+    docker compose --env-file .env up -d postgres
+    docker compose ps postgres
+    docker compose exec postgres pg_isready
+
+PostgreSQL must report healthy and accepting connections. Do not use
+`docker compose down --volumes` or `just destroy`.
+
+4. Synchronize the locked Python environment
+--------------------------------------------
+
+    uv sync --locked
+
+This must complete without changing uv.lock.
+
+5. Run configuration tests
+--------------------------
+
+    uv run pytest tests/test_deployment_config.py -v
+
+Both tests must pass.
+
+6. Run all database integration tests
+-------------------------------------
+
+    RUN_DATABASE_TESTS=1 uv run pytest tests/database -v
+
+All schema and registry-query tests must pass. No test may be skipped when
+RUN_DATABASE_TESTS=1 is set.
+
+The registry-query tests specifically validate transactional rollback,
+idempotent discovery updates, stable-ID collision handling, metadata snapshot
+replacement, blacklist preservation, due-stream selection, and ingestion-state
+updates.
+
+7. Confirm test data were rolled back
+-------------------------------------
+
+The tests use site identifiers beginning with `win` followed by a 32-character
+UUID and no provider workflow has populated Windy data yet. Confirm that test
+execution left no such generated records:
+
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      "SELECT count(*) AS checkpoint2_test_sites FROM site WHERE site_id ~ '^win[0-9a-f]{32}$';"
+
+The expected count is 0.
+
+8. Confirm the pilot schema remains healthy
+--------------------------------------------
+
+    uv run python -m database.healthcheck
+    docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
+      'SELECT network_id, network_name, api_version FROM network ORDER BY network_id;'
+
+The health check must list network, site, and source_stream. The network query
+must still return the Fintraffic, Skaping, and Windy rows.
+
+9. Review implementation and safety
+-----------------------------------
+
+    git diff --check
+    git status --short
+    git diff -- database/registry_queries.py tests/database/test_registry_queries.py
+
+Because new untracked files are not displayed by plain `git diff`, also inspect:
+
+    sed -n '1,520p' database/registry_queries.py
+    sed -n '1,320p' tests/database/test_registry_queries.py
+    sed -n '1,260p' history/checkpoint2_work_record.txt
+    sed -n '1,260p' manual_tests/validation_to_complete_checkpoint2
+
+Verify that no password, API key, token, S3 credential, or private architecture
+content appears in any file.
+
+10. Stop PostgreSQL without deleting data
+-----------------------------------------
+
+    docker compose stop postgres
+
+This preserves the PostgreSQL volume.
+
+Checkpoint decision
+-------------------
+
+Checkpoint 2 is accepted only after:
+
+- all configuration and database tests pass;
+- discovery rollback, idempotency, collision, and blacklist tests pass;
+- due-stream and ingestion-state tests pass;
+- the health check still succeeds;
+- generated test data are absent after rollback;
+- the final review finds no secrets or copied private architecture content.
+
+Stop after validation and approve Checkpoint 2 before starting Windy discovery.

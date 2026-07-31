@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 import time
 from typing import Callable
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -23,6 +24,7 @@ class SkapingImageReference:
     marker: str
     image_url: str
     provider_update_timestamp: datetime | None
+    resolved_target_path: str
 
 
 class SkapingImageClient:
@@ -105,6 +107,7 @@ class SkapingImageClient:
             marker=etag,
             image_url=final_url,
             provider_update_timestamp=provider_timestamp,
+            resolved_target_path=urlsplit(final_url).path,
         )
 
     def download(self, image_url: str) -> bytes:

@@ -1,0 +1,9 @@
+[Unit]
+Description=Checkpoint-13 quiet 30-minute full-system baseline
+Requires=webcam-checkpoint13-baseline-stack.service
+Wants=webcam-checkpoint13-baseline-workflow.timer
+Wants=webcam-checkpoint13-baseline-stop.timer
+After=webcam-checkpoint13-baseline-stack.service network-online.target
+
+[Install]
+WantedBy=multi-user.target

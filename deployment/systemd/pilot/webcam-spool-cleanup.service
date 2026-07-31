@@ -1,0 +1,12 @@
+[Unit]
+Description=Transformation-scoped S3 image spool cleanup
+Requires=webcam-stack.service
+After=webcam-stack.service network-online.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/opt/webcam-ingestion
+ExecStart=/usr/bin/docker compose --env-file .env --profile jobs run --rm webcam-job python -m storage.s3_spool_cleanup --older-than-hours 24 --transformation-prefix T0V0
+TimeoutStartSec=3600

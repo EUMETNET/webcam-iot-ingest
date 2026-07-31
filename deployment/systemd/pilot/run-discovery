@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+network="${1:?network is required}"
+shift
+case "$network" in
+    windy)
+        module="discovery.windy.windy_discovery_workflow"
+        ;;
+    fintraffic)
+        module="discovery.fintraffic.fintraffic_discovery_workflow"
+        ;;
+    skaping)
+        module="discovery.skaping.skaping_discovery_workflow"
+        ;;
+    *)
+        echo "unsupported discovery network: $network" >&2
+        exit 2
+        ;;
+esac
+
+compose_args=(
+    docker compose --env-file .env --profile jobs run --rm
+)
+if [[ -n "${WINDY_MEMBER_COUNTRIES:-}" ]]; then
+    compose_args+=(-e WINDY_MEMBER_COUNTRIES)
+fi
+
+exec "${compose_args[@]}" webcam-job python -m "$module" "$@"

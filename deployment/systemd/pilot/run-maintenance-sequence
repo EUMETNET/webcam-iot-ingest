@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -u
+
+status=0
+systemctl start --wait webcam-db-backup.service || status=1
+systemctl start --wait webcam-spool-cleanup.service || status=1
+exit "$status"

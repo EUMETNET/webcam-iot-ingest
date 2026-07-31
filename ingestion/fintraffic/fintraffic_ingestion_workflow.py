@@ -18,7 +18,7 @@ from config.deployment_config import (
     S3Config,
     TransformationConfig,
 )
-from database.registry_queries import get_due_source_streams
+from database.registry_queries import apply_ingestion_state_updates, get_due_source_streams
 from ingestion.fintraffic.fintraffic_image_access import FintrafficImageClient
 from ingestion.notification.mqtt_publisher import MqttPublisher
 from ingestion.windy.windy_ingestion_workflow import (
@@ -77,7 +77,6 @@ def run_ingestion(
         )
         results = tuple(
             _process_job(
-                connection,
                 client,
                 job,
                 dry_run=dry_run,
@@ -88,6 +87,13 @@ def run_ingestion(
             )
             for job in jobs
         )
+        if not dry_run:
+            apply_ingestion_state_updates(
+                connection,
+                [result.state_update for result in results if result.state_update],
+                apply_ema=True,
+            )
+            connection.commit()
     outcomes = dict(sorted(Counter(item.outcome for item in results).items()))
     return FintrafficIngestionResult(
         dry_run, publish, len(jobs), freshness_presets, outcomes, results

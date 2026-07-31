@@ -44,34 +44,42 @@ def test_uploads_immutable_jpeg_and_returns_reference() -> None:
         Metadata={"sha256": hashlib.sha256(b"jpeg").hexdigest()},
     )
     assert stored.url == "https://public.example/webcam/T0V0/win/a%20b.jpg"
-    assert events == [("s3_upload_bytes", {"size_bytes": 4})]
+    assert events == [
+        ("s3_operation", {"result": "success"}),
+        ("s3_upload_bytes", {"size_bytes": 4}),
+    ]
 
 
 def test_retries_once_then_reports_sanitized_failure() -> None:
     client = Mock()
-    client.head_object.side_effect = RuntimeError("secret response")
+    client.put_object.side_effect = RuntimeError("secret response")
 
+    events = []
     with pytest.raises(S3StorageError) as caught:
-        S3Storage(config(), client=client).upload("key", b"jpeg")
+        S3Storage(
+            config(),
+            client=client,
+            event_observer=lambda event, values: events.append((event, values)),
+        ).upload("key", b"jpeg")
 
-    assert client.head_object.call_count == 2
+    assert client.put_object.call_count == 2
+    assert events == [
+        ("retry", {"operation": "s3_upload", "reason": "request_failure"}),
+        ("s3_operation", {"result": "failure"}),
+    ]
     assert "secret response" not in str(caught.value)
 
 
-def test_matching_existing_object_is_reused_without_put() -> None:
+def test_upload_does_not_issue_a_preliminary_head_request() -> None:
     client = Mock()
     events = []
     content = b"jpeg"
-    client.head_object.return_value = {
-        "ContentLength": len(content),
-        "Metadata": {"sha256": hashlib.sha256(content).hexdigest()},
-    }
-
     S3Storage(
         config(),
         client=client,
         event_observer=lambda event, values: events.append((event, values)),
     ).upload("key", content)
 
-    client.put_object.assert_not_called()
-    assert events == []
+    client.head_object.assert_not_called()
+    client.put_object.assert_called_once()
+    assert ("s3_operation", {"result": "success"}) in events

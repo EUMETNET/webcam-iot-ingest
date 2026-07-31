@@ -1,6 +1,9 @@
 Checkpoint 9 owner validation - Fintraffic ingestion
 ====================================================
 
+Historical validation notice: outbox checks below were superseded by
+`validation_first_code_review_after_step12`.
+
 Status: completed and accepted by the repository owner on 2026-07-23.
 
 Prerequisites

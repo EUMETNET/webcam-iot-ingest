@@ -1,14 +1,18 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from unittest.mock import Mock
 
 from database.registry_queries import DueSourceStream
-from ingestion.shared.publication_outbox import DeliveryResult
+from ingestion.fintraffic.fintraffic_image_access import FintrafficImageReference
 from ingestion.windy.windy_image_access import WindyImageReference
 from ingestion.windy.windy_ingestion_workflow import (
+    _available_freshness_unchanged,
     _process_job,
     _select_country_sample,
     _validate_countries,
 )
+from ingestion.notification.mqtt_publisher import MqttPublicationError
+from ingestion.windy.windy_image_access import WindyImageAccessError
 from storage.s3_storage import StoredObject
 
 
@@ -19,7 +23,11 @@ PNG_1PX = (
 )
 
 
-def job(*, marker: str | None = None) -> DueSourceStream:
+def job(
+    *,
+    marker: str | None = None,
+    provider_timestamp=None,
+) -> DueSourceStream:
     return DueSourceStream(
         source_stream_id="win42",
         site_id="win42",
@@ -36,46 +44,68 @@ def job(*, marker: str | None = None) -> DueSourceStream:
         corrected_latitude=None,
         corrected_longitude=None,
         corrected_altitude=None,
-        last_freshness_query_timestamp=None,
         last_download_timestamp=None,
-        last_provider_image_marker=marker,
+        last_observed_provider_timestamp=provider_timestamp,
+        last_observed_image_marker=marker,
+        last_processed_timestamp=provider_timestamp,
         ema_download_period=None,
     )
 
 
-def test_unchanged_marker_skips_download() -> None:
+def test_unchanged_provider_timestamp_skips_download() -> None:
     client = Mock()
     client.get_current_image.return_value = WindyImageReference(
-        "42", "same", "https://images.example/a.jpg"
+        "42", "2026-07-30T12:00:00Z", "https://images.example/a.jpg"
     )
 
-    result = _process_job(Mock(), client, job(marker="same"), dry_run=True, ema_alpha=0.2)
+    result = _process_job(
+        client,
+        job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
+        dry_run=True,
+        ema_alpha=0.2,
+    )
 
     assert result.outcome == "unchanged"
     client.download.assert_not_called()
 
 
-def test_freshness_attempt_is_recorded_when_marker_is_unchanged(monkeypatch) -> None:
-    client = Mock()
-    client.get_current_image.return_value = WindyImageReference(
-        "42", "same", "https://images.example/a.jpg"
+def test_freshness_comparison_uses_every_available_indicator() -> None:
+    timestamp = datetime(2026, 7, 30, 12, tzinfo=timezone.utc)
+
+    assert _available_freshness_unchanged(
+        job(marker="etag"), marker="etag", provider_timestamp=None
     )
-    connection = Mock()
-    recorded = []
-    monkeypatch.setattr(
-        "ingestion.windy.windy_ingestion_workflow.record_freshness_query",
-        lambda _connection, stream_id, timestamp: recorded.append(
-            (stream_id, timestamp)
-        ),
+    assert _available_freshness_unchanged(
+        job(provider_timestamp=timestamp),
+        marker=None,
+        provider_timestamp=timestamp,
+    )
+    assert _available_freshness_unchanged(
+        job(marker="etag", provider_timestamp=timestamp),
+        marker="etag",
+        provider_timestamp=timestamp,
+    )
+    assert not _available_freshness_unchanged(
+        job(marker="etag", provider_timestamp=timestamp),
+        marker="etag",
+        provider_timestamp=timestamp + timedelta(minutes=5),
     )
 
+
+def test_unchanged_freshness_does_not_create_state_update() -> None:
+    client = Mock()
+    client.get_current_image.return_value = WindyImageReference(
+        "42", "2026-07-30T12:00:00Z", "https://images.example/a.jpg"
+    )
     result = _process_job(
-        connection, client, job(marker="same"), dry_run=False, ema_alpha=0.2
+        client,
+        job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
+        dry_run=False,
+        ema_alpha=0.2,
     )
 
     assert result.outcome == "unchanged"
-    assert recorded[0][0] == "win42"
-    connection.commit.assert_called_once_with()
+    assert result.state_update is None
 
 
 def test_dry_run_decodes_image_without_database_update() -> None:
@@ -84,52 +114,43 @@ def test_dry_run_decodes_image_without_database_update() -> None:
         "42", "new", "https://images.example/a.png"
     )
     client.download.return_value = PNG_1PX
-    connection = Mock()
-
-    result = _process_job(connection, client, job(), dry_run=True, ema_alpha=0.2)
+    result = _process_job(client, job(), dry_run=True, ema_alpha=0.2)
 
     assert result.outcome == "downloaded"
     assert (result.width, result.height, result.image_format) == (1, 1, "PNG")
-    connection.execute.assert_not_called()
+    assert result.state_update is not None
 
 
-def test_published_job_emits_latency_payload_derived_and_duration(monkeypatch) -> None:
+def test_published_job_emits_latency_payload_derived_and_duration() -> None:
     client = Mock()
     client.get_current_image.return_value = WindyImageReference(
         "42", "2020-01-01T00:00:00Z", "https://images.example/a.png"
     )
     client.download.return_value = PNG_1PX
-    connection = Mock()
     storage = Mock(prefix="")
     storage.reference.return_value = StoredObject(
         "bucket", "T0V0/win/image.jpg", "https://objects.example/image.jpg"
     )
+    storage.upload.return_value = storage.reference.return_value
+    publisher = Mock()
+    publisher.publish.return_value = "webcam/T0V0"
     events = []
-    monkeypatch.setattr(
-        "ingestion.windy.windy_ingestion_workflow.record_freshness_query",
-        lambda *args: None,
-    )
-    monkeypatch.setattr(
-        "ingestion.windy.windy_ingestion_workflow.record_download_and_enqueue_publication",
-        lambda *args, **kwargs: 300.0,
-    )
-    monkeypatch.setattr(
-        "ingestion.windy.windy_ingestion_workflow.deliver_publication",
-        lambda *args, **kwargs: DeliveryResult("image.jpg", "published"),
-    )
-
     result = _process_job(
-        connection,
         client,
         job(),
         dry_run=False,
         ema_alpha=0.2,
         storage=storage,
-        publisher=Mock(),
+        publisher=publisher,
         event_observer=lambda event, values: events.append((event, values)),
     )
 
     assert result.outcome == "published"
+    assert result.state_update is not None
+    assert result.state_update.processed_timestamp is not None
+    assert result.state_update.processed_timestamp > datetime(
+        2020, 1, 1, tzinfo=timezone.utc
+    )
     measures = {
         values["measure"]
         for event, values in events
@@ -142,7 +163,93 @@ def test_published_job_emits_latency_payload_derived_and_duration(monkeypatch) -
     }
     assert sum(event == "job_completed" for event, _ in events) == 1
     assert sum(event == "derived_image" for event, _ in events) == 1
-    assert sum(event == "mqtt_payload" for event, _ in events) == 1
+
+
+def test_download_failure_leaves_processed_state_for_next_attempt() -> None:
+    client = Mock()
+    client.get_current_image.return_value = WindyImageReference(
+        "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
+    )
+    client.download.side_effect = [WindyImageAccessError("temporary"), PNG_1PX]
+    first = _process_job(client, job(), dry_run=False, ema_alpha=0.2)
+    second = _process_job(client, job(), dry_run=False, ema_alpha=0.2)
+
+    assert first.outcome == "download_error"
+    assert second.outcome == "downloaded"
+    assert first.state_update is not None
+    assert first.state_update.processed_timestamp is None
+    assert second.state_update is not None
+    assert second.state_update.processed_timestamp is None
+
+
+def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
+    client = Mock()
+    client.get_current_image.return_value = WindyImageReference(
+        "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
+    )
+    client.download.return_value = PNG_1PX
+    storage = Mock(prefix="")
+    stored = StoredObject(
+        "bucket", "T0V0/win/image.jpg", "https://objects.example/image.jpg"
+    )
+    storage.reference.return_value = stored
+    storage.upload.return_value = stored
+    publisher = Mock()
+    publisher.publish.side_effect = [
+        MqttPublicationError("ambiguous failure"),
+        "webcam/T0V0",
+    ]
+    first = _process_job(
+        client,
+        job(),
+        dry_run=False,
+        ema_alpha=0.2,
+        storage=storage,
+        publisher=publisher,
+    )
+    second = _process_job(
+        client,
+        job(),
+        dry_run=False,
+        ema_alpha=0.2,
+        storage=storage,
+        publisher=publisher,
+    )
+
+    assert first.outcome == "mqtt_error"
+    assert second.outcome == "published"
+    assert storage.upload.call_count == 2
+    assert first.state_update is not None
+    assert first.state_update.processed_timestamp is None
+    assert second.state_update is not None
+    assert second.state_update.processed_timestamp is not None
+
+
+def test_fintraffic_unchanged_etag_discards_image_but_returns_decision_state() -> None:
+    timestamp = datetime(2026, 7, 30, 12, tzinfo=timezone.utc)
+    fintraffic_job = replace(
+        job(marker='"same-etag"'),
+        network_id="fin",
+        selected_rendition="full_jpeg",
+        last_observed_provider_timestamp=timestamp - timedelta(minutes=5),
+    )
+    client = Mock()
+    client.get_current_image.return_value = FintrafficImageReference(
+        "42", None, "https://images.example/a.png", timestamp
+    )
+    client.download.return_value = PNG_1PX
+    client.downloaded_marker.return_value = '"same-etag"'
+
+    result = _process_job(
+        client, fintraffic_job, dry_run=False, ema_alpha=0.2
+    )
+
+    assert result.outcome == "unchanged"
+    assert result.state_update is not None
+    assert result.state_update.provider_update_timestamp == timestamp
+    assert result.state_update.provider_image_marker == '"same-etag"'
+    assert result.state_update.processed_timestamp is None
+    assert result.ema_update_candidate is not None
 
 
 def test_country_selection_normalizes_and_deduplicates() -> None:

@@ -1,0 +1,18 @@
+[Unit]
+Description=Containerized webcam ingestion stack
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/opt/webcam-ingestion
+ExecStart=/usr/bin/docker compose --env-file .env --profile application --profile monitoring up -d
+ExecStop=/usr/bin/docker compose --env-file .env --profile application --profile monitoring stop
+RemainAfterExit=yes
+TimeoutStartSec=300
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

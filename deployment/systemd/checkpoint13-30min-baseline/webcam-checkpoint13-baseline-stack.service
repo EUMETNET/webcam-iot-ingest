@@ -1,0 +1,17 @@
+[Unit]
+Description=Containerized ingestion and monitoring for checkpoint-13 baseline
+Requires=docker.service
+After=docker.service network-online.target
+PartOf=webcam-checkpoint13-baseline.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/usr/bin/docker compose --env-file .env --profile monitoring up -d
+ExecStart=/usr/bin/docker compose --env-file .env --profile application up -d --build windy-worker fintraffic-worker skaping-worker
+ExecStop=/usr/bin/docker compose --env-file .env stop windy-worker fintraffic-worker skaping-worker
+RemainAfterExit=yes
+TimeoutStartSec=1800
+TimeoutStopSec=120

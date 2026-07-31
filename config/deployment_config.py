@@ -770,7 +770,6 @@ class WorkerConfig:
     shutdown_grace_s: float
     health_host: str
     health_port: int
-    outbox_batch_size: int
     database_pool_size: int = 16
     minimum_epoch_period_s: float = 15
     initial_stagger_window_s: float = 600
@@ -785,7 +784,6 @@ class WorkerConfig:
             shutdown_grace_s=float(os.getenv("INGESTION_SHUTDOWN_GRACE_S", "30")),
             health_host=os.getenv("INGESTION_HEALTH_HOST", "127.0.0.1"),
             health_port=int(os.getenv("INGESTION_HEALTH_PORT", "8002")),
-            outbox_batch_size=int(os.getenv("INGESTION_OUTBOX_BATCH_SIZE", "100")),
             database_pool_size=int(os.getenv("INGESTION_DATABASE_POOL_SIZE", "16")),
             minimum_epoch_period_s=float(
                 os.getenv("INGESTION_MIN_EPOCH_PERIOD_S", "15")
@@ -800,8 +798,8 @@ class WorkerConfig:
     def validate(self) -> None:
         if not 1 <= self.threads <= 128:
             raise ValueError("worker threads must be between 1 and 128")
-        if self.max_jobs_per_epoch < 1 or self.outbox_batch_size < 1:
-            raise ValueError("worker epoch and outbox limits must be positive")
+        if self.max_jobs_per_epoch < 1:
+            raise ValueError("worker epoch limit must be positive")
         if not 1 <= self.database_pool_size <= 64:
             raise ValueError("database pool size must be between 1 and 64")
         if min(

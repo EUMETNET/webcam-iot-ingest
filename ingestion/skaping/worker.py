@@ -12,6 +12,7 @@ import logging
 import signal
 import threading
 import time
+from dataclasses import replace
 
 from config.deployment_config import (
     DatabaseConfig,
@@ -23,18 +24,18 @@ from config.deployment_config import (
 )
 from database.registry_queries import (
     EmaUpdateCandidate,
-    apply_ema_update_candidates,
+    apply_ingestion_state_updates,
     get_due_source_streams,
 )
 from ingestion.notification.mqtt_publisher import MqttPublisher
-from ingestion.shared.publication_outbox import drain_publication_outbox
 from ingestion.skaping.skaping_ingestion_workflow import _new_client
 from ingestion.windy.windy_ingestion_workflow import _process_job
 from ingestion.worker import (
     DatabaseConnectionPool,
     InitialPollingStagger,
-    LazyPooledConnection,
     RateGate,
+    _completed_future_result,
+    _ema_update_allowed,
     _epoch_wait_s,
     _progress,
 )
@@ -171,31 +172,20 @@ def _run_epoch(
         publisher = (
             resources.enter_context(
                 MqttPublisher(
-                    MqttConfig.from_environment(), observer=metrics.observe_stage
+                    MqttConfig.from_environment(),
+                    observer=metrics.observe_stage,
+                    event_observer=metrics.observe_event,
                 )
             )
             if not dry_run
             else None
         )
-        if not dry_run:
-            with pool.connection() as connection:
-                deliveries = drain_publication_outbox(
-                    connection,
-                    storage,
-                    publisher,
-                    limit=worker.outbox_batch_size,
-                    network_id="ska",
-                )
-            metrics.outbox.labels("ska").set(
-                sum(item.outcome != "published" for item in deliveries)
-            )
         with pool.connection() as connection:
             jobs = get_due_source_streams(
                 connection,
                 "ska",
                 timedelta(seconds=skaping.minimum_ingestion_interval_s),
                 polling_interval_factor=skaping.polling_interval_factor,
-                adaptive_polling_anchor="download_timestamp",
                 limit=max_jobs,
             )
             connection.commit()
@@ -214,24 +204,29 @@ def _run_epoch(
         with ThreadPoolExecutor(
             max_workers=worker.threads, thread_name_prefix="skaping"
         ) as executor:
-            futures: set[Future] = {
+            futures: dict[Future, object] = {
                 executor.submit(
                     _process_due_job,
                     job,
                     dry_run,
                     skaping,
                     client,
-                    pool,
                     storage,
                     publisher,
                     metrics,
-                )
+                ): job
                 for job in jobs
             }
             for future in as_completed(futures):
-                result = future.result()
+                job = futures[future]
+                result = _completed_future_result(
+                    future,
+                    job,
+                    network_id="ska",
+                    epoch_number=epoch_number,
+                    metrics=metrics,
+                )
                 results.append(result)
-                metrics.jobs.labels("ska", result.outcome).inc()
                 if verbose:
                     print(
                         json.dumps(
@@ -240,22 +235,34 @@ def _run_epoch(
                         ),
                         flush=True,
                     )
+        state_updates = [
+            result.state_update
+            for result in results
+            if getattr(result, "state_update", None) is not None
+        ]
+        state_updates = [
+            replace(update, ema_update_candidate=None)
+            if update.source_stream_id in initial_release_ids
+            else update
+            for update in state_updates
+        ]
         candidates = [
             result.ema_update_candidate
             for result in results
             if isinstance(result.ema_update_candidate, EmaUpdateCandidate)
             and result.ema_update_candidate.source_stream_id not in initial_release_ids
         ]
+        ema_update_eligible = not dry_run and _ema_update_allowed(
+            epoch_number,
+            time.monotonic() - epoch_started,
+            skaping.minimum_ingestion_interval_s,
+        )
         applied = 0
-        if (
-            not dry_run
-            and epoch_number > 1
-            and time.monotonic() - epoch_started
-            < skaping.minimum_ingestion_interval_s
-            and candidates
-        ):
+        if not dry_run and state_updates:
             with pool.connection() as connection:
-                applied = apply_ema_update_candidates(connection, candidates)
+                applied = apply_ingestion_state_updates(
+                    connection, state_updates, apply_ema=ema_update_eligible
+                )
                 connection.commit()
     return {
         "selected": len(jobs),
@@ -263,28 +270,24 @@ def _run_epoch(
             sorted(Counter(result.outcome for result in results).items())
         ),
         "ema_candidates": len(candidates),
-        "ema_updates_applied": applied,
+        "state_updates_applied": applied,
+        "ema_updates_applied": len(candidates) if ema_update_eligible else 0,
         "stagger_deferred": deferred,
     }
 
 
-def _process_due_job(
-    job, dry_run, skaping, client, pool, storage, publisher, metrics
-):
-    with LazyPooledConnection(pool) as connection:
-        return _process_job(
-            connection,
-            client,
-            job,
-            dry_run=dry_run,
-            ema_alpha=skaping.ema_alpha,
-            transformation=TransformationConfig.from_environment(),
-            storage=storage,
-            publisher=publisher,
-            stage_observer=metrics.observe_stage,
-            event_observer=metrics.observe_event,
-            defer_ema_update=True,
-        )
+def _process_due_job(job, dry_run, skaping, client, storage, publisher, metrics):
+    return _process_job(
+        client,
+        job,
+        dry_run=dry_run,
+        ema_alpha=skaping.ema_alpha,
+        transformation=TransformationConfig.from_environment(),
+        storage=storage,
+        publisher=publisher,
+        stage_observer=metrics.observe_stage,
+        event_observer=metrics.observe_event,
+    )
 
 
 def main() -> None:

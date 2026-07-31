@@ -6,7 +6,7 @@ import argparse
 from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, replace
 from datetime import timedelta
 import hashlib
 import json
@@ -18,6 +18,7 @@ import time
 from typing import Callable
 
 import psycopg
+from psycopg.pq import TransactionStatus
 
 from config.deployment_config import (
     DatabaseConfig,
@@ -31,11 +32,10 @@ from config.deployment_config import (
 from database.registry_queries import (
     DueSourceStream,
     EmaUpdateCandidate,
-    apply_ema_update_candidates,
+    apply_ingestion_state_updates,
     get_due_source_streams,
 )
 from ingestion.notification.mqtt_publisher import MqttPublisher
-from ingestion.shared.publication_outbox import drain_publication_outbox
 from ingestion.windy.windy_image_access import WindyImageClient
 from ingestion.windy.windy_ingestion_workflow import _process_job, _validate_countries
 from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
@@ -109,6 +109,7 @@ class DatabaseConnectionPool:
         self._lock = threading.Lock()
         self._all: list[object] = []
         self._observer = observer
+        self._discarded_slots = 0
 
     @contextmanager
     def connection(self):
@@ -121,6 +122,14 @@ class DatabaseConnectionPool:
                     connection = _connect(self._config)
                     self._created += 1
                     self._all.append(connection)
+                    if self._discarded_slots:
+                        self._discarded_slots -= 1
+                        if self._observer is not None:
+                            self._observer(
+                                "database_pool_cleanup",
+                                "replacement",
+                                time.monotonic() - started,
+                            )
                 else:
                     connection = None
             if connection is None:
@@ -130,12 +139,50 @@ class DatabaseConnectionPool:
         try:
             yield connection
         finally:
-            if getattr(connection, "closed", False):
-                with self._lock:
-                    self._created -= 1
-                    self._all.remove(connection)
-            else:
+            if self._restore(connection):
                 self._available.put(connection)
+
+    def _restore(self, connection: object) -> bool:
+        """Return whether a borrowed connection is safe to reuse."""
+
+        if getattr(connection, "closed", False):
+            self._discard(connection)
+            return False
+        started = time.monotonic()
+        try:
+            status = connection.info.transaction_status
+            if status != TransactionStatus.IDLE:
+                connection.rollback()
+                if connection.info.transaction_status != TransactionStatus.IDLE:
+                    raise RuntimeError("database connection rollback did not restore IDLE")
+                if self._observer is not None:
+                    self._observer(
+                        "database_pool_cleanup",
+                        "rollback",
+                        time.monotonic() - started,
+                    )
+            return True
+        except Exception:
+            logger.exception("Discarding database connection that could not be restored")
+            try:
+                connection.close()
+            except Exception:
+                logger.exception("Failed to close discarded database connection")
+            self._discard(connection)
+            if self._observer is not None:
+                self._observer(
+                    "database_pool_cleanup",
+                    "discard",
+                    time.monotonic() - started,
+                )
+            return False
+
+    def _discard(self, connection: object) -> None:
+        with self._lock:
+            if connection in self._all:
+                self._all.remove(connection)
+                self._created -= 1
+                self._discarded_slots += 1
 
     def close(self) -> None:
         for connection in self._all:
@@ -143,26 +190,40 @@ class DatabaseConnectionPool:
         self._all.clear()
 
 
-class LazyPooledConnection:
-    """Borrow a database connection only when processing first writes state."""
+@dataclass(frozen=True)
+class InternalErrorResult:
+    """Accounting result for an unexpected exception escaping a source job."""
 
-    def __init__(self, pool: DatabaseConnectionPool) -> None:
-        self._pool = pool
-        self._context = None
-        self._connection = None
+    source_stream_id: str
+    outcome: str = "internal_error"
+    ema_update_candidate: None = None
 
-    def __enter__(self):
-        return self
 
-    def __exit__(self, *exc: object) -> None:
-        if self._context is not None:
-            self._context.__exit__(*exc)
-
-    def __getattr__(self, name: str):
-        if self._connection is None:
-            self._context = self._pool.connection()
-            self._connection = self._context.__enter__()
-        return getattr(self._connection, name)
+def _completed_future_result(
+    future: Future,
+    job: DueSourceStream,
+    *,
+    network_id: str,
+    epoch_number: int,
+    metrics: WorkerMetrics,
+):
+    try:
+        result = future.result()
+    except Exception:
+        logger.exception(
+            "Unexpected source job failure: source_stream_id=%s network=%s epoch=%s",
+            job.source_stream_id,
+            network_id,
+            epoch_number,
+        )
+        metrics.jobs.labels(network_id, "internal_error").inc()
+        metrics.observe_event(
+            "failure",
+            {"stage": "source_job", "reason": "internal_error"},
+        )
+        return InternalErrorResult(job.source_stream_id)
+    metrics.jobs.labels(network_id, result.outcome).inc()
+    return result
 
 
 class RateGate:
@@ -283,6 +344,16 @@ def _epoch_wait_s(
     return max(idle_delay_s, minimum_period_s - elapsed_s, 0)
 
 
+def _ema_update_allowed(
+    epoch_number: int, epoch_duration_s: float, minimum_ingestion_interval_s: float
+) -> bool:
+    """Keep the established first-epoch and overlong-epoch EMA guards."""
+    return (
+        epoch_number > 1
+        and epoch_duration_s < minimum_ingestion_interval_s
+    )
+
+
 def _run_epoch(
     countries: tuple[str, ...],
     max_jobs: int,
@@ -330,27 +401,14 @@ def _run_epoch(
         publisher = (
             resources.enter_context(
                 MqttPublisher(
-                    MqttConfig.from_environment(), observer=metrics.observe_stage
+                    MqttConfig.from_environment(),
+                    observer=metrics.observe_stage,
+                    event_observer=metrics.observe_event,
                 )
             )
             if not dry_run
             else None
         )
-        if not dry_run:
-            with pool.connection() as connection:
-                assert storage is not None and publisher is not None
-                deliveries = drain_publication_outbox(
-                    connection,
-                    storage,
-                    publisher,
-                    limit=worker.outbox_batch_size,
-                    network_id="win",
-                )
-            metrics.outbox.labels("win").set(
-                sum(item.outcome != "published" for item in deliveries)
-            )
-            for item in deliveries:
-                metrics.jobs.labels("win", item.outcome).inc()
         with pool.connection() as connection:
             jobs = get_due_source_streams(
                 connection,
@@ -390,33 +448,48 @@ def _run_epoch(
             )
         results = []
         with ThreadPoolExecutor(max_workers=worker.threads, thread_name_prefix="windy") as executor:
-            futures: set[Future] = {
+            futures: dict[Future, DueSourceStream] = {
                 executor.submit(
                     _process_due_job,
                     job,
                     dry_run,
                     windy,
                     client,
-                    pool,
                     storage,
                     publisher,
                     metrics.observe_stage,
                     metrics.observe_event,
-                    True,
-                )
+                ): job
                 for job in jobs
             }
             last_report = 0.0
             while futures:
-                done, futures = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
+                done, _ = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
-                    result = future.result()
+                    job = futures.pop(future)
+                    result = _completed_future_result(
+                        future,
+                        job,
+                        network_id="win",
+                        epoch_number=epoch_number,
+                        metrics=metrics,
+                    )
                     results.append(result)
-                    metrics.jobs.labels("win", result.outcome).inc()
                 now = time.monotonic()
                 if verbose and (now - last_report >= 1 or not futures):
                     print(json.dumps(_progress(epoch_number, len(jobs), results), sort_keys=True), flush=True)
                     last_report = now
+        state_updates = [
+            result.state_update
+            for result in results
+            if getattr(result, "state_update", None) is not None
+        ]
+        state_updates = [
+            replace(update, ema_update_candidate=None)
+            if update.source_stream_id in initial_release_ids
+            else update
+            for update in state_updates
+        ]
         candidates = [
             result.ema_update_candidate
             for result in results
@@ -427,17 +500,18 @@ def _run_epoch(
             for candidate in candidates
             if candidate.source_stream_id not in initial_release_ids
         ]
-        ema_updates_applied = 0
-        ema_update_eligible = (
-            not dry_run
-            and epoch_number > 1
-            and time.monotonic() - epoch_started
-            < windy.minimum_ingestion_interval_s
+        state_updates_applied = 0
+        ema_update_eligible = not dry_run and _ema_update_allowed(
+            epoch_number,
+            time.monotonic() - epoch_started,
+            windy.minimum_ingestion_interval_s,
         )
-        if ema_update_eligible and applicable_candidates:
+        if not dry_run and state_updates:
             with pool.connection() as connection:
-                ema_updates_applied = apply_ema_update_candidates(
-                    connection, applicable_candidates
+                state_updates_applied = apply_ingestion_state_updates(
+                    connection,
+                    state_updates,
+                    apply_ema=ema_update_eligible,
                 )
                 connection.commit()
     outcomes: dict[str, int] = {}
@@ -447,7 +521,10 @@ def _run_epoch(
         "selected": len(jobs),
         "outcomes": dict(sorted(outcomes.items())),
         "ema_candidates": len(candidates),
-        "ema_updates_applied": ema_updates_applied,
+        "state_updates_applied": state_updates_applied,
+        "ema_updates_applied": (
+            len(applicable_candidates) if ema_update_eligible else 0
+        ),
     }
     if batch_summary is not None:
         summary["freshness_batch"] = batch_summary
@@ -484,27 +561,22 @@ def _process_due_job(
     dry_run: bool,
     windy: WindyIngestionConfig,
     client: WindyImageClient,
-    pool: DatabaseConnectionPool,
     storage: S3Storage | None,
     publisher: MqttPublisher | None,
     stage_observer,
     event_observer,
-    defer_ema_update: bool = True,
 ):
-    with LazyPooledConnection(pool) as connection:
-        return _process_job(
-            connection,
-            client,
-            job,
-            dry_run=dry_run,
-            ema_alpha=windy.ema_alpha,
-            transformation=TransformationConfig.from_environment(),
-            storage=storage,
-            publisher=publisher,
-            stage_observer=stage_observer,
-            event_observer=event_observer,
-            defer_ema_update=defer_ema_update,
-        )
+    return _process_job(
+        client,
+        job,
+        dry_run=dry_run,
+        ema_alpha=windy.ema_alpha,
+        transformation=TransformationConfig.from_environment(),
+        storage=storage,
+        publisher=publisher,
+        stage_observer=stage_observer,
+        event_observer=event_observer,
+    )
 
 
 def _connect(config: DatabaseConfig):

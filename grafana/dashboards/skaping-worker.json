@@ -149,13 +149,25 @@
           ]
         }
       },
-      "targets": [
-        {
-          "expr": "sum(webcam_publication_outbox_pending_count{source_network=\"ska\"})",
-          "legendFormat": "pending"
-        }
-      ],
-      "title": "Publication outbox",
+    "targets": [
+      {
+        "expr": "sum(increase(webcam_s3_upload_total{source_network=\"ska\",result=\"success\"}[5m]))",
+        "legendFormat": "S3 success"
+      },
+      {
+        "expr": "sum(increase(webcam_s3_upload_total{source_network=\"ska\",result=\"failure\"}[5m]))",
+        "legendFormat": "S3 failure"
+      },
+      {
+        "expr": "sum(increase(webcam_mqtt_publication_total{source_network=\"ska\",result=\"success\"}[5m]))",
+        "legendFormat": "MQTT success"
+      },
+      {
+        "expr": "sum(increase(webcam_mqtt_publication_total{source_network=\"ska\",result=\"failure\"}[5m]))",
+        "legendFormat": "MQTT failure"
+      }
+    ],
+    "title": "5-minute delivery operations",
       "type": "stat"
     },
     {

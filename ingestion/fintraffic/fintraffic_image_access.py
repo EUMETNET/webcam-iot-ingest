@@ -21,8 +21,9 @@ class FintrafficImageAccessError(WindyImageAccessError):
 @dataclass(frozen=True)
 class FintrafficImageReference:
     provider_id: str
-    marker: str
+    marker: str | None
     image_url: str
+    provider_update_timestamp: datetime
 
 
 class FintrafficImageClient:
@@ -58,6 +59,7 @@ class FintrafficImageClient:
         self._request_gate = request_gate
         self._references: dict[str, FintrafficImageReference] = {}
         self._expected_by_url: dict[str, str] = {}
+        self._downloaded_etags: dict[str, str] = {}
         self._owns_client = client is None
         self._client = client or httpx.Client()
 
@@ -79,7 +81,8 @@ class FintrafficImageClient:
             raise
         self._references = references
         self._expected_by_url = {
-            reference.image_url: reference.marker for reference in references.values()
+            reference.image_url: reference.provider_update_timestamp.isoformat()
+            for reference in references.values()
         }
         if self._observer:
             self._observer("provider_refresh", "success", time.monotonic() - started)
@@ -121,6 +124,12 @@ class FintrafficImageClient:
                         )
                     response.raise_for_status()
                     self._validate_last_modified(response, image_url)
+                    etag = response.headers.get("ETag")
+                    if not etag:
+                        raise FintrafficImageAccessError(
+                            "Fintraffic image has no ETag"
+                        )
+                    self._downloaded_etags[image_url] = etag
                     content = _read_image(response, self._max_image_bytes)
                 if self._observer:
                     self._observer(
@@ -137,6 +146,9 @@ class FintrafficImageClient:
             "Fintraffic image download failed",
             throttled=_is_throttled(last_error),
         ) from last_error
+
+    def downloaded_marker(self, image_url: str) -> str | None:
+        return self._downloaded_etags.get(image_url)
 
     def _request_json(self) -> Any:
         last_error: Exception | None = None
@@ -218,10 +230,19 @@ def _parse_station_data(
                 raise FintrafficImageAccessError("invalid Fintraffic preset marker")
             if provider_id in references:
                 raise FintrafficImageAccessError("duplicate Fintraffic preset marker")
+            try:
+                provider_timestamp = datetime.fromisoformat(
+                    measured_time.replace("Z", "+00:00")
+                ).astimezone(UTC)
+            except ValueError as error:
+                raise FintrafficImageAccessError(
+                    "invalid Fintraffic preset timestamp"
+                ) from error
             references[provider_id] = FintrafficImageReference(
-                provider_id,
-                measured_time,
-                f"{image_base_url}/{quote(provider_id, safe='')}.jpg",
+                provider_id=provider_id,
+                marker=None,
+                image_url=f"{image_base_url}/{quote(provider_id, safe='')}.jpg",
+                provider_update_timestamp=provider_timestamp,
             )
     return references
 

@@ -15,14 +15,38 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./database/schema/001_pilot_schema.sql:/docker-entrypoint-initdb.d/001_pilot_schema.sql:ro
-      - ./database/schema/002_publication_outbox.sql:/docker-entrypoint-initdb.d/002_publication_outbox.sql:ro
-      - ./database/schema/003_adaptive_polling.sql:/docker-entrypoint-initdb.d/003_adaptive_polling.sql:ro
+      - ./database/schema/005_remove_publication_outbox.sql:/docker-entrypoint-initdb.d/005_remove_publication_outbox.sql:ro
+      - ./database/schema/006_simplify_ingestion_state.sql:/docker-entrypoint-initdb.d/006_simplify_ingestion_state.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+
+  schema-migrate:
+    image: postgres:16.9-bookworm
+    restart: "no"
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${DATABASE_NAME:-webcam_ingestion}
+      PGUSER: ${DATABASE_USER:-webcam_ingestion}
+    secrets:
+      - database_password
+    volumes:
+      - ./database/schema/005_remove_publication_outbox.sql:/migrations/005_remove_publication_outbox.sql:ro
+      - ./database/schema/006_simplify_ingestion_state.sql:/migrations/006_simplify_ingestion_state.sql:ro
+    command:
+      - bash
+      - -euc
+      - |
+        export PGPASSWORD="$$(cat /run/secrets/database_password)"
+        psql --set=ON_ERROR_STOP=1 --file=/migrations/005_remove_publication_outbox.sql
+        psql --set=ON_ERROR_STOP=1 --file=/migrations/006_simplify_ingestion_state.sql
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   ingest:
     build:
@@ -51,12 +75,17 @@ services:
         condition: service_healthy
 
   windy-worker:
-    profiles: ["worker"]
+    profiles: ["application"]
     build:
       context: .
       dockerfile: Dockerfile
     command: ["python", "-m", "ingestion.worker", "--network", "win"]
+    env_file:
+      - .env
     restart: unless-stopped
+    stop_grace_period: ${INGESTION_SHUTDOWN_GRACE_S:-65}s
+    cpus: ${WINDY_CPU_LIMIT:-4.0}
+    mem_limit: ${WINDY_MEMORY_LIMIT:-2g}
     ports:
       - "127.0.0.1:8002:8002"
     environment:
@@ -83,14 +112,170 @@ services:
       MINIMUM_INGESTION_INTERVAL_S: ${MINIMUM_INGESTION_INTERVAL_S:-300}
       POLLING_INTERVAL_FACTOR: ${POLLING_INTERVAL_FACTOR:-0.7}
       MAXIMUM_POLL_INTERVAL_S: ${MAXIMUM_POLL_INTERVAL_S:-1800}
+      INGESTION_WORKER_THREADS: ${WINDY_WORKER_THREADS:-60}
+      INGESTION_DATABASE_POOL_SIZE: ${WINDY_DATABASE_POOL_SIZE:-24}
+      INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
     secrets:
       - database_password
       - windy_api_key
       - s3_access_key
       - s3_secret_key
     depends_on:
-      postgres:
+      schema-migrate:
+        condition: service_completed_successfully
+      mqtt:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/readyz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  fintraffic-worker:
+    profiles: ["application"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "ingestion.fintraffic.worker"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    stop_grace_period: ${INGESTION_SHUTDOWN_GRACE_S:-65}s
+    cpus: ${FINTRAFFIC_CPU_LIMIT:-2.0}
+    mem_limit: ${FINTRAFFIC_MEMORY_LIMIT:-1g}
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-webcam_ingestion}
+      DATABASE_USER: ${DATABASE_USER:-webcam_ingestion}
+      DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      FINTRAFFIC_USER_HEADER: ${FINTRAFFIC_USER_HEADER:-webcam-iot-ingest}
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-webcam}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE}
+      S3_REGION: ${S3_REGION:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+      S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+      INGESTION_HEALTH_HOST: 0.0.0.0
+      INGESTION_HEALTH_PORT: 8003
+      INGESTION_WORKER_THREADS: ${FINTRAFFIC_WORKER_THREADS:-20}
+      INGESTION_DATABASE_POOL_SIZE: ${FINTRAFFIC_DATABASE_POOL_SIZE:-8}
+      INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
+    secrets:
+      - database_password
+      - s3_access_key
+      - s3_secret_key
+    depends_on:
+      schema-migrate:
+        condition: service_completed_successfully
+      mqtt:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/readyz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  skaping-worker:
+    profiles: ["application"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "ingestion.skaping.worker"]
+    env_file:
+      - .env
+    restart: unless-stopped
+    stop_grace_period: ${INGESTION_SHUTDOWN_GRACE_S:-65}s
+    cpus: ${SKAPING_CPU_LIMIT:-1.0}
+    mem_limit: ${SKAPING_MEMORY_LIMIT:-512m}
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-webcam_ingestion}
+      DATABASE_USER: ${DATABASE_USER:-webcam_ingestion}
+      DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      SKAPING_API_KEY_FILE: /run/secrets/skaping_api_key
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-webcam}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE}
+      S3_REGION: ${S3_REGION:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+      S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+      INGESTION_HEALTH_HOST: 0.0.0.0
+      INGESTION_HEALTH_PORT: 8004
+      INGESTION_WORKER_THREADS: ${SKAPING_WORKER_THREADS:-4}
+      INGESTION_DATABASE_POOL_SIZE: ${SKAPING_DATABASE_POOL_SIZE:-4}
+      INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
+    secrets:
+      - database_password
+      - skaping_api_key
+      - s3_access_key
+      - s3_secret_key
+    depends_on:
+      schema-migrate:
+        condition: service_completed_successfully
+      mqtt:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/readyz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  webcam-job:
+    profiles: ["jobs"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${DATABASE_NAME:-webcam_ingestion}
+      DATABASE_USER: ${DATABASE_USER:-webcam_ingestion}
+      DATABASE_PASSWORD_FILE: /run/secrets/database_password
+      WINDY_API_KEY_FILE: /run/secrets/windy_api_key
+      SKAPING_API_KEY_FILE: /run/secrets/skaping_api_key
+      FINTRAFFIC_USER_HEADER: ${FINTRAFFIC_USER_HEADER:-webcam-iot-ingest}
+      MQTT_HOST: mqtt
+      MQTT_PORT: 1883
+      MQTT_TLS: "false"
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-webcam}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_PREFIX: ${S3_PREFIX:-}
+      S3_PUBLIC_URL_BASE: ${S3_PUBLIC_URL_BASE}
+      S3_REGION: ${S3_REGION:-}
+      S3_ADDRESSING_STYLE: ${S3_ADDRESSING_STYLE:-path}
+      S3_ACCESS_KEY_FILE: /run/secrets/s3_access_key
+      S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
+      DISCOVERY_METRICS_GATEWAY_URL: http://pushgateway:9091
+      BATCH_METRICS_GATEWAY_URL: http://pushgateway:9091
+    secrets:
+      - database_password
+      - windy_api_key
+      - skaping_api_key
+      - s3_access_key
+      - s3_secret_key
+    depends_on:
+      schema-migrate:
+        condition: service_completed_successfully
       mqtt:
         condition: service_healthy
 
@@ -217,6 +402,8 @@ secrets:
     file: ./.secrets/database_password
   windy_api_key:
     file: ./.secrets/windy_api_key
+  skaping_api_key:
+    file: ./.secrets/skaping_api_key
   s3_access_key:
     file: ./.secrets/s3_access_key
   s3_secret_key:

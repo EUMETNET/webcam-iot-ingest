@@ -1,0 +1,118 @@
+Checkpoint 2 work record - shared database registry access layer
+================================================================
+
+Scope
+-----
+
+Checkpoint 2 implements only the provider-independent PostgreSQL access layer.
+It does not call Windy, Fintraffic, or Skaping APIs and does not implement image
+download, transformation, S3 upload, or MQTT notification.
+
+Repository and safety observations
+----------------------------------
+
+- Work was performed on the codex branch.
+- The private architecture document was used only as read-only background.
+- No destructive Git or database command was used.
+- The existing three-table pilot schema already contained all columns and
+  constraints required by this checkpoint, so no schema migration was added.
+- Existing unrelated working-tree files and changes were left untouched.
+
+Implementation
+--------------
+
+Added database/registry_queries.py as the shared boundary between future
+provider workflows and PostgreSQL.
+
+The module defines provider-neutral discovery records for sites and source
+streams, a registry snapshot, a discovery-update result, and due-stream job
+records. It also defines explicit errors for missing records and stable-ID
+collisions.
+
+The implemented operations are:
+
+- get_network_registry:
+  retrieves all sites and source streams for one network, including provider
+  metadata and ingestion state;
+
+- apply_discovery_update:
+  applies one complete provider discovery snapshot inside one transaction,
+  inserts new records, updates known records without changing their internal
+  identifiers, replaces provider jsonb metadata snapshots, reactivates
+  returning inactive streams, marks absent active streams inactive, and never
+  changes a blacklisted stream automatically;
+
+- set_source_stream_status:
+  provides an explicit operator path for active, inactive, and blacklisted
+  status changes;
+
+- get_due_source_streams:
+  retrieves active streams belonging to one network when they have never been
+  downloaded or their last successful download is older than the configured
+  minimum ingestion interval;
+
+- record_provider_image_marker:
+  records a handled provider marker without changing the successful-download
+  timestamp or EMA. This is the state transition intended for a downloaded
+  provider image that is unreadable or corrupt;
+
+- record_successful_download:
+  locks one stream row and atomically updates the provider marker, successful
+  download timestamp, and exponential moving average. The first EMA is 300
+  seconds by default. Later values use the configured alpha.
+
+Input and identity protections
+------------------------------
+
+- Duplicate internal site or stream identifiers in one discovery snapshot are
+  rejected before database writes.
+- Duplicate provider site identifiers, or duplicate provider stream identifiers
+  under one site, are rejected.
+- An internal identifier cannot be reassigned to another network, site, or
+  provider entity.
+- A provider identifier already mapped to one internal identifier cannot be
+  silently remapped to another.
+- Streams cannot reference sites omitted from the same complete discovery
+  snapshot.
+- Due-selection and successful-download timestamps must be timezone-aware.
+- Negative ingestion intervals, invalid EMA alpha values, negative initial EMA
+  values, and backwards download timestamps are rejected.
+
+Tests
+-----
+
+Added tests/database/test_registry_queries.py. Its PostgreSQL integration tests
+cover:
+
+- first insertion and repeated idempotent discovery;
+- replacement, rather than merging, of provider metadata snapshots;
+- inactive transitions for missing streams and reactivation when they return;
+- blacklist preservation when a stream is present or absent from discovery;
+- stable-identifier collision rejection;
+- rollback of a partially applied discovery snapshot;
+- due-stream filtering by time and status;
+- marker-only updates at the invalid-image stage;
+- successful-download timestamp, marker, and EMA updates.
+
+Like the existing schema integration tests, every test runs in a transaction
+and rolls back its generated UUID-based records.
+
+Validation performed during implementation
+------------------------------------------
+
+- Python bytecode compilation completed successfully for database and database
+  test modules.
+- The non-live test command completed with 2 passed and 13 database tests
+  correctly skipped because RUN_DATABASE_TESTS was not enabled.
+- An attempted live run could not connect because PostgreSQL had been stopped
+  after Checkpoint 1. An attempt to start it from the implementation sandbox was
+  denied access to the VM Docker socket. This is an execution-environment
+  limitation, not a test assertion result.
+- Full live PostgreSQL validation therefore remains for the repository owner and
+  is documented in manual_tests/validation_to_complete_checkpoint2.
+
+Checkpoint state
+----------------
+
+Implementation is prepared. Checkpoint 2 is not accepted until every command in
+the manual validation runbook passes and the final diff is reviewed.

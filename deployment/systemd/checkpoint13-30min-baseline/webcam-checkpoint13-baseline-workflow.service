@@ -1,0 +1,8 @@
+[Unit]
+Description=Sequential discovery, backup, and cleanup baseline workflow
+After=webcam-checkpoint13-baseline-stack.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-30min-baseline/run-workflow
+TimeoutStartSec=infinity

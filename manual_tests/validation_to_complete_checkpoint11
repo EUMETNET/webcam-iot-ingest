@@ -1,6 +1,9 @@
 Checkpoint 11 owner validation - Skaping ingestion
 ===================================================
 
+Historical validation notice: polling and outbox details below were
+superseded by `validation_first_code_review_after_step12`.
+
 Status: ready for owner validation.
 
 1. Automated tests

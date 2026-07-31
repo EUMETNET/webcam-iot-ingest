@@ -12,6 +12,7 @@ import logging
 import signal
 import threading
 import time
+from dataclasses import replace
 
 from config.deployment_config import (
     DatabaseConfig,
@@ -23,18 +24,18 @@ from config.deployment_config import (
 )
 from database.registry_queries import (
     EmaUpdateCandidate,
-    apply_ema_update_candidates,
+    apply_ingestion_state_updates,
     get_due_source_streams,
 )
 from ingestion.fintraffic.fintraffic_ingestion_workflow import _new_client
 from ingestion.notification.mqtt_publisher import MqttPublisher
-from ingestion.shared.publication_outbox import drain_publication_outbox
 from ingestion.windy.windy_ingestion_workflow import _process_job
 from ingestion.worker import (
     DatabaseConnectionPool,
     InitialPollingStagger,
-    LazyPooledConnection,
     RateGate,
+    _completed_future_result,
+    _ema_update_allowed,
     _epoch_wait_s,
     _progress,
 )
@@ -171,27 +172,14 @@ def _run_epoch(
         publisher = (
             resources.enter_context(
                 MqttPublisher(
-                    MqttConfig.from_environment(), observer=metrics.observe_stage
+                    MqttConfig.from_environment(),
+                    observer=metrics.observe_stage,
+                    event_observer=metrics.observe_event,
                 )
             )
             if not dry_run
             else None
         )
-        if not dry_run:
-            with pool.connection() as connection:
-                assert storage is not None and publisher is not None
-                deliveries = drain_publication_outbox(
-                    connection,
-                    storage,
-                    publisher,
-                    limit=worker.outbox_batch_size,
-                    network_id="fin",
-                )
-            metrics.outbox.labels("fin").set(
-                sum(item.outcome != "published" for item in deliveries)
-            )
-            for item in deliveries:
-                metrics.jobs.labels("fin", item.outcome).inc()
         with pool.connection() as connection:
             jobs = get_due_source_streams(
                 connection,
@@ -217,27 +205,32 @@ def _run_epoch(
         with ThreadPoolExecutor(
             max_workers=worker.threads, thread_name_prefix="fintraffic"
         ) as executor:
-            futures: set[Future] = {
+            futures: dict[Future, object] = {
                 executor.submit(
                     _process_due_job,
                     job,
                     dry_run,
                     fintraffic,
                     client,
-                    pool,
                     storage,
                     publisher,
                     metrics,
-                )
+                ): job
                 for job in jobs
             }
             last_report = 0.0
             while futures:
-                done, futures = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
+                done, _ = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
-                    result = future.result()
+                    job = futures.pop(future)
+                    result = _completed_future_result(
+                        future,
+                        job,
+                        network_id="fin",
+                        epoch_number=epoch_number,
+                        metrics=metrics,
+                    )
                     results.append(result)
-                    metrics.jobs.labels("fin", result.outcome).inc()
                 now = time.monotonic()
                 if verbose and (now - last_report >= 1 or not futures):
                     print(
@@ -248,22 +241,34 @@ def _run_epoch(
                         flush=True,
                     )
                     last_report = now
+        state_updates = [
+            result.state_update
+            for result in results
+            if getattr(result, "state_update", None) is not None
+        ]
+        state_updates = [
+            replace(update, ema_update_candidate=None)
+            if update.source_stream_id in initial_release_ids
+            else update
+            for update in state_updates
+        ]
         candidates = [
             result.ema_update_candidate
             for result in results
             if isinstance(result.ema_update_candidate, EmaUpdateCandidate)
             and result.ema_update_candidate.source_stream_id not in initial_release_ids
         ]
+        ema_update_eligible = not dry_run and _ema_update_allowed(
+            epoch_number,
+            time.monotonic() - epoch_started,
+            fintraffic.minimum_ingestion_interval_s,
+        )
         applied = 0
-        if (
-            not dry_run
-            and epoch_number > 1
-            and time.monotonic() - epoch_started
-            < fintraffic.minimum_ingestion_interval_s
-            and candidates
-        ):
+        if not dry_run and state_updates:
             with pool.connection() as connection:
-                applied = apply_ema_update_candidates(connection, candidates)
+                applied = apply_ingestion_state_updates(
+                    connection, state_updates, apply_ema=ema_update_eligible
+                )
                 connection.commit()
     outcomes = Counter(result.outcome for result in results)
     return {
@@ -271,7 +276,8 @@ def _run_epoch(
         "freshness_presets": freshness_presets,
         "outcomes": dict(sorted(outcomes.items())),
         "ema_candidates": len(candidates),
-        "ema_updates_applied": applied,
+        "state_updates_applied": applied,
+        "ema_updates_applied": len(candidates) if ema_update_eligible else 0,
         "stagger_deferred": deferred,
     }
 
@@ -281,25 +287,21 @@ def _process_due_job(
     dry_run,
     fintraffic,
     client,
-    pool,
     storage,
     publisher,
     metrics,
 ):
-    with LazyPooledConnection(pool) as connection:
-        return _process_job(
-            connection,
-            client,
-            job,
-            dry_run=dry_run,
-            ema_alpha=fintraffic.ema_alpha,
-            transformation=TransformationConfig.from_environment(),
-            storage=storage,
-            publisher=publisher,
-            stage_observer=metrics.observe_stage,
-            event_observer=metrics.observe_event,
-            defer_ema_update=True,
-        )
+    return _process_job(
+        client,
+        job,
+        dry_run=dry_run,
+        ema_alpha=fintraffic.ema_alpha,
+        transformation=TransformationConfig.from_environment(),
+        storage=storage,
+        publisher=publisher,
+        stage_observer=metrics.observe_stage,
+        event_observer=metrics.observe_event,
+    )
 
 
 def main() -> None:

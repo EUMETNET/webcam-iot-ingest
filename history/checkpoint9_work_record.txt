@@ -1,6 +1,11 @@
 Checkpoint 9 work record - Fintraffic ingestion
 ================================================
 
+Post-checkpoint note (2026-07-30): the durable publication outbox documented
+below was removed after checkpoint 12. Fintraffic now stores its provider
+timestamp separately and captures JPEG ETag as the opaque content marker after
+download. This file otherwise remains a historical checkpoint record.
+
 Status: accepted by the repository owner on 2026-07-23.
 
 Implementation

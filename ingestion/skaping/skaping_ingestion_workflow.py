@@ -18,7 +18,7 @@ from config.deployment_config import (
     SkapingIngestionConfig,
     TransformationConfig,
 )
-from database.registry_queries import get_due_source_streams
+from database.registry_queries import apply_ingestion_state_updates, get_due_source_streams
 from ingestion.notification.mqtt_publisher import MqttPublisher
 from ingestion.skaping.skaping_image_access import SkapingImageClient
 from ingestion.windy.windy_ingestion_workflow import (
@@ -70,12 +70,10 @@ def run_ingestion(
             "ska",
             timedelta(seconds=config.minimum_ingestion_interval_s),
             polling_interval_factor=config.polling_interval_factor,
-            adaptive_polling_anchor="download_timestamp",
             limit=limit or config.default_limit,
         )
         results = tuple(
             _process_job(
-                connection,
                 client,
                 job,
                 dry_run=dry_run,
@@ -86,6 +84,13 @@ def run_ingestion(
             )
             for job in jobs
         )
+        if not dry_run:
+            apply_ingestion_state_updates(
+                connection,
+                [result.state_update for result in results if result.state_update],
+                apply_ema=True,
+            )
+            connection.commit()
     outcomes = dict(sorted(Counter(item.outcome for item in results).items()))
     return SkapingIngestionResult(
         dry_run=dry_run,

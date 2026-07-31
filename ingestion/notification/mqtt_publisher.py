@@ -23,10 +23,12 @@ class MqttPublisher:
         client: Any | None = None,
         sleep: Callable[[float], None] = time.sleep,
         observer: Callable[[str, str, float], None] | None = None,
+        event_observer: Callable[[str, dict[str, object]], None] | None = None,
     ) -> None:
         self._config = config
         self._sleep = sleep
         self._observer = observer
+        self._event_observer = event_observer
         self._client = client or mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             protocol=mqtt.MQTTv5,
@@ -54,9 +56,19 @@ class MqttPublisher:
         except Exception:
             if self._observer is not None:
                 self._observer("mqtt_publish", "failure", time.monotonic() - started)
+            if self._event_observer is not None:
+                self._event_observer(
+                    "mqtt_operation",
+                    {"version": version, "result": "failure"},
+                )
             raise
         if self._observer is not None:
             self._observer("mqtt_publish", "success", time.monotonic() - started)
+        if self._event_observer is not None:
+            self._event_observer(
+                "mqtt_operation",
+                {"version": version, "result": "success"},
+            )
         return result
 
     def _publish(self, version: str, payload: dict[str, Any]) -> str:
@@ -74,6 +86,12 @@ class MqttPublisher:
                 return topic
             except Exception as error:
                 last_error = error
-                if attempt < self._config.retry_count and self._config.retry_backoff_s:
-                    self._sleep(self._config.retry_backoff_s * (2**attempt))
+                if attempt < self._config.retry_count:
+                    if self._event_observer is not None:
+                        self._event_observer(
+                            "retry",
+                            {"operation": "mqtt_publish", "reason": "request_failure"},
+                        )
+                    if self._config.retry_backoff_s:
+                        self._sleep(self._config.retry_backoff_s * (2**attempt))
         raise MqttPublicationError("MQTT notification publication failed") from last_error

@@ -145,7 +145,8 @@ in history/checkpoint4_work_record.txt before accepting the checkpoint.
 Checkpoint decision
 -------------------
 
-Checkpoint 4 is accepted only after standalone and integrated paths pass,
-Windy altitude backfill is measured, repeated execution is idempotent,
-coordinate changes cannot write stale altitude, failures remain retryable, and
-the final review is clean. Stop before checkpoint 5 image acquisition.
+Checkpoint 4 is accepted. Standalone and integrated paths pass, Windy altitude
+backfill is measured, repeated execution is idempotent, coordinate changes
+cannot write stale altitude, and failures remain retryable. Remaining null
+values are handled by daily discovery. Proceed to checkpoint 5 image
+acquisition.

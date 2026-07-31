@@ -40,12 +40,22 @@ class CleanupResult:
     selected_keys: list[str] | None = None
 
 
-def image_download_timestamp(object_key: str, configured_prefix: str) -> datetime | None:
+def image_download_timestamp(
+    object_key: str,
+    configured_prefix: str,
+    *,
+    transformation_prefix: str | None = None,
+) -> datetime | None:
     match = _IMAGE_KEY.fullmatch(object_key)
     if match is None:
         return None
     actual_prefix = match.group("prefix") or ""
     if actual_prefix != configured_prefix.strip("/"):
+        return None
+    if (
+        transformation_prefix is not None
+        and match.group("version") != transformation_prefix
+    ):
         return None
     try:
         timestamp = datetime.strptime(
@@ -84,11 +94,17 @@ def cleanup_spool(
     client: Any | None = None,
     metrics: BatchJobMetrics | None = None,
     include_keys: bool = False,
+    transformation_prefix: str = "T0V0",
+    all_transformation_prefixes: bool = False,
 ) -> CleanupResult:
     if older_than_hours <= 0:
         raise ValueError("retention must be positive")
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
+    if not all_transformation_prefixes and not re.fullmatch(
+        r"[A-Za-z0-9]{4}", transformation_prefix
+    ):
+        raise ValueError("transformation prefix must contain four alphanumerics")
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=older_than_hours)
     result = CleanupResult(
@@ -103,10 +119,23 @@ def cleanup_spool(
     listing_started = time.monotonic()
     candidates: list[tuple[str, int]] = []
     try:
-        for item in _objects(client, config.bucket, config.prefix):
+        listing_prefix = config.prefix
+        if not all_transformation_prefixes:
+            listing_prefix = "/".join(
+                part
+                for part in (config.prefix.strip("/"), transformation_prefix)
+                if part
+            )
+        for item in _objects(client, config.bucket, listing_prefix):
             result.examined += 1
             key = str(item["Key"])
-            timestamp = image_download_timestamp(key, config.prefix)
+            timestamp = image_download_timestamp(
+                key,
+                config.prefix,
+                transformation_prefix=(
+                    None if all_transformation_prefixes else transformation_prefix
+                ),
+            )
             if timestamp is None:
                 result.skipped_unknown += 1
                 continue
@@ -180,6 +209,16 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int)
     parser.add_argument(
+        "--transformation-prefix",
+        default="T0V0",
+        help="four-character transformation prefix cleaned by default",
+    )
+    parser.add_argument(
+        "--all-transformation-prefixes",
+        action="store_true",
+        help="clean every recognized transformation prefix",
+    )
+    parser.add_argument(
         "--show-keys",
         action="store_true",
         help="include eligible keys in output; requires --limit",
@@ -193,6 +232,8 @@ def main() -> None:
         dry_run=args.dry_run,
         limit=args.limit,
         include_keys=args.show_keys,
+        transformation_prefix=args.transformation_prefix,
+        all_transformation_prefixes=args.all_transformation_prefixes,
     )
     print(json.dumps(asdict(result), sort_keys=True))
 

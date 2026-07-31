@@ -48,7 +48,10 @@ def test_bulk_snapshot_exposes_measured_time_and_skips_null_marker():
     client = _client(handler)
     assert client.refresh() == 1
     reference = client.get_current_image("C0150301", "full_jpeg")
-    assert reference.marker == MARKER
+    assert reference.marker is None
+    assert reference.provider_update_timestamp == datetime(
+        2026, 7, 23, 10, 5, tzinfo=UTC
+    )
     assert reference.image_url == "https://images.test/C0150301.jpg"
     with pytest.raises(FintrafficImageAccessError):
         client.get_current_image("C0150302", "full_jpeg")
@@ -65,6 +68,7 @@ def test_download_validates_last_modified_against_snapshot():
                 "last-modified": format_datetime(
                     datetime(2026, 7, 23, 10, 5, tzinfo=UTC), usegmt=True
                 ),
+                "etag": '"fin-image-v1"',
             },
             content=b"jpeg",
         )
@@ -72,6 +76,10 @@ def test_download_validates_last_modified_against_snapshot():
     client = _client(handler)
     client.refresh()
     assert client.download("https://images.test/C0150301.jpg") == b"jpeg"
+    assert (
+        client.downloaded_marker("https://images.test/C0150301.jpg")
+        == '"fin-image-v1"'
+    )
 
 
 def test_download_rejects_metadata_image_race():

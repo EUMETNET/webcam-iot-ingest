@@ -1,0 +1,91 @@
+Validation - first code review after checkpoint 12
+==================================================
+
+Run these checks from the repository as `codexuser`. Review every destructive
+or live-provider command before execution.
+
+1. Unit and database integration tests
+--------------------------------------
+
+    UV_CACHE_DIR=/tmp/webcam-uv-cache uv run pytest -q \
+      tests/ingestion tests/worker tests/metrics tests/notification tests/storage
+
+Apply migrations through the Compose gate and run the database tests:
+
+    docker compose --env-file .env run --rm schema-migrate
+    RUN_DATABASE_TESTS=1 UV_CACHE_DIR=/tmp/webcam-uv-cache \
+      uv run --env-file .env pytest -q tests/database
+
+Confirm `source_stream` contains only these five ingestion-state columns:
+`last_observed_provider_timestamp`, `last_observed_image_marker`,
+`last_download_timestamp`, `last_processed_timestamp`, and
+`ema_download_period`. Confirm `publication_outbox` no longer exists.
+
+2. Container build and bounded jobs
+-----------------------------------
+
+    docker compose --env-file .env --profile application --profile monitoring \
+      --profile jobs config --quiet
+    docker compose --env-file .env build webcam-job windy-worker \
+      fintraffic-worker skaping-worker
+
+Run bounded or dry-run discovery and ingestion before enabling continuous
+workers. Confirm secrets are not printed.
+
+3. Freshness and retry state
+----------------------------
+
+For one stream per network, inspect observed timestamp/marker, processed
+timestamp, EMA, and last download-decision time. Confirm:
+
+- unchanged available indicators skip the pipeline;
+- a changed provider timestamp updates cadence estimation only after a
+  download is selected;
+- an observation excluded by scheduling changes no database state;
+- a failed later stage does not advance processed state;
+- a later due pass retries that observed image;
+- Fintraffic and Skaping unchanged ETags avoid repeated processing;
+- Skaping MQTT source-image metadata contains only a sanitized resolved path.
+
+4. Delivery observability
+-------------------------
+
+Cause one controlled retry in fixture tests or a non-production environment.
+Confirm each retry increments `webcam_image_retry_total`, while
+`webcam_s3_upload_total` or `webcam_mqtt_publication_total` increments exactly
+once with the final success or failure.
+
+Confirm worker dashboards show five-minute S3 and MQTT operation counts and no
+publication-outbox panel.
+
+5. Cleanup safety
+-----------------
+
+    just container-cleanup-spool 24 --dry-run --limit 10 --show-keys
+    just container-cleanup-spool 24 --dry-run \
+      --all-transformation-prefixes --limit 10 --show-keys
+
+Confirm the first command selects only T0V0 and the second still ignores
+unknown and database-backup keys.
+
+After a verified backup exists, inspect conservative backup cleanup:
+
+    just container-cleanup-database-backups \
+      backups/postgresql/YYYY/MM/DD/webcam_ingestion_YYYYMMDDTHHMMSSZ.dump \
+      --dry-run --show-keys
+
+Confirm only the latest preceding available day in the same month is selected.
+
+6. Compose and systemd handoff
+------------------------------
+
+Install the reviewed files from `deployment/systemd/pilot/` under
+`/etc/systemd/system` with the intended `/opt/webcam-ingestion` deployment
+path. Enable `webcam-stack.service`, `webcam-discovery.timer`, and
+`webcam-maintenance.timer`.
+
+Confirm Compose owns the three continuously running worker containers and
+their restart policies. Confirm systemd schedules sequential discovery at
+12:00 UTC and backup followed by cleanup at 01:00 UTC. Check graceful stop,
+container restart, persistent database state, worker health, metrics, and
+separate logs before beginning checkpoint 13 drills.

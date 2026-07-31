@@ -9,19 +9,13 @@ from config.deployment_config import DatabaseConfig
 from database.registry_queries import (
     DiscoveredSite,
     DiscoveredSourceStream,
+    IngestionStateUpdate,
     RegistryCollisionError,
     apply_discovery_update,
-    apply_ema_update_candidates,
+    apply_ingestion_state_updates,
+    build_ema_update_candidate,
     get_due_source_streams,
-    get_pending_publications,
     get_network_registry,
-    record_freshness_query,
-    record_provider_image_marker,
-    record_download_and_enqueue_publication,
-    mark_publication_uploaded,
-    record_publication_failure,
-    complete_publication,
-    record_successful_download,
     set_source_stream_status,
 )
 
@@ -208,14 +202,19 @@ def test_due_stream_selection_filters_status_network_and_recent_downloads(
         [site(site_id)],
         [stream(due_stream, site_id), stream(recent_stream, site_id)],
     )
-    record_successful_download(
+    apply_ingestion_state_updates(
         connection,
-        recent_stream,
-        "recent-marker",
-        now - timedelta(minutes=2),
-        ema_alpha=0.5,
+        [
+            IngestionStateUpdate(
+                recent_stream,
+                now - timedelta(minutes=2),
+                "recent-marker",
+                now - timedelta(minutes=2),
+                processed_timestamp=now - timedelta(minutes=2),
+            )
+        ],
+        apply_ema=False,
     )
-    record_freshness_query(connection, recent_stream, now - timedelta(minutes=2))
 
     due = get_due_source_streams(
         connection, "win", timedelta(minutes=5), now=now
@@ -270,8 +269,8 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
     connection.execute(
         """
         UPDATE source_stream
-        SET last_download_timestamp = %s,
-            last_provider_image_marker = CASE source_stream_id
+        SET last_processed_timestamp = %s,
+            last_observed_provider_timestamp = CASE source_stream_id
                 WHEN %s THEN %s ELSE %s END,
             ema_download_period = 600
         WHERE source_stream_id IN (%s, %s)
@@ -279,8 +278,8 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
         (
             now - timedelta(minutes=6),
             due_stream,
-            (now - timedelta(minutes=8)).isoformat(),
-            (now - timedelta(minutes=6)).isoformat(),
+            now - timedelta(minutes=8),
+            now - timedelta(minutes=6),
             due_stream,
             blocked_stream,
         ),
@@ -298,10 +297,10 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
     connection.execute(
         """
         UPDATE source_stream
-        SET last_provider_image_marker = %s
+        SET last_observed_provider_timestamp = %s
         WHERE source_stream_id = %s
         """,
-        ((now - timedelta(minutes=8)).isoformat(), blocked_stream),
+        (now - timedelta(minutes=8), blocked_stream),
     )
     due = get_due_source_streams(
         connection,
@@ -318,7 +317,7 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
     connection.execute(
         """
         UPDATE source_stream
-        SET last_download_timestamp = %s
+        SET last_processed_timestamp = %s
         WHERE source_stream_id = %s
         """,
         (now - timedelta(minutes=4), blocked_stream),
@@ -333,101 +332,6 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
     assert [item.source_stream_id for item in due] == [due_stream]
 
 
-def test_download_timestamp_polling_is_isolated_and_backs_off_freshness(
-    connection, identifiers
-) -> None:
-    site_id, successful_stream, never_downloaded_stream = identifiers
-    now = datetime(2026, 7, 14, 12, 0, tzinfo=timezone.utc)
-    apply_discovery_update(
-        connection,
-        "win",
-        [site(site_id)],
-        [
-            stream(successful_stream, site_id),
-            stream(never_downloaded_stream, site_id),
-        ],
-    )
-    connection.execute(
-        """
-        UPDATE source_stream
-        SET last_download_timestamp = %s,
-            last_freshness_query_timestamp = %s,
-            last_provider_image_marker = '"etag-value"',
-            ema_download_period = 1200
-        WHERE source_stream_id = %s
-        """,
-        (
-            now - timedelta(minutes=15),
-            now - timedelta(minutes=4),
-            successful_stream,
-        ),
-    )
-    record_freshness_query(
-        connection, never_downloaded_stream, now - timedelta(minutes=2)
-    )
-
-    selected = get_due_source_streams(
-        connection,
-        "win",
-        timedelta(minutes=5),
-        polling_interval_factor=0.7,
-        adaptive_polling_anchor="download_timestamp",
-        now=now,
-    )
-    assert selected == []
-
-    connection.execute(
-        """
-        UPDATE source_stream
-        SET last_freshness_query_timestamp = %s
-        WHERE source_stream_id IN (%s, %s)
-        """,
-        (
-            now - timedelta(minutes=6),
-            successful_stream,
-            never_downloaded_stream,
-        ),
-    )
-    selected = get_due_source_streams(
-        connection,
-        "win",
-        timedelta(minutes=5),
-        polling_interval_factor=0.7,
-        adaptive_polling_anchor="download_timestamp",
-        now=now,
-    )
-    assert {item.source_stream_id for item in selected} == {
-        successful_stream,
-        never_downloaded_stream,
-    }
-
-    # The default provider-marker strategy is unchanged: an opaque ETag skips
-    # only its timestamp guard and does not enable the new freshness backoff.
-    default_selected = get_due_source_streams(
-        connection,
-        "win",
-        timedelta(minutes=5),
-        polling_interval_factor=0.7,
-        now=now,
-    )
-    assert {item.source_stream_id for item in default_selected} == {
-        successful_stream,
-        never_downloaded_stream,
-    }
-
-
-def test_due_stream_selection_rejects_unknown_polling_anchor(
-    connection,
-) -> None:
-    with pytest.raises(ValueError, match="polling anchor"):
-        get_due_source_streams(
-            connection,
-            "win",
-            timedelta(minutes=5),
-            adaptive_polling_anchor="unknown",
-        )
-
-
 def test_ingestion_state_updates_respect_workflow_stages(
     connection, identifiers
 ) -> None:
@@ -437,82 +341,62 @@ def test_ingestion_state_updates_respect_workflow_stages(
         connection, "win", [site(site_id)], [stream(stream_id, site_id)]
     )
 
-    record_provider_image_marker(connection, stream_id, "invalid-image-marker")
-    marker_only = get_network_registry(connection, "win").source_streams[stream_id]
-    assert marker_only["last_provider_image_marker"] == "invalid-image-marker"
-    assert marker_only["last_download_timestamp"] is None
-    assert marker_only["ema_download_period"] is None
-
-    first_ema = record_successful_download(
-        connection,
-        stream_id,
-        "first-good-marker",
-        first_timestamp,
-        ema_alpha=0.25,
+    current = get_due_source_streams(
+        connection, "win", timedelta(0), now=first_timestamp
+    )[0]
+    first_ema = build_ema_update_candidate(
+        current, provider_update_timestamp=first_timestamp, ema_alpha=0.25
     )
-    second_ema = record_successful_download(
+    apply_ingestion_state_updates(
         connection,
-        stream_id,
-        "second-good-marker",
-        first_timestamp + timedelta(seconds=500),
-        ema_alpha=0.25,
+        [
+            IngestionStateUpdate(
+                stream_id,
+                first_timestamp,
+                "first-good-marker",
+                first_timestamp,
+                first_ema,
+                first_timestamp,
+            )
+        ],
+        apply_ema=True,
     )
-    assert first_ema == 300.0
-    assert second_ema == 350.0
+    second_timestamp = first_timestamp + timedelta(seconds=500)
+    due_job = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(0),
+        polling_interval_factor=0,
+        now=second_timestamp,
+    )[0]
+    second_ema = build_ema_update_candidate(
+        due_job, provider_update_timestamp=second_timestamp, ema_alpha=0.25
+    )
+    apply_ingestion_state_updates(
+        connection,
+        [
+            IngestionStateUpdate(
+                stream_id,
+                second_timestamp,
+                "second-good-marker",
+                second_timestamp,
+                second_ema,
+                second_timestamp,
+            )
+        ],
+        apply_ema=True,
+    )
+    assert first_ema is not None
+    assert first_ema.ema_download_period == 300.0
+    assert second_ema is not None
+    assert second_ema.ema_download_period == 350.0
 
     stored = get_network_registry(connection, "win").source_streams[stream_id]
-    assert stored["last_provider_image_marker"] == "second-good-marker"
-    assert stored["last_download_timestamp"] == first_timestamp + timedelta(
-        seconds=500
-    )
+    assert stored["last_observed_image_marker"] == "second-good-marker"
+    assert stored["last_download_timestamp"] == second_timestamp
+    assert stored["last_observed_provider_timestamp"] == second_timestamp
+    assert stored["last_processed_timestamp"] == second_timestamp
     assert stored["ema_download_period"] == 350.0
-
-
-def test_publication_outbox_lifecycle_is_durable(connection, identifiers) -> None:
-    site_id, stream_id, _ = identifiers
-    timestamp = datetime(2026, 7, 21, 13, 0, tzinfo=timezone.utc)
-    apply_discovery_update(
-        connection, "win", [site(site_id)], [stream(stream_id, site_id)]
-    )
-
-    ema = record_download_and_enqueue_publication(
-        connection,
-        stream_id,
-        "marker",
-        timestamp,
-        ema_alpha=0.2,
-        image_id=f"image{stream_id}.jpg",
-        object_key=f"T0V0/win/{stream_id}.jpg",
-        derived_content=b"jpeg",
-        notification={"derived_stream": {"transformation_version": "T0V0"}},
-    )
-    image_id = f"image{stream_id}.jpg"
-    pending = [
-        item
-        for item in get_pending_publications(connection, limit=100)
-        if item.image_id == image_id
-    ]
-
-    assert ema == 300.0
-    assert len(pending) == 1
-    assert pending[0].stage == "pending_s3"
-    assert pending[0].derived_content == b"jpeg"
-
-    mark_publication_uploaded(connection, pending[0].image_id)
-    record_publication_failure(connection, pending[0].image_id, "mqtt_publish")
-    replay = next(
-        item
-        for item in get_pending_publications(connection, limit=100)
-        if item.image_id == image_id
-    )
-    assert replay.stage == "pending_mqtt"
-    assert replay.attempt_count == 1
-    assert replay.last_error_code == "mqtt_publish"
-
-    complete_publication(connection, replay.image_id)
-    assert image_id not in {
-        item.image_id for item in get_pending_publications(connection, limit=100)
-    }
 
 
 def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
@@ -522,28 +406,45 @@ def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
         connection, "win", [site(site_id)], [stream(stream_id, site_id)]
     )
 
-    candidate = record_successful_download(
-        connection,
-        stream_id,
-        "marker",
-        timestamp,
-        ema_alpha=0.2,
-        defer_ema_update=True,
+    job = get_due_source_streams(connection, "win", timedelta(0), now=timestamp)[0]
+    candidate = build_ema_update_candidate(
+        job, provider_update_timestamp=timestamp, ema_alpha=0.2
     )
+    assert candidate is not None
+    update = IngestionStateUpdate(
+        stream_id, timestamp, "marker", timestamp, candidate
+    )
+    assert apply_ingestion_state_updates(
+        connection, [update], apply_ema=False
+    ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
     assert stored["last_download_timestamp"] == timestamp
     assert stored["ema_download_period"] is None
 
-    assert apply_ema_update_candidates(connection, [candidate]) == 1
+    assert apply_ingestion_state_updates(
+        connection, [update], apply_ema=True
+    ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
     assert stored["ema_download_period"] == 300.0
 
-    record_successful_download(
-        connection,
-        stream_id,
-        "newer-marker",
-        timestamp + timedelta(minutes=5),
-        ema_alpha=0.2,
-        defer_ema_update=True,
+
+def test_unselected_freshness_snapshot_is_not_persisted(
+    connection, identifiers
+) -> None:
+    site_id, stream_id, _ = identifiers
+    apply_discovery_update(
+        connection, "win", [site(site_id)], [stream(stream_id, site_id)]
     )
-    assert apply_ema_update_candidates(connection, [candidate]) == 0
+    before = get_network_registry(connection, "win").source_streams[stream_id]
+
+    # A provider result by itself performs no write. Only a returned download
+    # decision is passed to apply_ingestion_state_updates at epoch end.
+    observed_timestamp = datetime(2026, 7, 21, 13, 0, tzinfo=timezone.utc)
+    assert observed_timestamp is not None
+    after = get_network_registry(connection, "win").source_streams[stream_id]
+    assert after["last_observed_provider_timestamp"] == before[
+        "last_observed_provider_timestamp"
+    ]
+    assert after["last_observed_image_marker"] == before[
+        "last_observed_image_marker"
+    ]

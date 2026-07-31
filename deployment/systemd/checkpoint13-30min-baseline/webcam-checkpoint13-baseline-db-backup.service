@@ -1,0 +1,11 @@
+[Unit]
+Description=Checkpoint-13 baseline verified PostgreSQL backup and backup cleanup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/usr/bin/docker compose --env-file .env --profile jobs run --rm webcam-job python -m database.database_backup --pg-dump-mode direct
+TimeoutStartSec=3600

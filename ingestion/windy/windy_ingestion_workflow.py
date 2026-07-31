@@ -24,17 +24,17 @@ from config.deployment_config import (
 from database.registry_queries import (
     DueSourceStream,
     EmaUpdateCandidate,
-    PendingPublication,
+    IngestionStateUpdate,
+    apply_ingestion_state_updates,
+    build_ema_update_candidate,
     get_due_source_streams,
-    record_download_and_enqueue_publication,
-    record_freshness_query,
-    record_provider_image_marker,
-    record_successful_download,
 )
 from ingestion.notification.mqtt_publisher import MqttPublicationError, MqttPublisher
-from ingestion.shared.ingestion_core import process_source_image
-from ingestion.shared.ingestion_core import prepare_publication
-from ingestion.shared.publication_outbox import deliver_publication
+from ingestion.shared.ingestion_core import (
+    PublicationResult,
+    prepare_publication,
+    process_source_image,
+)
 from ingestion.shared.source_image_validation import (
     InvalidSourceImageError,
     validate_source_image,
@@ -79,6 +79,7 @@ class WindyIngestionJobResult:
     object_key: str | None = None
     mqtt_topic: str | None = None
     ema_update_candidate: EmaUpdateCandidate | None = None
+    state_update: IngestionStateUpdate | None = None
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,6 @@ def run_ingestion(
         )
         results = tuple(
             _process_job(
-                connection,
                 client,
                 job,
                 dry_run=dry_run,
@@ -156,6 +156,13 @@ def run_ingestion(
             )
             for job in jobs
         )
+        if not dry_run:
+            apply_ingestion_state_updates(
+                connection,
+                [result.state_update for result in results if result.state_update],
+                apply_ema=True,
+            )
+            connection.commit()
     outcomes = dict(sorted(Counter(item.outcome for item in results).items()))
     return WindyIngestionResult(
         dry_run, publish, normalized_countries, len(jobs), outcomes, results
@@ -163,7 +170,6 @@ def run_ingestion(
 
 
 def _process_job(
-    connection: psycopg.Connection[Any],
     client: WindyImageClient,
     job: DueSourceStream,
     *,
@@ -174,7 +180,6 @@ def _process_job(
     publisher: MqttPublisher | None = None,
     stage_observer: Callable[[str, str, float], None] | None = None,
     event_observer: Callable[[str, dict[str, object]], None] | None = None,
-    defer_ema_update: bool = False,
 ) -> WindyIngestionJobResult:
     job_started = time.monotonic()
     name_value = job.source_stream_metadata.get(
@@ -184,8 +189,15 @@ def _process_job(
     download_timestamp: datetime | None = None
     provider_update_timestamp: datetime | None = None
     provider_to_download_s: float | None = None
+    observed_marker: str | None = None
+    ema_candidate: EmaUpdateCandidate | None = None
+    state_update: IngestionStateUpdate | None = None
 
     def finish(outcome: JobOutcome, **values: Any) -> WindyIngestionJobResult:
+        if "ema_update_candidate" not in values:
+            values["ema_update_candidate"] = ema_candidate
+        if "state_update" not in values:
+            values["state_update"] = state_update
         finished_at = datetime.now(UTC)
         if event_observer is not None:
             event_observer(
@@ -228,15 +240,32 @@ def _process_job(
             job.source_stream_metadata,
         )
     except WindyImageAccessError as error:
-        if not dry_run:
-            record_freshness_query(connection, job.source_stream_id, datetime.now(UTC))
-            connection.commit()
         return finish("throttled" if error.throttled else "provider_error")
-    if not dry_run:
-        record_freshness_query(connection, job.source_stream_id, datetime.now(UTC))
-        connection.commit()
-    if reference.marker == job.last_provider_image_marker:
+    provider_update_timestamp = getattr(reference, "provider_update_timestamp", None)
+    if provider_update_timestamp is None and job.network_id == "win":
+        provider_update_timestamp = _parse_provider_timestamp(reference.marker)
+    observed_marker = reference.marker if job.network_id in {"ska", "fin"} else None
+    if _available_freshness_unchanged(
+        job,
+        marker=observed_marker,
+        provider_timestamp=provider_update_timestamp,
+    ):
+        if observed_marker is not None and event_observer is not None:
+            event_observer("marker_unchanged_skip", {})
         return finish("unchanged", provider_marker=reference.marker)
+    download_timestamp = datetime.now(UTC)
+    ema_candidate = build_ema_update_candidate(
+        job,
+        provider_update_timestamp=provider_update_timestamp,
+        ema_alpha=ema_alpha,
+    )
+    state_update = IngestionStateUpdate(
+        source_stream_id=job.source_stream_id,
+        provider_update_timestamp=provider_update_timestamp,
+        provider_image_marker=observed_marker,
+        download_timestamp=download_timestamp,
+        ema_update_candidate=ema_candidate,
+    )
     try:
         content = client.download(reference.image_url)
     except WindyImageAccessError as error:
@@ -244,6 +273,25 @@ def _process_job(
             "throttled" if error.throttled else "download_error",
             provider_marker=reference.marker,
         )
+    downloaded_marker = getattr(client, "downloaded_marker", lambda _url: None)(
+        reference.image_url
+    )
+    if downloaded_marker is not None:
+        observed_marker = downloaded_marker
+        state_update = IngestionStateUpdate(
+            source_stream_id=job.source_stream_id,
+            provider_update_timestamp=provider_update_timestamp,
+            provider_image_marker=observed_marker,
+            download_timestamp=download_timestamp,
+            ema_update_candidate=ema_candidate,
+        )
+        if (
+            job.network_id == "fin"
+            and job.last_observed_image_marker == downloaded_marker
+        ):
+            if event_observer is not None:
+                event_observer("marker_unchanged_skip", {})
+            return finish("unchanged", provider_marker=downloaded_marker)
     if event_observer is not None:
         event_observer(
             "source_download_bytes",
@@ -252,8 +300,6 @@ def _process_job(
     try:
         source = validate_source_image(content)
     except InvalidSourceImageError:
-        if not dry_run:
-            record_provider_image_marker(connection, job.source_stream_id, reference.marker)
         return finish(
             "invalid_image",
             provider_marker=reference.marker,
@@ -272,10 +318,6 @@ def _process_job(
             },
         )
 
-    download_timestamp = datetime.now(UTC)
-    provider_update_timestamp = getattr(reference, "provider_update_timestamp", None)
-    if provider_update_timestamp is None:
-        provider_update_timestamp = _parse_provider_timestamp(reference.marker)
     if provider_update_timestamp is not None:
         candidate_latency = (download_timestamp - provider_update_timestamp).total_seconds()
         if candidate_latency >= 0:
@@ -289,170 +331,41 @@ def _process_job(
                     },
                 )
     selected_transformation = transformation or TransformationConfig.from_environment()
-    if storage is not None and publisher is not None:
-        transformation_started = time.monotonic()
-        try:
+    transformation_started = time.monotonic()
+    try:
+        source_provider_metadata = (
+            {"resolved_target_path": reference.resolved_target_path}
+            if job.network_id == "ska"
+            and hasattr(reference, "resolved_target_path")
+            else None
+        )
+        if storage is not None and publisher is not None:
             prepared = prepare_publication(
                 job=job,
                 source=source,
                 download_timestamp=download_timestamp,
                 provider_update_timestamp=provider_update_timestamp,
+                source_image_provider_metadata=source_provider_metadata,
                 transformation=selected_transformation,
                 storage=storage,
             )
-        except Exception:
-            if stage_observer is not None:
-                stage_observer(
-                    "transformation", "failure", time.monotonic() - transformation_started
-                )
-            if event_observer is not None:
-                event_observer(
-                    "transformation",
-                    {"version": selected_transformation.version, "outcome": "failure"},
-                )
-            ema_value: float | EmaUpdateCandidate | None = None
-            if not dry_run:
-                ema_value = record_successful_download(
-                    connection,
-                    job.source_stream_id,
-                    reference.marker,
-                    download_timestamp,
-                    ema_alpha=ema_alpha,
-                    defer_ema_update=defer_ema_update,
-                )
-            return finish(
-                "transformation_error",
-                provider_marker=reference.marker,
-                ema_update_candidate=(
-                    ema_value if isinstance(ema_value, EmaUpdateCandidate) else None
-                ),
-            )
-        if stage_observer is not None:
-            stage_observer(
-                "transformation", "success", time.monotonic() - transformation_started
-            )
-        if event_observer is not None:
-            event_observer(
-                "transformation",
-                {"version": selected_transformation.version, "outcome": "success"},
-            )
-            event_observer(
-                "derived_image",
-                {
-                    "version": selected_transformation.version,
-                    "size_bytes": prepared.derived.size_bytes,
-                    "width": prepared.derived.width,
-                "height": prepared.derived.height,
-                "format": prepared.derived.format,
-                "color_mode": prepared.derived.color_mode,
-                "color_depth_bits": prepared.derived.color_depth,
-                },
-            )
-            event_observer(
-                "mqtt_payload",
-                {
-                    "version": selected_transformation.version,
-                    "size_bytes": len(
-                        json.dumps(
-                            prepared.notification,
-                            ensure_ascii=False,
-                            separators=(",", ":"),
-                        ).encode("utf-8")
-                    ),
-                },
-            )
-        database_started = time.monotonic()
-        ema_value = record_download_and_enqueue_publication(
-            connection,
-            job.source_stream_id,
-            reference.marker,
-            download_timestamp,
-            ema_alpha=ema_alpha,
-            image_id=prepared.image_id,
-            object_key=prepared.object_key,
-            derived_content=prepared.derived.content,
-            notification=prepared.notification,
-            defer_ema_update=defer_ema_update,
-        )
-        connection.commit()
-        if stage_observer is not None:
-            stage_observer(
-                "database_enqueue", "success", time.monotonic() - database_started
-            )
-        delivery = deliver_publication(
-            connection,
-            storage,
-            publisher,
-            PendingPublication(
+            publication = PublicationResult(
+                prepared.derived,
+                prepared.derived_stream_id,
                 prepared.image_id,
-                job.source_stream_id,
-                reference.marker,
-                download_timestamp,
                 prepared.object_key,
-                prepared.derived.content,
-                prepared.notification,
-                "pending_s3",
-                0,
+                storage.reference(prepared.object_key).url,
                 None,
-            ),
-        )
-        return finish(
-            delivery.outcome,
-            provider_marker=reference.marker,
-            size_bytes=source.size_bytes,
-            width=source.width,
-            height=source.height,
-            image_format=source.format,
-            color_mode=source.color_mode,
-            ema_download_period=(ema_value if isinstance(ema_value, float) else None),
-            ema_update_candidate=(
-                ema_value if isinstance(ema_value, EmaUpdateCandidate) else None
-            ),
-            derived_size_bytes=prepared.derived.size_bytes,
-            derived_width=prepared.derived.width,
-            derived_height=prepared.derived.height,
-            image_signature=prepared.derived.image_signature,
-            image_id=prepared.image_id,
-            object_key=prepared.object_key,
-            mqtt_topic=(
-                f"{MqttConfig.from_environment().topic_prefix}/{selected_transformation.version}"
-                if delivery.outcome == "published"
-                else None
-            ),
-        )
-
-    ema = None
-    if not dry_run:
-        ema = record_successful_download(
-            connection,
-            job.source_stream_id,
-            reference.marker,
-            download_timestamp,
-            ema_alpha=ema_alpha,
-        )
-    transformation_started = time.monotonic()
-    try:
-        publication = process_source_image(
-            job=job,
-            source=source,
-            download_timestamp=download_timestamp,
-            provider_update_timestamp=provider_update_timestamp,
-            transformation=selected_transformation,
-            storage=storage,
-            publisher=publisher,
-        )
-    except S3StorageError:
-        if stage_observer is not None:
-            stage_observer(
-                "s3_upload", "failure", time.monotonic() - transformation_started
             )
-        return finish("storage_error", provider_marker=reference.marker)
-    except MqttPublicationError:
-        if stage_observer is not None:
-            stage_observer(
-                "mqtt_publish", "failure", time.monotonic() - transformation_started
+        else:
+            publication = process_source_image(
+                job=job,
+                source=source,
+                download_timestamp=download_timestamp,
+                provider_update_timestamp=provider_update_timestamp,
+                source_image_provider_metadata=source_provider_metadata,
+                transformation=selected_transformation,
             )
-        return finish("mqtt_error", provider_marker=reference.marker)
     except Exception:
         if stage_observer is not None:
             stage_observer(
@@ -485,6 +398,49 @@ def _process_job(
                 "color_depth_bits": publication.derived.color_depth,
             },
         )
+        if storage is not None:
+            assert publisher is not None
+            event_observer(
+                "mqtt_payload",
+                {
+                    "version": selected_transformation.version,
+                    "size_bytes": len(
+                        json.dumps(
+                            prepared.notification,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ),
+                },
+            )
+    if storage is not None and publisher is not None:
+        try:
+            stored = storage.upload(prepared.object_key, prepared.derived.content)
+        except S3StorageError:
+            return finish("storage_error", provider_marker=reference.marker)
+        try:
+            topic = publisher.publish(
+                selected_transformation.version, prepared.notification
+            )
+        except MqttPublicationError:
+            return finish("mqtt_error", provider_marker=reference.marker)
+        publication = PublicationResult(
+            prepared.derived,
+            prepared.derived_stream_id,
+            prepared.image_id,
+            prepared.object_key,
+            stored.url,
+            topic,
+        )
+    if storage is not None and publisher is not None:
+        state_update = IngestionStateUpdate(
+            source_stream_id=job.source_stream_id,
+            provider_update_timestamp=provider_update_timestamp,
+            provider_image_marker=observed_marker,
+            download_timestamp=download_timestamp,
+            ema_update_candidate=ema_candidate,
+            processed_timestamp=download_timestamp,
+        )
     return finish(
         "published" if storage is not None else "downloaded",
         provider_marker=reference.marker,
@@ -493,7 +449,8 @@ def _process_job(
         height=source.height,
         image_format=source.format,
         color_mode=source.color_mode,
-        ema_download_period=ema,
+        ema_update_candidate=ema_candidate,
+        state_update=state_update,
         derived_size_bytes=publication.derived.size_bytes,
         derived_width=publication.derived.width,
         derived_height=publication.derived.height,
@@ -502,6 +459,20 @@ def _process_job(
         object_key=publication.object_key,
         mqtt_topic=publication.mqtt_topic,
     )
+
+
+def _available_freshness_unchanged(
+    job: DueSourceStream,
+    *,
+    marker: str | None,
+    provider_timestamp: datetime | None,
+) -> bool:
+    comparisons: list[bool] = []
+    if marker is not None:
+        comparisons.append(marker == job.last_observed_image_marker)
+    if provider_timestamp is not None:
+        comparisons.append(provider_timestamp == job.last_observed_provider_timestamp)
+    return bool(comparisons) and all(comparisons)
 
 
 def _source_color_depth_bits(color_mode: str) -> int:

@@ -1,0 +1,8 @@
+[Unit]
+Description=Launch the quiet-baseline workflow ten minutes after activation
+PartOf=webcam-checkpoint13-baseline.target
+
+[Timer]
+OnActiveSec=10min
+AccuracySec=1s
+Unit=webcam-checkpoint13-baseline-workflow.service

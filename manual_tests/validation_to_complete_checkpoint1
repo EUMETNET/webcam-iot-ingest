@@ -1,5 +1,5 @@
-Checkpoint 1 synthesis and validation runbook
-==============================================
+Checkpoint 1 sudo installation and validation runbook
+======================================================
 
 Checkpoint outcome
 ------------------
@@ -46,7 +46,82 @@ Confirm that the local files are ignored:
 
 Both paths must be reported as ignored.
 
-3. Validate the Compose model
+3. Install required tooling
+---------------------------
+
+The validation requires Docker Engine, the Docker Compose plugin, and uv.
+PostgreSQL and Mosquitto run in containers; do not install their server
+packages on the VM.
+
+Run all commands beginning with sudo from the VM's designated administrative
+user account, not from codexuser. The administrative user installs and manages
+the system service. It then grants codexuser access through the dedicated
+docker Unix group. Do not grant codexuser general sudo access for this
+validation workflow.
+
+First check what is already installed:
+
+    command -v docker
+    docker compose version
+    command -v uv
+
+On Rocky Linux 9.6, if Docker is absent, the administrative user installs
+Docker Engine and the Compose plugin from Docker's official RHEL repository:
+
+    sudo dnf -y install dnf-plugins-core
+    sudo dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo
+    sudo dnf install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+If dnf asks for confirmation before importing Docker's signing key, verify
+that its fingerprint is:
+
+    060A 61C5 1B55 8A7F 742B 77AA C52F EB6B 621E 9F35
+
+Then start Docker and enable it after VM reboots:
+
+    sudo systemctl enable --now docker
+    sudo systemctl status docker --no-pager
+
+Test the installation with sudo first:
+
+    sudo docker run --rm hello-world
+    sudo docker compose version
+
+From the administrative account, add codexuser specifically to the docker
+group so it can run the remaining container validation commands without sudo:
+
+    sudo usermod -aG docker codexuser
+
+Membership in the docker group effectively grants root-level control of the
+VM. Confirm that this is permitted by the VM administration policy. Log out
+of any existing codexuser sessions completely and open a new codexuser SSH
+session so the new group membership takes effect. As codexuser, verify:
+
+    id
+    docker version
+    docker compose version
+
+If uv is absent and curl is also absent, the administrative user installs
+curl:
+
+    command -v curl
+    sudo dnf -y install curl
+
+Then, from the codexuser account, install uv without sudo using the official
+installer:
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+Open a new shell or load the path reported by the installer, then verify:
+
+    uv --version
+
+No other sudo-installed packages are required for Checkpoint 1 validation.
+The PostgreSQL client commands and Mosquitto client commands in this runbook
+execute inside their respective containers. Python 3.14 and Python project
+dependencies are managed by uv rather than installed system-wide.
+
+4. Validate the Compose model
 -----------------------------
 
     docker compose --env-file .env config
@@ -59,7 +134,7 @@ Inspect the result and confirm:
 - the database password is represented as a secret-file mount, not a value;
 - no real credentials appear in the rendered configuration.
 
-4. Start only Checkpoint 1 infrastructure
+5. Start only Checkpoint 1 infrastructure
 -----------------------------------------
 
     docker compose --env-file .env up -d postgres mqtt
@@ -70,7 +145,7 @@ its logs without copying secret values into an issue or commit:
 
     docker compose logs --no-log-prefix postgres mqtt
 
-5. Validate PostgreSQL connectivity and schema
+6. Validate PostgreSQL connectivity and schema
 ----------------------------------------------
 
     docker compose exec postgres pg_isready
@@ -95,7 +170,7 @@ The network query must return:
     ska | Skaping    | NULL
     win | Windy      | v3
 
-6. Run focused automated tests
+7. Run focused automated tests
 ------------------------------
 
 Run tests that do not require a live database:
@@ -109,16 +184,7 @@ Run the live PostgreSQL integration tests:
 All focused tests must pass. The integration tests use transactions and roll
 back their test data.
 
-The existing tests/test_upload.py suite may fail if no MQTT broker is running
-at import time because of a pre-existing test-isolation problem. With the local
-broker started above, it can also be checked separately:
-
-    uv run pytest tests/test_upload.py -v
-
-Do not treat an import-time MQTT connection failure in that legacy suite as a
-pilot-schema failure; record it separately.
-
-7. Validate MQTT publish and subscribe
+8. Validate MQTT publish and subscribe
 --------------------------------------
 
 In terminal 1, start a subscriber:
@@ -133,7 +199,7 @@ Terminal 1 must print:
 
     {"ok":true}
 
-8. Validate persistence across normal restart
+9. Validate persistence across normal restart
 ----------------------------------------------
 
     docker compose restart postgres mqtt
@@ -145,8 +211,8 @@ Terminal 1 must print:
 The final query must return 3. This confirms that a normal restart reused the
 PostgreSQL volume rather than recreating the schema.
 
-9. Final repository safety checks
----------------------------------
+10. Final repository safety checks
+----------------------------------
 
     git diff --check
     git status --short
@@ -159,8 +225,8 @@ Confirm once more that secret paths are ignored:
 
     git check-ignore -v .env .secrets/database_password
 
-10. Stop without deleting data
-------------------------------
+11. Stop without deleting data
+--------------------------------
 
     docker compose stop postgres mqtt
 

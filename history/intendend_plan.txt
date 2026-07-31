@@ -239,9 +239,9 @@ Objectives:
 - Expose low-cardinality Prometheus metrics.
 - Add application health checks.
 - Verify restart and state-recovery behavior.
-- Persist unfinished S3/MQTT delivery in a publication outbox so replay after
-  retry exhaustion or process restart does not require downloading or
-  transforming the provider image again.
+- Process transformation, S3 upload, and MQTT publication synchronously.
+  Advance processed freshness state only after the complete pipeline succeeds;
+  freshness detection supplies later retries after failures.
 - Stabilize Compose operation before adding production systemd units.
 
 Expected validation:
@@ -444,7 +444,7 @@ Objectives:
 - Replace bounded validation workers with full configured provider scopes.
 - Replace accelerated timers and retention with production schedules.
 - Add production secret-file paths and deployment documentation.
-- Exercise restart, failure, outbox, reboot, backup, and recovery drills.
+- Exercise restart, failure, reboot, backup, and recovery drills.
 - Restore a selected dump only as an explicitly approved maintenance action.
 - Never automate destructive database restoration or volume deletion.
 

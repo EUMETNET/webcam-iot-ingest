@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily webcam backup and cleanup maintenance
+
+[Timer]
+OnCalendar=*-*-* 01:00:00 UTC
+Persistent=true
+Unit=webcam-maintenance-sequence.service
+
+[Install]
+WantedBy=timers.target

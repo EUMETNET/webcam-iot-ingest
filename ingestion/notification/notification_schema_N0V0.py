@@ -24,6 +24,7 @@ def build_notification(
     stored: StoredObject,
     download_timestamp: datetime,
     provider_update_timestamp: datetime | None,
+    source_image_provider_metadata: dict[str, Any] | None = None,
     publication_timestamp: datetime | None = None,
 ) -> dict[str, Any]:
     published = publication_timestamp or datetime.now(UTC)
@@ -74,6 +75,7 @@ def build_notification(
             "format": source.format,
             "size_bytes": source.size_bytes,
             "colour_mode": source.color_mode,
+            "provider_metadata": source_image_provider_metadata or {},
         },
         "derived_image": {
             "width": derived.width,

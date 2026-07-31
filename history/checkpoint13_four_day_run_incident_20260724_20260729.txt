@@ -1,0 +1,159 @@
+Checkpoint 13 four-day live-run incident record
+================================================
+
+Run boundary
+------------
+
+- Full-scope target started: 2026-07-24 14:51:16 UTC.
+- Intended stop: 2026-07-28 14:51:16 UTC.
+- The automatic stop did not fire; the target remained active.
+- The unhealthy target was stopped manually on 2026-07-29 at about 15:04 UTC.
+- The run used database-pool ceilings 64/24/8, not the subsequently requested
+  60/20/8 values.
+
+Four-day Prometheus snapshot
+----------------------------
+
+At the intended deadline the workers reported:
+
+    network  successful epochs  published  storage errors
+    win                  1,658  9,081,617       1,336,753
+    fin                 13,658    891,404         221,325
+    ska                 19,830     13,257           2,391
+
+The workers downloaded 514,447,180,812 source bytes and successfully uploaded
+201,765,667,196 derived-image bytes to S3. Aggregate publication throughput
+over the four-day window was approximately 28.9 images per second.
+
+Provider-to-download latency estimated from the four-day Prometheus
+histograms was:
+
+    network  p50 seconds  p95 seconds
+    win           199.40       559.37
+    fin            94.07       279.59
+    ska           122.80       289.93
+
+Discovery and scheduled jobs
+----------------------------
+
+No discovery completed successfully during the live run. The last successful
+discovery timestamps remained the checkpoint-12 runs:
+
+    win  2026-07-24 13:43:49 UTC
+    fin  2026-07-24 13:46:25 UTC
+    ska  2026-07-24 13:46:25 UTC
+
+The discovery timer did trigger. The 2026-07-29 run failed before each recipe
+could start because the full root filesystem prevented `just` from creating a
+temporary directory.
+
+The last successful 24-hour cleanup was 2026-07-25 00:17:27 UTC. It examined
+1,195,608 objects in 141.30 seconds and found no object older than 24 hours.
+Cleanup was triggered again at 00:15 UTC on July 26, 27, 28, and 29. Every one
+of these runs failed before reaching S3 because the Python interpreter could
+not import `encodings`. The last successful database backup was
+2026-07-25 01:00:07 UTC; later newly started Python workflows were affected by
+the same interpreter failure.
+
+S3 failure and outbox evidence
+------------------------------
+
+Successful S3 upload throughput fell to zero around 2026-07-27 23:00 UTC,
+simultaneously for Windy, Fintraffic, and Skaping. Provider downloads
+continued. Prometheus recorded approximately 2.30 million Windy, 342 thousand
+Fintraffic, and 4.15 thousand Skaping failures at the S3 upload stage over the
+observed period.
+
+Before the approved recovery truncation, PostgreSQL contained:
+
+    database size:             60 GB
+    publication_outbox size:   60 GB
+    pending_s3 rows:            2,645,054
+    embedded JPEG payload:     52 GB
+    oldest row:                2026-07-27 23:33:04 UTC
+    newest row:                2026-07-29 02:06:59 UTC
+    payload minimum:           882 bytes
+    payload mean:              21,215 bytes
+    payload p50:               19,045 bytes
+    payload p90:               40,615 bytes
+    payload maximum:           170,787 bytes
+
+Breakdown:
+
+    network  rows       embedded payload
+    win      2,298,745  38 GB
+    fin        342,172  14 GB
+    ska          4,137  239 MB
+
+Every row was in `pending_s3` with `last_error_code=s3_upload`. Most rows had
+one recorded attempt, while a small set of the earliest rows had between
+roughly 200 and 809 attempts. The controlled error code does not retain the S3
+HTTP status, response body, request identifier, or provider quota message.
+
+The simultaneous cross-network upload stop, continued provider downloads,
+large successfully uploaded volume, absent cleanup after 2026-07-25, and
+generic S3 failures indicated an EWC bucket capacity or quota boundary. After
+local recovery, a bounded 1 MiB smoke-test `PutObject` returned the exact
+provider response `QuotaExceeded` with zero configured retries. The temporary
+object was never created. The bucket quota cause is therefore confirmed,
+although the original worker failures did not persist this precise response.
+
+A bounded cleanup test after local recovery listed ten eligible objects in
+0.15 seconds and deleted all ten (432,950 bytes) in 0.19 seconds with no
+failure. A second 1 MiB canary still returned `QuotaExceeded`, as expected
+because this deletion was negligible relative to bucket usage. This proves
+that EWC currently permits listing and deletion while quota blocks new
+objects; it does not explain why scheduled cleanup stopped after July 25.
+
+Failure chain
+-------------
+
+1. Daily cleanup stopped succeeding after its first live-run invocation.
+2. S3 successful upload throughput dropped to zero around July 27 23:00 UTC.
+3. Durable pending-S3 JPEG payloads accumulated in PostgreSQL.
+4. The outbox grew to 60 GB and filled the 75 GB VM root filesystem.
+5. PostgreSQL crash-restarted and all workers emitted `OperationalError`.
+6. Scheduled cleanup, backup, and discovery were already unable to start
+   because their virtual environment referenced an incomplete Python runtime
+   below `/tmp`.
+7. The four-day stop timer did not stop the target, extending the incident.
+
+Recovery evidence and follow-up
+-------------------------------
+
+Unused Docker build cache was pruned first, recovering 801.5 MB without
+touching application data. PostgreSQL then became healthy and the read-only
+queries above were collected. The owner explicitly approved truncating the
+outbox after this evidence was preserved. Truncation reduced the database from
+60 GB to 105 MB, reduced the outbox to 32 kB with zero rows, and restored
+approximately 62 GB of host free space.
+
+The virtual environment's interpreter symlink referenced the UV-managed Python
+3.14.6 installation below `/tmp/uv-python`. Between the successful July 25
+cleanup and the July 26 scheduled run, that temporary runtime lost standard
+library source files, including the `encodings` package needed during Python
+startup. Host temporary-file cleanup is the most plausible mechanism; the
+failure predates both the July 27 S3 quota event and the later full local
+filesystem. Already-running ingestion interpreters continued, but every new
+cleanup, backup, or discovery process failed immediately.
+
+The same Python version was reinstalled into `/tmp/uv-python` for recovery and
+import validation succeeded, but this is temporary remediation. The virtual
+environment must be rebuilt against UV's persistent managed-Python directory
+under the user's home before scheduling is restored.
+
+The cleanup implementation lists the complete bucket and retains every
+eligible key in memory before issuing deletes. Given the multi-million-object
+workload, failure or excessive duration from this unbounded scan remains a
+separate cleanup scalability risk.
+
+Before another full run:
+
+- retain the original S3 exception class, HTTP status, provider error code,
+  request identifier, and a bounded message in logs/metrics;
+- add an S3-capacity or writable-canary preflight and alert;
+- alert on pending outbox rows/bytes and local filesystem free space;
+- define bounded outbox retry/backoff and stale-payload disposal;
+- establish why cleanup did not remain successful after July 25;
+- repair and test the automatic four-day stop independently;
+- use database-pool ceilings 60/20/8, leaving infrastructure headroom.

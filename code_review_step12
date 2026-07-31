@@ -1,0 +1,129 @@
+Corrections to do after a first code review (just after step 12)
+
+A.To handle marker/timestamp in a more coherent way across networks:
+1. Add a provider_timestamp column.
+2. Fill it with Windy’s lastUpdatedOn, and let windy marker column null.
+3. Fill it with Fintraffic’s timestamp.
+4. Fill it with Skaping’s Last-Modified value.
+5. Continue filling the marker column with Skaping’s ETag.
+6. Fill the marker column with Fintraffic’s ETag.
+7. Switch Skaping to the common provider-timestamp polling rule.
+8. Skip Fintraffic image processing when the ETag has not changed.
+9. Skip Skaping image downloading when the ETag has not changed.
+10. Make skips caused by unchanged markers observable.
+11. Update the EMA from valid provider-timestamp changes, even when the ETag is unchanged; skip downloading or processing the unchanged image content.
+12. For freshness assessment, compare all freshness indicators currently available: use the marker alone when no provider timestamp is available, the provider timestamp alone when no marker is available, and both when both are available. An image is considered unchanged only when all available indicators are unchanged.
+13. Keep the latest observed provider marker/timestamp distinct from the latest successfully processed marker/timestamp. Use the observed values for provider-cadence estimation and polling, and the successfully processed values to decide whether the image pipeline still needs to run.
+14. Add tests for marker-only, timestamp-only, and combined freshness, including timestamp changed with marker unchanged.
+
+
+
+B.simplify ingestion by removing the durable publication outbox and its replay mechanism, while
+ preserving retries through freshness detection and accepting possible duplicate uploads or MQTT
+ publications after ambiguous failures.
+
+1. Remove the publication outbox and replay operations.
+2. Process transformation, S3 upload, and MQTT publication synchronously within each source job.
+3. Update the successfully processed freshness marker only after the complete pipeline succeeds.
+4. Leave the processed marker unchanged when transformation, S3 upload, or MQTT publication fails, so the source can be retried.
+5. Accept possible duplicate S3 uploads or MQTT publications after ambiguous failures.
+6. Remove the outbox batch-size configuration.
+7. Remove outbox-related commands and worker options.
+8. Remove outbox-specific metrics and observability code.
+9. Remove outbox and replay panels from the Grafana dashboards.
+10. Remove the outbox database objects through a migration.
+11. Update tests, documentation, checkpoint records, and changes_wrt_initial_design.md accordingly.
+12. Record the observed provider timestamp and image marker even when the subsequent image download or processing fails, so an invalid or unavailable image does not distort the EMA estimation.
+13. Do not advance the successfully processed marker/timestamp after a download, transformation, S3, or MQTT failure; retry the pipeline for the observed image when it becomes due again.
+14. Add tests for download failure and publication failure followed by a successful retry, including ambiguous failures that may produce duplicate S3 uploads or MQTT publications.
+
+
+
+C.Include the resolved Skaping image target path in the MQTT source-image metadata, while keeping Last-Modified as the provider timestamp and not treating the timestamp embedded in the path as authoritative.
+
+
+D.ensure every database connection returned to the custom pool is clean and idle, preventing one job’s transaction or database error from affecting another job.
+
+1. Inspect the Psycopg transaction status whenever a connection is returned.
+2. Return IDLE connections directly to the pool.
+3. Roll back connections in an open or failed transaction.
+4. Verify that rollback restored the connection to IDLE.
+5. Close and remove any connection that cannot be restored safely.
+6. Allow the pool to create a replacement for every discarded connection.
+7. Preserve the original job exception if both job processing and connection cleanup fail.
+8. Add tests for successful SELECT, committed transactions, open transactions, aborted transactions, rollback failures, and closed connections.
+9. Add metrics or controlled logs for connection rollback, discard, and replacement events.
+
+
+E.Remove the S3 HEAD request performed before each PUT; upload the object directly to avoid the additional request and latency.
+
+
+F.Restrict S3 cleanup to an explicitly selected transformation prefix by default, while supporting an all_transformation_prefixes option to clean every recognized transformation prefix within the configured S3 bucket prefix.
+
+
+G.retain daily PostgreSQL backups during the current month while progressively preserving one final backup per preceding month, without risking deletion before a replacement backup is verified.
+
+1. Run PostgreSQL-backup cleanup only after the current backup has been uploaded and verified successfully.
+2. Scope cleanup strictly to backups/postgresql/.
+3. Organize or recognize dumps by their year, month, and day path.
+4. When a verified dump exists for the current date, remove the latest preceding available daily dump only if it belongs to the same month. This also handles missed daily executions without leaving unintended daily backups indefinitely.
+5. On the first day of a month, retain the final dump from the preceding month.
+6. Never delete backups from older months through this daily cleanup rule.
+7. Under regular daily execution, retain the latest dump for the current month and the final retained dump from each preceding month.
+8. Treat missing, malformed, or unexpected backup keys conservatively and never delete them automatically.
+9. Provide a dry-run mode that reports the exact backup keys selected for deletion.
+10. Emit dedicated backup-cleanup outcome, duration, object-count, and deleted-byte metrics.
+11. Run image-spool cleanup and database-backup cleanup as distinct operations, even if they share the same maintenance command or systemd chain.
+
+
+H.expose one definitive success/failure count for every completed high-level S3 upload and MQTT publication while keeping retry attempts separately observable.
+1. Add webcam_s3_upload_total, labelled by source_network and result.
+2. Add webcam_mqtt_publication_total, labelled by source_network, transformation_version, and result.
+3. Restrict result to success or failure.
+4. Increment each operation counter exactly once, after its complete retry loop terminates.
+5. Record success when any attempt succeeds.
+6. Record failure only when the initial attempt and every configured retry fail.
+7. Continue incrementing the retry metric once for every retry attempt actually started.
+8. Do not increment the high-level operation counter separately for retries.
+9. Ensure exceptions and early returns cannot omit or duplicate the final counter update.
+10. Add tests covering immediate success, success after retry, and final failure.
+11. Add the counters to the relevant Grafana dashboards and documentation.
+
+
+I.isolate unexpected source-job failures so one faulty job does not prevent completion and accounting of the remaining epoch jobs.
+1. Associate each submitted future with its source-stream job.
+2. Wrap every future.result() call in try/except Exception.
+3. Log the affected source_stream_id, network, epoch, and exception with its traceback.
+4. Record the affected job with the internal_error outcome.
+5. Increment the ingestion job counter once with result="internal_error".
+6. Emit a controlled internal-error failure metric without using the exception message as a Prometheus label.
+7. Continue collecting every remaining future.
+8. Include internal errors in epoch summaries so completed outcomes still add up to selected jobs.
+9. Exclude internally failed jobs from EMA updates and other success-only processing.
+10. Apply the same shared handling to Windy, Fintraffic, and Skaping workers.
+11. Add tests proving that one unexpected future failure is recorded while the other futures complete normally.
+
+
+J.establish the final container-based deployment model before validating operational recovery and long-running behaviour in checkpoint 13.
+  
+1. Build a reproducible application image containing the discovery, ingestion, cleanup, backup, and migration programs.
+2. Run Windy, Fintraffic, and Skaping ingestion as separate long-lived Docker Compose services.
+3. Run PostgreSQL, MQTT, Prometheus, Grafana, exporters, and ingestion workers within the same Compose deployment.
+4. Give each ingestion worker its own configuration, metrics port, health checks, resource limits, and restart policy.
+5. Run discovery as short-lived docker compose run --rm jobs triggered by systemd timers.
+6. Run database backup and subsequent backup cleanup as a chained short-lived container job.
+7. Run image-spool cleanup as a separate short-lived container job.
+8. Keep persistent PostgreSQL, Prometheus, Grafana, MQTT, and other required state in named volumes or explicit durable mounts.
+9. Mount or inject .env configuration and secrets without copying secrets into container images.
+10. Make application containers connect through Compose service names rather than host-specific addresses.
+11. Ensure graceful worker shutdown finishes or safely interrupts active jobs within the configured grace period.
+12. Let Docker Compose restart failed long-lived containers; avoid competing per-worker restart loops in systemd.
+13. Use systemd only to start and stop the Compose stack at VM boot, schedule short-lived jobs, and expose administrative lifecycle commands.
+14. Make scheduled jobs fail clearly when the Compose infrastructure or required dependencies are unavailable.
+15. Preserve separate logs, metrics, health status, and dashboards for every network and maintenance job.
+16. Update the Justfile so development, bounded tests, scheduled jobs, and full deployment use the containerized commands consistently.
+17. Add container-level tests for startup ordering, health checks, graceful shutdown, restart, persistent state, and scheduled-job execution.
+  
+ 
+
+K.Update README, deployment documentation, with a first_code_review_after_step_12

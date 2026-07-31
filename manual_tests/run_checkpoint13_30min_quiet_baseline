@@ -1,0 +1,134 @@
+Checkpoint 13 - quiet 30-minute full-system baseline
+====================================================
+
+Purpose
+-------
+
+Establish a no-failure baseline before recovery code or crash injection. The
+target starts the three full-scope containerized ingestion workers immediately.
+Ten minutes later it starts exactly one sequential workflow:
+
+1. Windy discovery;
+2. Fintraffic discovery;
+3. Skaping discovery;
+4. verified PostgreSQL backup and conservative backup cleanup;
+5. transformation-scoped cleanup of images older than 24 hours.
+
+At thirty minutes the target stops only the three ingestion workers. Monitoring
+and core infrastructure remain available. A workflow already in progress is
+allowed to finish, so its actual duration and whether discovery fitted inside
+the thirty-minute ingestion window remain observable.
+
+Administrator installation
+----------------------------
+
+    sudo cp \
+      /home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-30min-baseline/webcam-checkpoint13-baseline* \
+      /etc/systemd/system/
+    sudo systemctl daemon-reload
+    sudo systemd-analyze verify \
+      /etc/systemd/system/webcam-checkpoint13-baseline*.service \
+      /etc/systemd/system/webcam-checkpoint13-baseline*.timer \
+      /etc/systemd/system/webcam-checkpoint13-baseline.target
+
+The `run-workflow` script remains in the repository and is invoked through its
+absolute path; it must be executable.
+
+Still from the administrator account, create a narrow sudo policy so
+`codexuser` can control and inspect only this benchmark:
+
+    sudo visudo -f /etc/sudoers.d/webcam-checkpoint13-baseline
+
+Add the following content. Confirm the executable paths first with
+`command -v systemctl journalctl`; replace `/usr/bin` below if this host uses a
+different location.
+
+    Cmnd_Alias WEBCAM_CP13_BASELINE = \
+        /usr/bin/systemctl start webcam-checkpoint13-baseline.target, \
+        /usr/bin/systemctl stop webcam-checkpoint13-baseline.target, \
+        /usr/bin/systemctl --no-pager --full status webcam-checkpoint13-baseline*, \
+        /usr/bin/journalctl -f -u webcam-checkpoint13-baseline*
+
+    codexuser ALL=(root) NOPASSWD: WEBCAM_CP13_BASELINE
+
+Then secure and validate the policy:
+
+    sudo chown root:root /etc/sudoers.d/webcam-checkpoint13-baseline
+    sudo chmod 0440 /etc/sudoers.d/webcam-checkpoint13-baseline
+    sudo visudo -c
+
+Do not grant unrestricted `systemctl`, `journalctl`, or root access.
+
+Preflight as codexuser
+----------------------
+
+    cd /home/codexuser/src/webcam-iot-ingest
+    docker compose --env-file .env --profile application \
+      --profile monitoring --profile jobs config --quiet
+    systemd-analyze verify \
+      deployment/systemd/checkpoint13-30min-baseline/*.service \
+      deployment/systemd/checkpoint13-30min-baseline/*.timer \
+      deployment/systemd/checkpoint13-30min-baseline/*.target
+    docker compose ps
+    sudo -n -l
+
+Confirm that `sudo -n -l` lists `WEBCAM_CP13_BASELINE`. The `-n` option makes
+an authorization error fail immediately instead of unexpectedly asking
+`codexuser` for an administrator password.
+
+Do not run another ingestion benchmark, discovery, backup, or cleanup command
+in parallel with this baseline.
+
+Start and observe
+-----------------
+
+    sudo -n systemctl start webcam-checkpoint13-baseline.target
+    sudo -n systemctl --no-pager --full status \
+      webcam-checkpoint13-baseline.target \
+      webcam-checkpoint13-baseline-stack.service \
+      webcam-checkpoint13-baseline-workflow.timer \
+      webcam-checkpoint13-baseline-stop.timer
+
+    sudo -n journalctl -f \
+      -u webcam-checkpoint13-baseline-workflow.service \
+      -u 'webcam-checkpoint13-baseline-discovery@*.service' \
+      -u webcam-checkpoint13-baseline-db-backup.service \
+      -u webcam-checkpoint13-baseline-spool-cleanup.service
+
+Worker logs remain container logs:
+
+    docker compose logs -f --since 5m \
+      windy-worker fintraffic-worker skaping-worker
+
+Confirm all three workers are healthy:
+
+    docker compose ps windy-worker fintraffic-worker skaping-worker
+
+After thirty minutes
+--------------------
+
+    sudo -n systemctl --no-pager --full status \
+      webcam-checkpoint13-baseline.target \
+      webcam-checkpoint13-baseline-workflow.service \
+      webcam-checkpoint13-baseline-discovery@windy.service \
+      webcam-checkpoint13-baseline-discovery@fintraffic.service \
+      webcam-checkpoint13-baseline-discovery@skaping.service \
+      webcam-checkpoint13-baseline-db-backup.service \
+      webcam-checkpoint13-baseline-spool-cleanup.service
+
+    docker compose ps windy-worker fintraffic-worker skaping-worker
+
+Record worker throughput, latency, epoch duration, provider errors, PostgreSQL
+connections, CPU, memory, disk, discovery durations, backup duration, cleanup
+duration, and whether the workflow completed before or after the thirty-minute
+deadline. Grafana and Prometheus remain running for inspection.
+
+Stop early
+----------
+
+    sudo -n systemctl stop webcam-checkpoint13-baseline.target
+
+Stopping early does not terminate a workflow that has already started. Stop an
+individual workflow service explicitly only if necessary and from the
+administrator account; the narrow `codexuser` policy deliberately does not
+authorize that operation.

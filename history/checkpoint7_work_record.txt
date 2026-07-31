@@ -1,6 +1,11 @@
 Checkpoint 7 work record - operational Windy worker
 ===================================================
 
+Post-checkpoint note (2026-07-30): the durable publication outbox and replay
+mechanism documented below were removed by the first code review after
+checkpoint 12. Delivery is now synchronous and ambiguous retries may produce
+duplicates. The remainder records what checkpoint 7 validated at the time.
+
 Status
 ------
 

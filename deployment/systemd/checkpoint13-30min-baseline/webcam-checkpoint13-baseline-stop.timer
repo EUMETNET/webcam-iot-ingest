@@ -1,0 +1,8 @@
+[Unit]
+Description=End checkpoint-13 baseline ingestion after thirty minutes
+PartOf=webcam-checkpoint13-baseline.target
+
+[Timer]
+OnActiveSec=30min
+AccuracySec=1s
+Unit=webcam-checkpoint13-baseline-stop.service

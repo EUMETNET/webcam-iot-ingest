@@ -76,7 +76,7 @@
           </tbody>
         </table>
         <div class="detail"><strong>Freshness query error.</strong> The Windy metadata/current-image-reference request failed or returned an unusable response: for example an HTTP failure, invalid JSON, missing webcam or marker, mismatched ID, or missing rendition URL. It excludes a valid unchanged marker, image-download failures, and throttling.</div>
-        <p class="note">Counts are averages over the final 30 minutes. Small differences between transformation, S3 and MQTT counts come from durable outbox replay across the measurement boundary.</p>
+        <p class="note">Counts are averages over the final 30 minutes. Small differences between stages can occur at the measurement-window boundary.</p>
       </section>
       <div class="stack">
         <section>

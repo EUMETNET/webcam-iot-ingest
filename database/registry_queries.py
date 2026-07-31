@@ -85,31 +85,30 @@ class DueSourceStream:
     corrected_latitude: float | None
     corrected_longitude: float | None
     corrected_altitude: float | None
-    last_freshness_query_timestamp: datetime | None
     last_download_timestamp: datetime | None
-    last_provider_image_marker: str | None
+    last_observed_provider_timestamp: datetime | None
+    last_observed_image_marker: str | None
+    last_processed_timestamp: datetime | None
     ema_download_period: float | None
 
 
 @dataclass(frozen=True)
 class EmaUpdateCandidate:
     source_stream_id: str
-    download_timestamp: datetime
+    anchor_timestamp: datetime
     ema_download_period: float
 
 
 @dataclass(frozen=True)
-class PendingPublication:
-    image_id: str
+class IngestionStateUpdate:
+    """One state transition accumulated by a source job for epoch-end batching."""
+
     source_stream_id: str
-    provider_marker: str
+    provider_update_timestamp: datetime | None
+    provider_image_marker: str | None
     download_timestamp: datetime
-    object_key: str
-    derived_content: bytes
-    notification: dict[str, Any]
-    stage: Literal["pending_s3", "pending_mqtt"]
-    attempt_count: int
-    last_error_code: str | None
+    ema_update_candidate: EmaUpdateCandidate | None = None
+    processed_timestamp: datetime | None = None
 
 
 def get_network_registry(
@@ -286,9 +285,6 @@ def get_due_source_streams(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
-    adaptive_polling_anchor: Literal[
-        "provider_marker", "download_timestamp"
-    ] = "provider_marker",
     now: datetime | None = None,
     countries: Sequence[str] | None = None,
     limit: int | None = None,
@@ -298,11 +294,6 @@ def get_due_source_streams(
         raise ValueError("minimum ingestion interval cannot be negative")
     if polling_interval_factor < 0:
         raise ValueError("polling interval factor cannot be negative")
-    if adaptive_polling_anchor not in {
-        "provider_marker",
-        "download_timestamp",
-    }:
-        raise ValueError("unsupported adaptive polling anchor")
     now = now or datetime.now(timezone.utc)
     _require_aware_datetime(now, "now")
     if countries is not None and (
@@ -325,54 +316,28 @@ def get_due_source_streams(
                 ss.provider_metadata AS source_stream_metadata,
                 s.latitude, s.longitude, s.altitude, s.country,
                 s.corrected_latitude, s.corrected_longitude,
-                s.corrected_altitude, ss.last_freshness_query_timestamp,
-                ss.last_download_timestamp,
-                ss.last_provider_image_marker, ss.ema_download_period
+                s.corrected_altitude, ss.last_download_timestamp,
+                ss.last_observed_provider_timestamp,
+                ss.last_observed_image_marker,
+                ss.last_processed_timestamp,
+                ss.ema_download_period
             FROM source_stream AS ss
             JOIN site AS s USING (site_id)
             WHERE s.network_id = %s
               AND ss.status = 'active'
               AND (%s::text[] IS NULL OR s.country = ANY(%s::text[]))
-              AND CASE
-                  WHEN %s = 'download_timestamp' THEN
-                      (
-                          ss.last_freshness_query_timestamp IS NULL
-                          OR ss.last_freshness_query_timestamp
-                              + %s::double precision * interval '1 second' <= %s
-                      )
-                      AND (
-                          ss.last_download_timestamp IS NULL
-                          OR ss.last_download_timestamp
-                              + GREATEST(
-                                  %s::double precision,
-                                  COALESCE(
-                                      ss.ema_download_period
-                                          * %s::double precision,
-                                      %s::double precision
-                                  )
-                              ) * interval '1 second' <= %s
-                      )
-                  ELSE
-                      ss.last_download_timestamp IS NULL
-                      OR (
-                          ss.last_download_timestamp
-                              + %s::double precision * interval '1 second' <= %s
-                          AND CASE
-                              WHEN ss.ema_download_period IS NULL
-                                OR ss.last_provider_image_marker IS NULL
-                                OR NOT pg_input_is_valid(
-                                    ss.last_provider_image_marker,
-                                    'timestamp with time zone'
-                                )
-                              THEN TRUE
-                              ELSE ss.last_provider_image_marker::timestamptz
-                                  + (
-                                      ss.ema_download_period
-                                          * %s::double precision
-                                    ) * interval '1 second' <= %s
-                          END
-                      )
-              END
+              AND (
+                  ss.last_processed_timestamp IS NULL
+                  OR ss.last_processed_timestamp
+                      + %s::double precision * interval '1 second' <= %s
+              )
+              AND (
+                  ss.last_observed_provider_timestamp IS NULL
+                  OR ss.ema_download_period IS NULL
+                  OR ss.last_observed_provider_timestamp
+                      + ss.ema_download_period * %s::double precision
+                        * interval '1 second' <= %s
+              )
             ORDER BY ss.last_download_timestamp NULLS FIRST,
                      ss.source_stream_id
             LIMIT %s
@@ -381,13 +346,6 @@ def get_due_source_streams(
                 network_id,
                 normalized_countries,
                 normalized_countries,
-                adaptive_polling_anchor,
-                minimum_ingestion_interval.total_seconds(),
-                now,
-                minimum_ingestion_interval.total_seconds(),
-                polling_interval_factor,
-                minimum_ingestion_interval.total_seconds(),
-                now,
                 minimum_ingestion_interval.total_seconds(),
                 now,
                 polling_interval_factor,
@@ -398,275 +356,101 @@ def get_due_source_streams(
         return [DueSourceStream(**dict(row)) for row in cursor.fetchall()]
 
 
-def record_freshness_query(
-    connection: psycopg.Connection[Any],
-    source_stream_id: str,
-    query_timestamp: datetime,
-) -> None:
-    """Record a provider freshness attempt, regardless of its outcome."""
-    _require_aware_datetime(query_timestamp, "query_timestamp")
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE source_stream
-            SET last_freshness_query_timestamp = %s
-            WHERE source_stream_id = %s
-            """,
-            (query_timestamp, source_stream_id),
-        )
-        if cursor.rowcount != 1:
-            raise RegistryRecordNotFoundError(
-                f"source stream does not exist: {source_stream_id}"
-            )
-
-
-def record_provider_image_marker(
-    connection: psycopg.Connection[Any],
-    source_stream_id: str,
-    provider_image_marker: str,
-) -> None:
-    """Record a handled marker without claiming a successful download."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE source_stream
-            SET last_provider_image_marker = %s
-            WHERE source_stream_id = %s
-            """,
-            (provider_image_marker, source_stream_id),
-        )
-        if cursor.rowcount != 1:
-            raise RegistryRecordNotFoundError(
-                f"source stream does not exist: {source_stream_id}"
-            )
-
-
-def record_successful_download(
-    connection: psycopg.Connection[Any],
-    source_stream_id: str,
-    provider_image_marker: str,
-    download_timestamp: datetime,
+def build_ema_update_candidate(
+    job: DueSourceStream,
     *,
+    provider_update_timestamp: datetime | None,
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
-    defer_ema_update: bool = False,
-) -> float | EmaUpdateCandidate:
-    """Atomically record a successful source download and update its EMA."""
+) -> EmaUpdateCandidate | None:
+    """Apply the established EMA formula without writing source state."""
     if not 0 <= ema_alpha <= 1:
         raise ValueError("ema_alpha must be between 0 and 1")
-    if initial_ema_seconds < 0:
-        raise ValueError("initial EMA cannot be negative")
-    _require_aware_datetime(download_timestamp, "download timestamp")
-
-    with connection.transaction():
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT last_download_timestamp, ema_download_period
-                FROM source_stream
-                WHERE source_stream_id = %s
-                FOR UPDATE
-                """,
-                (source_stream_id,),
-            )
-            previous = cursor.fetchone()
-            if previous is None:
-                raise RegistryRecordNotFoundError(
-                    f"source stream does not exist: {source_stream_id}"
-                )
-            previous_timestamp, previous_ema = previous
-            if previous_timestamp is None:
-                next_ema = initial_ema_seconds
-            else:
-                elapsed = (download_timestamp - previous_timestamp).total_seconds()
-                if elapsed < 0:
-                    raise ValueError("download timestamp cannot move backwards")
-                baseline = (
-                    float(previous_ema)
-                    if previous_ema is not None
-                    else initial_ema_seconds
-                )
-                next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
-
-            cursor.execute(
-                """
-                UPDATE source_stream
-                SET last_provider_image_marker = %s,
-                    last_download_timestamp = %s,
-                    ema_download_period = CASE WHEN %s THEN ema_download_period ELSE %s END
-                WHERE source_stream_id = %s
-                """,
-                (
-                    provider_image_marker,
-                    download_timestamp,
-                    defer_ema_update,
-                    next_ema,
-                    source_stream_id,
-                ),
-            )
-    if defer_ema_update:
-        return EmaUpdateCandidate(
-            source_stream_id, download_timestamp, next_ema
+    if provider_update_timestamp is not None:
+        _require_aware_datetime(provider_update_timestamp, "provider timestamp")
+    previous_timestamp = job.last_observed_provider_timestamp
+    if (
+        provider_update_timestamp is None
+        or provider_update_timestamp == previous_timestamp
+    ):
+        return None
+    if previous_timestamp is None:
+        next_ema = initial_ema_seconds
+    else:
+        elapsed = (provider_update_timestamp - previous_timestamp).total_seconds()
+        if elapsed < 0:
+            return None
+        baseline = (
+            float(job.ema_download_period)
+            if job.ema_download_period is not None
+            else initial_ema_seconds
         )
-    return next_ema
+        next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
+    return EmaUpdateCandidate(job.source_stream_id, provider_update_timestamp, next_ema)
 
 
-def apply_ema_update_candidates(
+def apply_ingestion_state_updates(
     connection: psycopg.Connection[Any],
-    candidates: Sequence[EmaUpdateCandidate],
+    updates: Sequence[IngestionStateUpdate],
+    *,
+    apply_ema: bool,
 ) -> int:
-    """Apply one epoch's EMA candidates without overwriting newer downloads."""
-    if not candidates:
+    """Persist one epoch's download decisions atomically in a single batch."""
+    if not updates:
         return 0
+    for update in updates:
+        _require_aware_datetime(update.download_timestamp, "download timestamp")
+        if update.provider_update_timestamp is not None:
+            _require_aware_datetime(
+                update.provider_update_timestamp, "provider timestamp"
+            )
+        if update.processed_timestamp is not None:
+            _require_aware_datetime(update.processed_timestamp, "processed timestamp")
     with connection.transaction():
         with connection.cursor() as cursor:
             cursor.executemany(
                 """
                 UPDATE source_stream
-                SET ema_download_period = %s
+                SET last_observed_provider_timestamp = COALESCE(
+                        %s, last_observed_provider_timestamp
+                    ),
+                    last_observed_image_marker = COALESCE(
+                        %s, last_observed_image_marker
+                    ),
+                    last_download_timestamp = %s,
+                    last_processed_timestamp = COALESCE(
+                        %s, last_processed_timestamp
+                    ),
+                    ema_download_period = CASE
+                        WHEN %s::boolean AND %s::double precision IS NOT NULL
+                        THEN %s::double precision
+                        ELSE ema_download_period
+                    END
                 WHERE source_stream_id = %s
-                  AND last_download_timestamp = %s
                 """,
                 (
                     (
-                        candidate.ema_download_period,
-                        candidate.source_stream_id,
-                        candidate.download_timestamp,
+                        update.provider_update_timestamp,
+                        update.provider_image_marker,
+                        update.download_timestamp,
+                        update.processed_timestamp,
+                        apply_ema,
+                        (
+                            update.ema_update_candidate.ema_download_period
+                            if update.ema_update_candidate is not None
+                            else None
+                        ),
+                        (
+                            update.ema_update_candidate.ema_download_period
+                            if update.ema_update_candidate is not None
+                            else None
+                        ),
+                        update.source_stream_id,
                     )
-                    for candidate in candidates
+                    for update in updates
                 ),
             )
             return cursor.rowcount
-
-
-def record_download_and_enqueue_publication(
-    connection: psycopg.Connection[Any],
-    source_stream_id: str,
-    provider_image_marker: str,
-    download_timestamp: datetime,
-    *,
-    ema_alpha: float,
-    image_id: str,
-    object_key: str,
-    derived_content: bytes,
-    notification: JsonObject,
-    defer_ema_update: bool = False,
-) -> float | EmaUpdateCandidate:
-    """Atomically record source success and durable pending publication."""
-    if not derived_content:
-        raise ValueError("derived publication content cannot be empty")
-    with connection.transaction():
-        ema = record_successful_download(
-            connection,
-            source_stream_id,
-            provider_image_marker,
-            download_timestamp,
-            ema_alpha=ema_alpha,
-            defer_ema_update=defer_ema_update,
-        )
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO publication_outbox (
-                    image_id, source_stream_id, provider_marker,
-                    download_timestamp, object_key, derived_content, notification
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (image_id) DO NOTHING
-                """,
-                (
-                    image_id,
-                    source_stream_id,
-                    provider_image_marker,
-                    download_timestamp,
-                    object_key,
-                    derived_content,
-                    Jsonb(dict(notification)),
-                ),
-            )
-            if cursor.rowcount != 1:
-                raise RegistryCollisionError(
-                    f"publication image identifier already exists: {image_id}"
-                )
-    return ema
-
-
-def get_pending_publications(
-    connection: psycopg.Connection[Any],
-    *,
-    limit: int = 100,
-    network_id: str | None = None,
-) -> list[PendingPublication]:
-    if limit < 1:
-        raise ValueError("publication limit must be positive")
-    with connection.cursor(row_factory=dict_row) as cursor:
-        network_clause = (
-            """
-            JOIN source_stream ss USING (source_stream_id)
-            JOIN site s USING (site_id)
-            WHERE s.network_id = %s
-            """
-            if network_id is not None
-            else ""
-        )
-        parameters: tuple[Any, ...] = (
-            (network_id, limit) if network_id is not None else (limit,)
-        )
-        cursor.execute(
-            f"""
-            SELECT po.image_id, po.source_stream_id, po.provider_marker,
-                   po.download_timestamp, po.object_key, po.derived_content,
-                   po.notification, po.stage, po.attempt_count, po.last_error_code
-            FROM publication_outbox po
-            {network_clause}
-            ORDER BY po.created_at, po.image_id
-            LIMIT %s
-            """,
-            parameters,
-        )
-        return [PendingPublication(**dict(row)) for row in cursor.fetchall()]
-
-
-def mark_publication_uploaded(
-    connection: psycopg.Connection[Any], image_id: str
-) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE publication_outbox
-            SET stage = 'pending_mqtt', updated_at = now(), last_error_code = NULL
-            WHERE image_id = %s
-            """,
-            (image_id,),
-        )
-        if cursor.rowcount != 1:
-            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
-
-
-def record_publication_failure(
-    connection: psycopg.Connection[Any], image_id: str, error_code: str
-) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            UPDATE publication_outbox
-            SET attempt_count = attempt_count + 1,
-                last_error_code = %s,
-                updated_at = now()
-            WHERE image_id = %s
-            """,
-            (error_code, image_id),
-        )
-        if cursor.rowcount != 1:
-            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
-
-
-def complete_publication(
-    connection: psycopg.Connection[Any], image_id: str
-) -> None:
-    with connection.cursor() as cursor:
-        cursor.execute("DELETE FROM publication_outbox WHERE image_id = %s", (image_id,))
-        if cursor.rowcount != 1:
-            raise RegistryRecordNotFoundError(f"publication does not exist: {image_id}")
 
 
 def _ensure_network_exists(

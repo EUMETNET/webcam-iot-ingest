@@ -1,0 +1,11 @@
+[Unit]
+Description=Checkpoint-13 baseline cleanup of T0V0 images older than 24 hours
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/usr/bin/docker compose --env-file .env --profile jobs run --rm webcam-job python -m storage.s3_spool_cleanup --older-than-hours 24 --transformation-prefix T0V0
+TimeoutStartSec=3600

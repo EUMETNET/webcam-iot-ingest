@@ -1,0 +1,12 @@
+[Unit]
+Description=Verified PostgreSQL backup and conservative backup cleanup
+Requires=webcam-stack.service
+After=webcam-stack.service network-online.target
+
+[Service]
+Type=oneshot
+User=codexuser
+Group=codexuser
+WorkingDirectory=/opt/webcam-ingestion
+ExecStart=/usr/bin/docker compose --env-file .env --profile jobs run --rm webcam-job python -m database.database_backup --pg-dump-mode direct
+TimeoutStartSec=3600

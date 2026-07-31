@@ -34,28 +34,26 @@ infrastructure:
 
 # Check that PostgreSQL is reachable and the pilot schema exists
 database-check:
-    uv run python -m database.healthcheck
+    docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.healthcheck
 
 # Run one complete Fintraffic discovery pass. Add --dry-run to avoid writes.
 discover-fintraffic *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec uv run --env-file .env python -m \
-        discovery.fintraffic.fintraffic_discovery_workflow "$@"
+    exec just container-discover fintraffic "$@"
 
 # Run one complete Windy discovery pass. Add --dry-run to avoid writes.
 discover-windy *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec uv run --env-file .env python -m \
-        discovery.windy.windy_discovery_workflow "$@"
+    exec just container-discover windy "$@"
 
 # Run one complete Skaping discovery pass. Add --dry-run to avoid writes.
 discover-skaping *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec uv run --env-file .env python -m \
-        discovery.skaping.skaping_discovery_workflow "$@"
+    exec just container-discover skaping "$@"
 
 # Inspect or delete canonical derived-image objects older than an exact age.
 # Example: just cleanup-spool 24 --dry-run
@@ -64,17 +62,58 @@ cleanup-spool older_than_hours *args:
     set -euo pipefail
     older_than_hours="$1"
     shift
-    exec env UV_CACHE_DIR=/tmp/webcam-uv-cache \
-        uv run --env-file .env python -m storage.s3_spool_cleanup \
-        --older-than-hours "$older_than_hours" "$@"
+    exec just container-cleanup-spool "$older_than_hours" "$@"
 
 # Create a timestamped full PostgreSQL dump in the configured S3 bucket.
 # Add --dry-run to validate configuration and inspect the future key.
 backup-database *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec env UV_CACHE_DIR=/tmp/webcam-uv-cache PG_DUMP_MODE=docker-compose \
-        uv run --env-file .env python -m database.database_backup "$@"
+    exec just container-backup-database "$@"
+
+# Build and start the final containerized ingestion and monitoring stack.
+container-stack-up:
+    docker compose --env-file .env --profile application --profile monitoring up -d --build
+
+# Stop the final containerized stack without removing persistent volumes.
+container-stack-stop:
+    docker compose --env-file .env --profile application --profile monitoring stop
+
+# Run one provider discovery in the shared short-lived application container.
+container-discover network *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    network="$1"
+    shift
+    exec deployment/systemd/pilot/run-discovery "$network" "$@"
+
+# Run transformation-scoped image cleanup in a short-lived container.
+container-cleanup-spool older_than_hours="24" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    older_than_hours="$1"
+    shift
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m storage.s3_spool_cleanup \
+        --older-than-hours "$older_than_hours" "$@"
+
+# Create and verify a database dump, then clean the prior same-month daily dump.
+container-backup-database *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.database_backup \
+        --pg-dump-mode direct "$@"
+
+# Inspect or run conservative cleanup for a verified canonical backup key.
+container-cleanup-database-backups current_key *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current_key="$1"
+    shift
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.database_backup_cleanup \
+        --current-key "$current_key" "$@"
 
 # One dry-run discovery used by the accelerated checkpoint-12 systemd chain.
 checkpoint12-discover network:
@@ -151,7 +190,7 @@ checkpoint13-ingest network:
             module="ingestion.worker"
             max_jobs=30000
             threads=100
-            pool_size=64
+            pool_size=60
             port=8013
             network_args=(--network win)
             provider_env=(
@@ -163,8 +202,8 @@ checkpoint13-ingest network:
         fintraffic)
             module="ingestion.fintraffic.worker"
             max_jobs=3000
-            threads=100
-            pool_size=24
+            threads=50
+            pool_size=20
             port=8014
             network_args=()
             provider_env=(
@@ -204,20 +243,28 @@ checkpoint13-ingest network:
         uv run --env-file .env python -m "$module" \
         --max-jobs "$max_jobs" --stagger-initial-polling "${network_args[@]}"
 
+# Run a bounded Windy ingestion sample. Add --dry-run to avoid S3/MQTT.
+ingest-windy *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m \
+        ingestion.windy.windy_ingestion_workflow "$@"
+
 # Run a bounded Fintraffic ingestion sample. Add --dry-run to avoid S3/MQTT.
 ingest-fintraffic *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec env MQTT_HOST=127.0.0.1 \
-        uv run --env-file .env python -m \
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m \
         ingestion.fintraffic.fintraffic_ingestion_workflow "$@"
 
 # Run a bounded Skaping ingestion sample. Add --dry-run to avoid S3/MQTT.
 ingest-skaping *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    exec env MQTT_HOST=127.0.0.1 \
-        uv run --env-file .env python -m \
+    exec docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m \
         ingestion.skaping.skaping_ingestion_workflow "$@"
 
 # Start the monitoring containers

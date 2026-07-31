@@ -16,20 +16,37 @@ def test_publishes_compact_json_at_qos_one() -> None:
     client = Mock()
     client.publish.return_value = result
 
-    topic = MqttPublisher(config(), client=client).publish("T0V0", {"x": 1})
+    events = []
+    topic = MqttPublisher(
+        config(),
+        client=client,
+        event_observer=lambda event, values: events.append((event, values)),
+    ).publish("T0V0", {"x": 1})
 
     assert topic == "webcam/T0V0"
     client.publish.assert_called_once_with(
         "webcam/T0V0", '{"x":1}', qos=1, retain=False
     )
+    assert events == [
+        ("mqtt_operation", {"version": "T0V0", "result": "success"})
+    ]
 
 
 def test_retries_and_raises_controlled_error() -> None:
     client = Mock()
     client.publish.side_effect = RuntimeError("broker detail")
 
+    events = []
     with pytest.raises(MqttPublicationError) as caught:
-        MqttPublisher(config(), client=client).publish("T0V0", {})
+        MqttPublisher(
+            config(),
+            client=client,
+            event_observer=lambda event, values: events.append((event, values)),
+        ).publish("T0V0", {})
 
     assert client.publish.call_count == 2
     assert "broker detail" not in str(caught.value)
+    assert events == [
+        ("retry", {"operation": "mqtt_publish", "reason": "request_failure"}),
+        ("mqtt_operation", {"version": "T0V0", "result": "failure"}),
+    ]

@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily verified backup followed by S3 image cleanup
+Requires=webcam-stack.service
+After=webcam-stack.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/webcam-ingestion/deployment/systemd/pilot/run-maintenance-sequence
