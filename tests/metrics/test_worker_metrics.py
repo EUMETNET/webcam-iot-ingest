@@ -115,6 +115,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
 def test_health_and_metrics_endpoints() -> None:
     health = WorkerHealth()
     metrics = WorkerMetrics()
+    metrics.epoch_duration.labels("win").observe(300)
     try:
         server = HealthServer("127.0.0.1", 0, health, metrics)
     except PermissionError:
@@ -132,6 +133,8 @@ def test_health_and_metrics_endpoints() -> None:
         assert urllib.request.urlopen(base + "/readyz").status == 200
         body = urllib.request.urlopen(base + "/metrics").read()
         assert b"webcam_ingestion_epoch_total" in body
+        assert b'webcam_ingestion_epoch_duration_seconds_bucket{le="300.0",source_network="win"}' in body
+        assert b'webcam_ingestion_epoch_duration_seconds_bucket{le="3600.0",source_network="win"}' in body
         assert b"source_stream_id" not in body
     finally:
         server.close()

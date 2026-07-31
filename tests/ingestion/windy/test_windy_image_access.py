@@ -61,6 +61,18 @@ def test_refreshes_selected_rendition_with_api_key() -> None:
     assert reference.image_url == "https://images.example/current.jpg"
 
 
+def test_batched_and_individual_freshness_return_identical_reference() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=metadata())
+
+    individual = client_for(handler).get_current_image("42", "preview")
+    batched_client = client_for(handler)
+    batched_client.refresh([("42", "preview")], max_workers=1)
+    batched = batched_client.get_current_image("42", "preview")
+
+    assert batched == individual
+
+
 def test_refresh_observability_separates_gate_http_and_total() -> None:
     events = []
 

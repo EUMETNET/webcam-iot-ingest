@@ -121,6 +121,25 @@ def test_dry_run_decodes_image_without_database_update() -> None:
     assert result.state_update is not None
 
 
+def test_windy_initial_ema_is_configurable() -> None:
+    client = Mock()
+    client.get_current_image.return_value = WindyImageReference(
+        "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
+    )
+    client.download.return_value = PNG_1PX
+
+    result = _process_job(
+        client,
+        job(),
+        dry_run=True,
+        ema_alpha=0.2,
+        initial_ema_seconds=120,
+    )
+
+    assert result.ema_update_candidate is not None
+    assert result.ema_update_candidate.ema_download_period == 120
+
+
 def test_published_job_emits_latency_payload_derived_and_duration() -> None:
     client = Mock()
     client.get_current_image.return_value = WindyImageReference(

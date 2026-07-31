@@ -654,3 +654,16 @@ Discovery runs sequentially at 12:00 UTC; verified backup and cleanup
 maintenance run in sequence at 01:00 UTC. Checkpoint 13 operational drills
 must validate this containerized model rather than the earlier host-Python
 validation units.
+
+### 2026-07-31 — Windy polling parameters reduced for latency experiment
+
+**Affected component:** Windy ingestion scheduling only.
+
+A read-only 1,000-stream visibility probe found that changed Windy
+`lastUpdatedOn` values became visible after approximately 40 seconds at p50
+and 70 seconds at p95, while the registry's latest provider-to-download gap
+was 2.60 minutes at p50. To test EMA-driven polling as the remaining cause,
+Windy now uses a 120-second minimum publication interval, a 120-second initial
+EMA, and a polling factor of 0.5. Fintraffic and Skaping keep their existing
+300-second and 0.7 defaults. These Windy values remain subject to the next
+controlled 40-minute benchmark.

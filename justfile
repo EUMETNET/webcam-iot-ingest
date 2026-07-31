@@ -338,13 +338,14 @@ _ingestion-test-foreground scope run_seconds mode="":
         INGESTION_WORKER_THREADS=100 \
         INGESTION_DATABASE_POOL_SIZE=64 \
         INGESTION_MAX_JOBS_PER_EPOCH=30000 \
-        MINIMUM_INGESTION_INTERVAL_S=300 \
+        WINDY_MINIMUM_INGESTION_INTERVAL_S=120 \
         INGESTION_MIN_EPOCH_PERIOD_S=15 \
         INGESTION_IDLE_DELAY_S=0 \
         INITIAL_STAGGER_WINDOW_S=600 \
         INGESTION_HEALTH_HOST=0.0.0.0 \
         INGESTION_HEALTH_PORT=8013 \
-        POLLING_INTERVAL_FACTOR=0.7 \
+        WINDY_POLLING_INTERVAL_FACTOR=0.5 \
+        WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120 \
         UV_CACHE_DIR=/tmp/webcam-uv-cache \
         uv run --env-file .env python -m ingestion.worker \
             --network win \

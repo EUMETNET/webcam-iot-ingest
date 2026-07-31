@@ -22,10 +22,25 @@ the thirty-minute ingestion window remain observable.
 Administrator installation
 ----------------------------
 
-    sudo cp \
-      /home/codexuser/src/webcam-iot-ingest/deployment/systemd/checkpoint13-30min-baseline/webcam-checkpoint13-baseline* \
+From the administrator account, enter its local checkout of the `codex` branch
+first. Its location does not need to match the example below:
+
+    cd /path/to/the/admin-checkout/webcam-iot-ingest
+    git switch codex
+    git pull --ff-only origin codex
+
+Derive the actual checkout root, confirm that the target exists there, and copy
+the unit files from that checkout. Stop if the `ls` command fails:
+
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    ls "$REPO_ROOT/deployment/systemd/checkpoint13-30min-baseline/webcam-checkpoint13-baseline.target"
+    sudo install -m 0644 \
+      "$REPO_ROOT"/deployment/systemd/checkpoint13-30min-baseline/*.service \
+      "$REPO_ROOT"/deployment/systemd/checkpoint13-30min-baseline/*.timer \
+      "$REPO_ROOT"/deployment/systemd/checkpoint13-30min-baseline/*.target \
       /etc/systemd/system/
     sudo systemctl daemon-reload
+    ls /etc/systemd/system/webcam-checkpoint13-baseline.target
     sudo systemd-analyze verify \
       /etc/systemd/system/webcam-checkpoint13-baseline*.service \
       /etc/systemd/system/webcam-checkpoint13-baseline*.timer \

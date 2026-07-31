@@ -417,6 +417,7 @@ class WindyIngestionConfig:
     download_retry_count: int
     retry_backoff_s: float
     ema_alpha: float
+    initial_ema_seconds: float
     default_limit: int
 
     @classmethod
@@ -431,10 +432,16 @@ class WindyIngestionConfig:
             ),
             image_max_bytes=int(os.getenv("SOURCE_IMAGE_MAX_BYTES", "10000000")),
             minimum_ingestion_interval_s=float(
-                os.getenv("MINIMUM_INGESTION_INTERVAL_S", "300")
+                os.getenv(
+                    "WINDY_MINIMUM_INGESTION_INTERVAL_S",
+                    os.getenv("MINIMUM_INGESTION_INTERVAL_S", "120"),
+                )
             ),
             polling_interval_factor=float(
-                os.getenv("POLLING_INTERVAL_FACTOR", "0.7")
+                os.getenv(
+                    "WINDY_POLLING_INTERVAL_FACTOR",
+                    os.getenv("POLLING_INTERVAL_FACTOR", "0.5"),
+                )
             ),
             request_delay_s=float(
                 os.getenv("WINDY_INGESTION_REQUEST_DELAY_S", "0.1")
@@ -447,6 +454,9 @@ class WindyIngestionConfig:
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
             ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            initial_ema_seconds=float(
+                os.getenv("WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S", "120")
+            ),
             default_limit=int(os.getenv("WINDY_INGESTION_DEFAULT_LIMIT", "10")),
         )
         config.validate()
@@ -459,6 +469,8 @@ class WindyIngestionConfig:
             raise ValueError("source image maximum bytes must be positive")
         if self.minimum_ingestion_interval_s < 0:
             raise ValueError("minimum ingestion interval cannot be negative")
+        if self.initial_ema_seconds <= 0:
+            raise ValueError("initial Windy EMA must be positive")
         if self.polling_interval_factor < 0:
             raise ValueError("polling interval factor cannot be negative")
         if self.request_delay_s < 0 or self.retry_backoff_s < 0:

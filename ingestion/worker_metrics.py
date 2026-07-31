@@ -23,7 +23,11 @@ class WorkerMetrics:
             "webcam_ingestion_epoch_total", "Ingestion epochs", ["source_network", "result"], registry=self.registry
         )
         self.epoch_duration = Histogram(
-            "webcam_ingestion_epoch_duration_seconds", "Epoch duration", ["source_network"], registry=self.registry
+            "webcam_ingestion_epoch_duration_seconds",
+            "Epoch duration",
+            ["source_network"],
+            buckets=(1, 2.5, 5, 10, 15, 30, 60, 120, 180, 300, 450, 600, 900, 1200, 1800, 2700, 3600),
+            registry=self.registry,
         )
         self.jobs = Counter(
             "webcam_ingestion_job_total", "Ingestion job outcomes", ["source_network", "result"], registry=self.registry

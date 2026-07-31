@@ -204,8 +204,9 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.freshness_query_retry_count == 0
     assert config.download_retry_count == 0
     assert config.image_max_bytes == 10_000_000
-    assert config.minimum_ingestion_interval_s == 300
-    assert config.polling_interval_factor == 0.7
+    assert config.minimum_ingestion_interval_s == 120
+    assert config.polling_interval_factor == 0.5
+    assert config.initial_ema_seconds == 120
     assert WorkerConfig.from_environment().initial_stagger_window_s == 600
 
 

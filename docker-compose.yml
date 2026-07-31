@@ -79,7 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "ingestion.worker", "--network", "win"]
+    command: ["python", "-m", "ingestion.worker", "--network", "win", "--stagger-initial-polling"]
     env_file:
       - .env
     restart: unless-stopped
@@ -109,8 +109,9 @@ services:
       S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
       INGESTION_HEALTH_HOST: 0.0.0.0
       INGESTION_HEALTH_PORT: 8002
-      MINIMUM_INGESTION_INTERVAL_S: ${MINIMUM_INGESTION_INTERVAL_S:-300}
-      POLLING_INTERVAL_FACTOR: ${POLLING_INTERVAL_FACTOR:-0.7}
+      MINIMUM_INGESTION_INTERVAL_S: ${WINDY_MINIMUM_INGESTION_INTERVAL_S:-120}
+      POLLING_INTERVAL_FACTOR: ${WINDY_POLLING_INTERVAL_FACTOR:-0.5}
+      WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S: ${WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S:-120}
       MAXIMUM_POLL_INTERVAL_S: ${MAXIMUM_POLL_INTERVAL_S:-1800}
       INGESTION_WORKER_THREADS: ${WINDY_WORKER_THREADS:-60}
       INGESTION_DATABASE_POOL_SIZE: ${WINDY_DATABASE_POOL_SIZE:-24}
@@ -137,7 +138,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "ingestion.fintraffic.worker"]
+    command: ["python", "-m", "ingestion.fintraffic.worker", "--stagger-initial-polling"]
     env_file:
       - .env
     restart: unless-stopped
@@ -189,7 +190,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "ingestion.skaping.worker"]
+    command: ["python", "-m", "ingestion.skaping.worker", "--stagger-initial-polling"]
     env_file:
       - .env
     restart: unless-stopped

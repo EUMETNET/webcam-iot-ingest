@@ -330,10 +330,13 @@ worker prints the seed and phase window in its log.
 
 The benchmark keeps two independent timing controls explicit:
 
-- `MINIMUM_INGESTION_INTERVAL_S=300` is the per-webcam successful-publication
-  guard;
+- `WINDY_MINIMUM_INGESTION_INTERVAL_S=120` is the Windy per-webcam
+  successful-publication guard;
 - after a download, normal selection also waits until the stored provider
-  timestamp plus `POLLING_INTERVAL_FACTOR * ema_download_period`;
+  timestamp plus `WINDY_POLLING_INTERVAL_FACTOR * ema_download_period`; the
+  Windy factor is currently `0.5`;
+- `WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120` initializes a Windy stream whose
+  update period has not yet been learned;
 - `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
 - `INGESTION_IDLE_DELAY_S=0` adds no post-epoch pause; the 15-second minimum
   epoch period still prevents a tight loop for short or empty epochs.

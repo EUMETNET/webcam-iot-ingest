@@ -249,6 +249,35 @@ Denmark streams in one batch and 200 of 200 France streams in four batches.
 Their complete image-validation epochs took 0.685 and 2.100 seconds,
 respectively, with no missing, failed, or throttled request.
 
+Provider timestamp visibility diagnostic
+----------------------------------------
+
+On 2026-07-31, the isolated `codex-windy-visibility-probe` branch tested
+whether Windy exposes a changed `lastUpdatedOn` substantially later than the
+timestamp itself. A deterministic read-only sample contained 1,000 active
+Windy streams whose learned EMA was at most 600 seconds. Batched metadata was
+queried every 15 seconds; the first snapshot established a baseline, and the
+probe performed neither image downloads nor database writes.
+
+After 35 cycles, 631 later marker changes had been observed without a provider
+error. The first-visibility delay was approximately 40 seconds at p50, 67
+seconds at p90, and 70 seconds at p95, with an observed range of 7--84 seconds.
+The 15-second sampling cadence and batch completion time make these upper-bound
+estimates rather than exact publication instants. They indicate that provider
+visibility explains roughly one minute of latency, but not the then-current
+2.60-minute median provider-timestamp-to-download gap. Adaptive polling, EMA
+overestimation, or scheduling therefore remained necessary follow-up causes.
+The experimental implementation and protocol are retained in local commit
+`133b6a4` on that branch.
+
+For the next controlled Windy benchmark, the Windy-only minimum publication
+interval and initial EMA were reduced from 300 to 120 seconds, and the polling
+factor from 0.7 to 0.5. Fintraffic and Skaping retain their validated shared
+defaults. The purpose is to test whether the remaining provider-to-download
+latency is primarily produced by an overestimated Windy EMA and its polling
+guard; this is an experimental checkpoint-7 refinement, not yet a final
+production conclusion.
+
 Checkpoint decision
 -------------------
 

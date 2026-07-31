@@ -13,14 +13,7 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "decimals": 0,
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "lineWidth": 2,
-            "fillOpacity": 8,
-            "showPoints": "never"
-          }
+          "decimals": 0
         },
         "overrides": []
       },
@@ -32,22 +25,24 @@
       },
       "id": 1,
       "options": {
-        "legend": {
-          "displayMode": "hidden"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
           "expr": "sum(webcam_ingestion_epoch_total{source_network=\"win\",result=\"success\"})",
+          "instant": true,
           "legendFormat": "completed epochs"
         }
       ],
-      "description": "Cumulative successful epochs since the worker process started. Each upward step is an epoch completion; flat sections show time spent inside longer epochs.",
+      "description": "Current cumulative number of successful epochs since the worker process started.",
       "title": "Completed epochs",
-      "type": "timeseries"
+      "type": "stat"
     },
     {
       "datasource": {
@@ -189,13 +184,8 @@
       },
       "id": 5,
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
+        "legend": {"displayMode": "table", "placement": "bottom"},
+        "tooltip": {"mode": "multi"}
       },
       "targets": [
         {
@@ -226,23 +216,29 @@
       },
       "id": 6,
       "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "textMode": "auto",
+        "wideLayout": true
       },
       "targets": [
         {
-          "expr": "sum(rate(webcam_ingestion_stage_duration_seconds_sum{source_network=\"win\",outcome=\"success\"}[5m])) by (stage) / sum(rate(webcam_ingestion_stage_duration_seconds_count{source_network=\"win\",outcome=\"success\"}[5m])) by (stage)",
-          "legendFormat": "mean {{stage}}"
+          "expr": "histogram_quantile(0.50, sum by (le) (webcam_ingestion_epoch_duration_seconds_bucket{source_network=\"win\"}))",
+          "instant": true,
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.90, sum by (le) (webcam_ingestion_epoch_duration_seconds_bucket{source_network=\"win\"}))",
+          "instant": true,
+          "legendFormat": "p90"
         }
       ],
-      "description": "Rolling means use samples observed during the trailing 5 minutes. provider_refresh is total metadata time; provider_rate_gate_wait and provider_http split its controlled queueing and HTTP components.",
-      "title": "Mean stage duration (refresh = gate + HTTP)",
-      "type": "timeseries"
+      "description": "Wall-clock duration of completed epochs, from due-stream selection through batched freshness, parallel source jobs, and the final bulk database commit. Values are not divided by stream count; the active epoch is excluded until it completes.",
+      "title": "Completed-epoch wall time (P50/P90)",
+      "type": "stat"
     },
     {
       "datasource": {
@@ -259,7 +255,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 12
+        "y": 20
       },
       "id": 7,
       "options": {
@@ -281,8 +277,8 @@
           "legendFormat": "p95 {{stage}}"
         }
       ],
-      "description": "Approximate p50 and p95 values from Prometheus histogram samples observed during the trailing 5 minutes.",
-      "title": "P50 and P95 stage duration",
+      "description": "Approximate p50 and p95 duration of individual detailed pipeline steps observed during the trailing 5 minutes.",
+      "title": "Detailed step duration (P50/P95)",
       "type": "timeseries"
     },
     {
@@ -300,7 +296,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 12
+        "y": 20
       },
       "id": 8,
       "options": {
@@ -341,7 +337,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 20
+        "y": 12
       },
       "id": 9,
       "options": {
@@ -382,7 +378,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 20
+        "y": 12
       },
       "id": 10,
       "options": {
@@ -397,11 +393,11 @@
       "targets": [
         {
           "expr": "sum(rate(webcam_ingestion_source_job_duration_seconds_sum{source_network=\"win\"}[5m])) by (outcome) / sum(rate(webcam_ingestion_source_job_duration_seconds_count{source_network=\"win\"}[5m])) by (outcome)",
-          "legendFormat": "mean {{outcome}}"
+          "legendFormat": "{{outcome}}"
         }
       ],
-      "description": "Rolling mean source-job duration by outcome, using samples observed during the trailing 5 minutes.",
-      "title": "Mean source-job duration",
+      "description": "Rolling mean end-to-end duration of one source-stream job, grouped by its final outcome, over the trailing 5 minutes.",
+      "title": "Mean per-stream job duration by outcome",
       "type": "timeseries"
     },
     {
@@ -766,7 +762,7 @@
   "templating": {
     "list": [
       {
-        "current": {},
+        "current": {"selected": true, "text": "Prometheus", "value": "Prometheus"},
         "hide": 0,
         "includeAll": false,
         "label": "Prometheus",

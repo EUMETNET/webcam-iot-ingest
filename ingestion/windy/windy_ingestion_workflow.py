@@ -150,6 +150,7 @@ def run_ingestion(
                 job,
                 dry_run=dry_run,
                 ema_alpha=config.ema_alpha,
+                initial_ema_seconds=config.initial_ema_seconds,
                 transformation=transformation,
                 storage=storage,
                 publisher=publisher,
@@ -175,6 +176,7 @@ def _process_job(
     *,
     dry_run: bool,
     ema_alpha: float,
+    initial_ema_seconds: float = 300.0,
     transformation: TransformationConfig | None = None,
     storage: S3Storage | None = None,
     publisher: MqttPublisher | None = None,
@@ -258,6 +260,7 @@ def _process_job(
         job,
         provider_update_timestamp=provider_update_timestamp,
         ema_alpha=ema_alpha,
+        initial_ema_seconds=initial_ema_seconds,
     )
     state_update = IngestionStateUpdate(
         source_stream_id=job.source_stream_id,

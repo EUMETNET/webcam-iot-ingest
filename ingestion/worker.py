@@ -571,6 +571,7 @@ def _process_due_job(
         job,
         dry_run=dry_run,
         ema_alpha=windy.ema_alpha,
+        initial_ema_seconds=windy.initial_ema_seconds,
         transformation=TransformationConfig.from_environment(),
         storage=storage,
         publisher=publisher,
