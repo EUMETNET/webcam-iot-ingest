@@ -448,6 +448,78 @@ Objectives:
 - Restore a selected dump only as an explicitly approved maintenance action.
 - Never automate destructive database restoration or volume deletion.
 
+Implementation sequence:
+
+1. Retain Docker Compose as the application and infrastructure runtime.
+   Windy, Fintraffic, and Skaping ingestion are independent long-lived Compose
+   services using `restart: unless-stopped`, separate health endpoints, logs,
+   and metrics. Systemd provides VM-boot integration and invokes the scheduled
+   maintenance sequence; it does not supervise a second set of host workers.
+
+2. Add an explicit database-recovery command. It lists available S3 dumps,
+   downloads the selected dump, verifies it before use, stops all ingestion
+   workers, restores PostgreSQL, validates the restored schema and registry,
+   and restarts the workers. Ordinary PostgreSQL failure continues to reuse
+   the persistent data volume and never triggers automatic dump restoration.
+   Restoration preserves the learned `estimated_source_stream_period` and
+   other ingestion state: the bounded-minimum estimator no longer requires a
+   post-restore reset to legacy first-epoch EMA defaults.
+
+3. Implement one non-overlapping production maintenance sequence. A systemd
+   timer invokes a sequencer which launches each application operation as a
+   short-lived `docker compose run --rm` container. The order is:
+
+       S3 image cleanup
+       Windy discovery
+       Fintraffic discovery
+       Skaping discovery
+       PostgreSQL backup and backup-retention cleanup
+
+   Cleanup is first because failure to enforce image retention can exhaust
+   storage. Each step has an explicit timeout and records its own outcome and
+   duration. A failure or timeout is accumulated but never prevents later
+   steps from being attempted. The sequencer reports aggregate failure only
+   after every step has run. A lock prevents overlapping sequences.
+
+4. Complete recovery observability. Expose worker health and restart evidence,
+   PostgreSQL availability, maintenance step and sequence outcomes, database
+   restore outcome and duration, and the timestamp of the latest successful
+   recovery. Add corresponding Grafana panels and actionable failure states.
+
+5. Validate recovery in controlled drills after a quiet baseline: terminate
+   one worker and confirm independent Compose restart; restart PostgreSQL and
+   confirm worker reconnection without dump restoration; validate a selected
+   dump in an isolated database; run the explicit restore procedure only with
+   operator approval; and perform a VM-reboot drill confirming that the stack,
+   workers, health endpoints, and maintenance timer return.
+
+6. Add checkpoint-13 history, manual validation, production deployment and
+   secret-path documentation, including exact inspection, stop, restart,
+   backup, restore, and rollback commands.
+
+- Add Prometheus Alertmanager email notification as a checkpoint-13 extension,
+  after the core restart and recovery path is validated. Alert on persistent
+  worker unavailability or repeated restart, PostgreSQL unavailability,
+  failed maintenance or backup, and dangerous host disk or memory pressure;
+  send a resolved notification when the condition clears. Use persistence
+  delays so transient failures do not generate unnecessary mail.
+- Keep Alertmanager SMTP credentials and addresses outside Git. Before email
+  notification is implemented, the operator must create the ignored,
+  mode-0600 file `.secrets/alertmanager_addresses.env` containing only:
+
+      ALERT_EMAIL_TO=recipient@example.org
+      ALERT_EMAIL_FROM=sender@example.org
+
+  SMTP host, port, username, and password configuration remains a separate
+  implementation step; the password must use its own ignored secret file and
+  must never be placed in the addresses file or committed.
+- Treat complete VM loss separately from in-VM alerts. A stopped VM cannot
+  send its own failure email, so reliable VM-death notification requires an
+  external Prometheus/Alertmanager, uptime service, or heartbeat observer.
+  Prepare a heartbeat target and document this requirement, but leave the
+  choice and deployment of the external observer outside the initial local
+  Alertmanager implementation.
+
 Checkpoint 14 - Distributed Windy worker scaling
 ------------------------------------------------
 

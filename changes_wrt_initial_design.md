@@ -682,3 +682,31 @@ lambda 0.7. Its provider-time guard is now
 separate 300-second successful-publication guard. The 540-second floor affects
 selection only and does not clamp the stored estimate. Fintraffic and Skaping
 are unchanged.
+
+### 2026-08-02 — Checkpoint-13 supervision and maintenance sequence
+
+**Affected component:** production orchestration and recovery.
+
+The initial architecture assigned application-worker restart and journal
+ownership to templated systemd services. The retained implementation instead
+uses independent long-lived Docker Compose services with
+`restart: unless-stopped`; systemd is limited to VM-boot integration and the
+scheduled maintenance trigger. This keeps the application runtime consistent
+with the containerized implementation inherited and validated before
+checkpoint 13.
+
+The initial architecture also described discovery, image cleanup, and database
+backup as separately scheduled jobs. Checkpoint 13 deliberately uses one
+non-overlapping best-effort sequence. It runs image cleanup first, then the
+three discoveries, then PostgreSQL backup and backup-retention cleanup. Each
+operation runs in its own short-lived `docker compose run --rm` container with
+a timeout. Failure or timeout is recorded but does not prevent the remaining
+operations from running; aggregate failure is reported only after all steps
+have been attempted. Cleanup is prioritized because missed retention can
+exhaust storage.
+
+Database restoration remains an explicit operator-approved maintenance
+operation and never an automatic restart response. A restored dump retains
+`estimated_source_stream_period` and the other ingestion-state fields. The
+earlier idea of clearing legacy EMA-related state after restoration is dropped:
+the bounded-minimum period estimator does not require that reset.
