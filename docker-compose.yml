@@ -17,6 +17,7 @@ services:
       - ./database/schema/001_pilot_schema.sql:/docker-entrypoint-initdb.d/001_pilot_schema.sql:ro
       - ./database/schema/005_remove_publication_outbox.sql:/docker-entrypoint-initdb.d/005_remove_publication_outbox.sql:ro
       - ./database/schema/006_simplify_ingestion_state.sql:/docker-entrypoint-initdb.d/006_simplify_ingestion_state.sql:ro
+      - ./database/schema/007_rename_source_stream_period.sql:/docker-entrypoint-initdb.d/007_rename_source_stream_period.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -37,6 +38,7 @@ services:
     volumes:
       - ./database/schema/005_remove_publication_outbox.sql:/migrations/005_remove_publication_outbox.sql:ro
       - ./database/schema/006_simplify_ingestion_state.sql:/migrations/006_simplify_ingestion_state.sql:ro
+      - ./database/schema/007_rename_source_stream_period.sql:/migrations/007_rename_source_stream_period.sql:ro
     command:
       - bash
       - -euc
@@ -44,6 +46,7 @@ services:
         export PGPASSWORD="$$(cat /run/secrets/database_password)"
         psql --set=ON_ERROR_STOP=1 --file=/migrations/005_remove_publication_outbox.sql
         psql --set=ON_ERROR_STOP=1 --file=/migrations/006_simplify_ingestion_state.sql
+        psql --set=ON_ERROR_STOP=1 --file=/migrations/007_rename_source_stream_period.sql
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,8 +112,9 @@ services:
       S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
       INGESTION_HEALTH_HOST: 0.0.0.0
       INGESTION_HEALTH_PORT: 8002
-      MINIMUM_INGESTION_INTERVAL_S: ${WINDY_MINIMUM_INGESTION_INTERVAL_S:-120}
-      POLLING_INTERVAL_FACTOR: ${WINDY_POLLING_INTERVAL_FACTOR:-0.5}
+      MINIMUM_INGESTION_INTERVAL_S: ${WINDY_MINIMUM_INGESTION_INTERVAL_S:-300}
+      WINDY_MINIMUM_POLLING_INTERVAL_S: ${WINDY_MINIMUM_POLLING_INTERVAL_S:-540}
+      POLLING_INTERVAL_FACTOR: ${WINDY_POLLING_INTERVAL_FACTOR:-0.7}
       WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S: ${WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S:-120}
       MAXIMUM_POLL_INTERVAL_S: ${MAXIMUM_POLL_INTERVAL_S:-1800}
       INGESTION_WORKER_THREADS: ${WINDY_WORKER_THREADS:-60}
@@ -166,6 +170,7 @@ services:
       S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
       INGESTION_HEALTH_HOST: 0.0.0.0
       INGESTION_HEALTH_PORT: 8003
+      FINTRAFFIC_MINIMUM_POLLING_INTERVAL_S: ${FINTRAFFIC_MINIMUM_POLLING_INTERVAL_S:-480}
       INGESTION_WORKER_THREADS: ${FINTRAFFIC_WORKER_THREADS:-20}
       INGESTION_DATABASE_POOL_SIZE: ${FINTRAFFIC_DATABASE_POOL_SIZE:-8}
       INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
@@ -218,6 +223,7 @@ services:
       S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
       INGESTION_HEALTH_HOST: 0.0.0.0
       INGESTION_HEALTH_PORT: 8004
+      SKAPING_MINIMUM_POLLING_INTERVAL_S: ${SKAPING_MINIMUM_POLLING_INTERVAL_S:-240}
       INGESTION_WORKER_THREADS: ${SKAPING_WORKER_THREADS:-4}
       INGESTION_DATABASE_POOL_SIZE: ${SKAPING_DATABASE_POOL_SIZE:-4}
       INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}

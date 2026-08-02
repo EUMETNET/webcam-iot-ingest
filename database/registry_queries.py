@@ -89,14 +89,14 @@ class DueSourceStream:
     last_observed_provider_timestamp: datetime | None
     last_observed_image_marker: str | None
     last_processed_timestamp: datetime | None
-    ema_download_period: float | None
+    estimated_source_stream_period: float | None
 
 
 @dataclass(frozen=True)
 class EmaUpdateCandidate:
     source_stream_id: str
     anchor_timestamp: datetime
-    ema_download_period: float
+    estimated_source_stream_period: float
 
 
 @dataclass(frozen=True)
@@ -285,6 +285,7 @@ def get_due_source_streams(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
+    minimum_polling_interval: timedelta = timedelta(0),
     now: datetime | None = None,
     countries: Sequence[str] | None = None,
     limit: int | None = None,
@@ -294,6 +295,8 @@ def get_due_source_streams(
         raise ValueError("minimum ingestion interval cannot be negative")
     if polling_interval_factor < 0:
         raise ValueError("polling interval factor cannot be negative")
+    if minimum_polling_interval < timedelta(0):
+        raise ValueError("minimum polling interval cannot be negative")
     now = now or datetime.now(timezone.utc)
     _require_aware_datetime(now, "now")
     if countries is not None and (
@@ -320,7 +323,7 @@ def get_due_source_streams(
                 ss.last_observed_provider_timestamp,
                 ss.last_observed_image_marker,
                 ss.last_processed_timestamp,
-                ss.ema_download_period
+                ss.estimated_source_stream_period
             FROM source_stream AS ss
             JOIN site AS s USING (site_id)
             WHERE s.network_id = %s
@@ -333,10 +336,12 @@ def get_due_source_streams(
               )
               AND (
                   ss.last_observed_provider_timestamp IS NULL
-                  OR ss.ema_download_period IS NULL
+                  OR ss.estimated_source_stream_period IS NULL
                   OR ss.last_observed_provider_timestamp
-                      + ss.ema_download_period * %s::double precision
-                        * interval '1 second' <= %s
+                      + GREATEST(
+                          %s::double precision,
+                          ss.estimated_source_stream_period * %s::double precision
+                        ) * interval '1 second' <= %s
               )
             ORDER BY ss.last_download_timestamp NULLS FIRST,
                      ss.source_stream_id
@@ -348,6 +353,7 @@ def get_due_source_streams(
                 normalized_countries,
                 minimum_ingestion_interval.total_seconds(),
                 now,
+                minimum_polling_interval.total_seconds(),
                 polling_interval_factor,
                 now,
                 limit,
@@ -362,17 +368,25 @@ def build_ema_update_candidate(
     provider_update_timestamp: datetime | None,
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
+    running_minimum_floor_seconds: float | None = None,
 ) -> EmaUpdateCandidate | None:
     """Apply the established EMA formula without writing source state."""
     if not 0 <= ema_alpha <= 1:
         raise ValueError("ema_alpha must be between 0 and 1")
     if provider_update_timestamp is not None:
         _require_aware_datetime(provider_update_timestamp, "provider timestamp")
+    if (
+        running_minimum_floor_seconds is not None
+        and running_minimum_floor_seconds <= 0
+    ):
+        raise ValueError("running-minimum floor must be positive")
     previous_timestamp = job.last_observed_provider_timestamp
     if (
         provider_update_timestamp is None
         or provider_update_timestamp == previous_timestamp
     ):
+        return None
+    if previous_timestamp is None and running_minimum_floor_seconds is not None:
         return None
     if previous_timestamp is None:
         next_ema = initial_ema_seconds
@@ -380,13 +394,41 @@ def build_ema_update_candidate(
         elapsed = (provider_update_timestamp - previous_timestamp).total_seconds()
         if elapsed < 0:
             return None
-        baseline = (
-            float(job.ema_download_period)
-            if job.ema_download_period is not None
-            else initial_ema_seconds
-        )
-        next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
+        if running_minimum_floor_seconds is not None:
+            next_ema = max(
+                running_minimum_floor_seconds,
+                min(float(job.estimated_source_stream_period), elapsed)
+                if job.estimated_source_stream_period is not None
+                else elapsed,
+            )
+        else:
+            baseline = (
+                float(job.estimated_source_stream_period)
+                if job.estimated_source_stream_period is not None
+                else initial_ema_seconds
+            )
+            next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
     return EmaUpdateCandidate(job.source_stream_id, provider_update_timestamp, next_ema)
+
+
+def reset_network_period_estimates(
+    connection: psycopg.Connection[Any], network_id: str
+) -> int:
+    """Reset only the experimental period estimate for one network."""
+    with connection.transaction():
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE source_stream AS ss
+                SET estimated_source_stream_period = NULL
+                FROM site AS s
+                WHERE ss.site_id = s.site_id
+                  AND s.network_id = %s
+                  AND ss.estimated_source_stream_period IS NOT NULL
+                """,
+                (network_id,),
+            )
+            return cursor.rowcount
 
 
 def apply_ingestion_state_updates(
@@ -421,10 +463,10 @@ def apply_ingestion_state_updates(
                     last_processed_timestamp = COALESCE(
                         %s, last_processed_timestamp
                     ),
-                    ema_download_period = CASE
+                    estimated_source_stream_period = CASE
                         WHEN %s::boolean AND %s::double precision IS NOT NULL
                         THEN %s::double precision
-                        ELSE ema_download_period
+                        ELSE estimated_source_stream_period
                     END
                 WHERE source_stream_id = %s
                 """,
@@ -436,12 +478,12 @@ def apply_ingestion_state_updates(
                         update.processed_timestamp,
                         apply_ema,
                         (
-                            update.ema_update_candidate.ema_download_period
+                            update.ema_update_candidate.estimated_source_stream_period
                             if update.ema_update_candidate is not None
                             else None
                         ),
                         (
-                            update.ema_update_candidate.ema_download_period
+                            update.ema_update_candidate.estimated_source_stream_period
                             if update.ema_update_candidate is not None
                             else None
                         ),

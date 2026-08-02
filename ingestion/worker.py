@@ -34,6 +34,7 @@ from database.registry_queries import (
     EmaUpdateCandidate,
     apply_ingestion_state_updates,
     get_due_source_streams,
+    reset_network_period_estimates,
 )
 from ingestion.notification.mqtt_publisher import MqttPublisher
 from ingestion.windy.windy_image_access import WindyImageClient
@@ -255,6 +256,8 @@ def run_worker(
     dry_run: bool = False,
     stop_event: threading.Event | None = None,
     verbose: bool = False,
+    windy_bounded_minimum_period: bool = False,
+    reset_windy_period_estimates: bool = False,
 ) -> list[dict[str, object]]:
     if network != "win":
         raise ValueError("checkpoint 7 supports only network 'win'")
@@ -267,6 +270,23 @@ def run_worker(
     normalized = _validate_countries(countries)
     worker = WorkerConfig.from_environment()
     windy = WindyIngestionConfig.from_environment()
+    if reset_windy_period_estimates:
+        with _connect(DatabaseConfig.from_environment()) as connection:
+            reset_count = reset_network_period_estimates(connection, "win")
+        print(
+            json.dumps(
+                {
+                    "windy_period_estimate_reset": {
+                        "reset_streams": reset_count,
+                        "provider_timestamps_preserved": True,
+                        "download_timestamps_preserved": True,
+                        "processed_timestamps_preserved": True,
+                    }
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     maximum = max_jobs or worker.max_jobs_per_epoch
     stop = stop_event or threading.Event()
     metrics = WorkerMetrics()
@@ -307,6 +327,7 @@ def run_worker(
                     verbose,
                     initial_stagger,
                     batch_freshness,
+                    windy_bounded_minimum_period,
                 )
                 health.last_epoch_success_monotonic = time.monotonic()
                 metrics.epochs.labels("win", "success").inc()
@@ -367,6 +388,7 @@ def _run_epoch(
     verbose: bool = False,
     initial_stagger: InitialPollingStagger | None = None,
     batch_freshness: bool = False,
+    windy_bounded_minimum_period: bool = False,
 ) -> dict[str, object]:
     epoch_started = time.monotonic()
     database = DatabaseConfig.from_environment()
@@ -415,6 +437,9 @@ def _run_epoch(
                 "win",
                 timedelta(seconds=windy.minimum_ingestion_interval_s),
                 polling_interval_factor=windy.polling_interval_factor,
+                minimum_polling_interval=timedelta(
+                    seconds=windy.minimum_polling_interval_s
+                ),
                 countries=countries,
                 limit=max_jobs,
             )
@@ -459,6 +484,7 @@ def _run_epoch(
                     publisher,
                     metrics.observe_stage,
                     metrics.observe_event,
+                    windy_bounded_minimum_period,
                 ): job
                 for job in jobs
             }
@@ -565,6 +591,7 @@ def _process_due_job(
     publisher: MqttPublisher | None,
     stage_observer,
     event_observer,
+    bounded_minimum_period: bool = False,
 ):
     return _process_job(
         client,
@@ -572,6 +599,11 @@ def _process_due_job(
         dry_run=dry_run,
         ema_alpha=windy.ema_alpha,
         initial_ema_seconds=windy.initial_ema_seconds,
+        running_minimum_floor_seconds=(
+            windy.minimum_ingestion_interval_s
+            if bounded_minimum_period
+            else None
+        ),
         transformation=TransformationConfig.from_environment(),
         storage=storage,
         publisher=publisher,
@@ -624,6 +656,16 @@ def main() -> None:
     parser.add_argument(
         "--verbose", action="store_true", help="print epoch progress once per second"
     )
+    parser.add_argument(
+        "--windy-bounded-minimum-period",
+        action="store_true",
+        help="estimate Windy source periods with a provider-timestamp running minimum",
+    )
+    parser.add_argument(
+        "--reset-windy-period-estimates",
+        action="store_true",
+        help="clear only Windy period estimates before the worker starts",
+    )
     args = parser.parse_args()
     stop = threading.Event()
 
@@ -658,6 +700,8 @@ def main() -> None:
         dry_run=args.dry_run,
         stop_event=stop,
         verbose=args.verbose,
+        windy_bounded_minimum_period=args.windy_bounded_minimum_period,
+        reset_windy_period_estimates=args.reset_windy_period_estimates,
     )
     durations = [float(item["duration_s"]) for item in summaries]
     print(

@@ -272,7 +272,7 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
         SET last_processed_timestamp = %s,
             last_observed_provider_timestamp = CASE source_stream_id
                 WHEN %s THEN %s ELSE %s END,
-            ema_download_period = 600
+            estimated_source_stream_period = 600
         WHERE source_stream_id IN (%s, %s)
         """,
         (
@@ -293,6 +293,34 @@ def test_due_stream_selection_combines_download_and_provider_time_guards(
         now=now,
     )
     assert [item.source_stream_id for item in due] == [due_stream]
+
+    with_polling_floor = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        minimum_polling_interval=timedelta(minutes=9),
+        now=now,
+    )
+    assert with_polling_floor == []
+
+    connection.execute(
+        """
+        UPDATE source_stream
+        SET last_observed_provider_timestamp = %s
+        WHERE source_stream_id = %s
+        """,
+        (now - timedelta(minutes=10), due_stream),
+    )
+    with_polling_floor = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(minutes=5),
+        polling_interval_factor=0.7,
+        minimum_polling_interval=timedelta(minutes=9),
+        now=now,
+    )
+    assert [item.source_stream_id for item in with_polling_floor] == [due_stream]
 
     connection.execute(
         """
@@ -387,16 +415,16 @@ def test_ingestion_state_updates_respect_workflow_stages(
         apply_ema=True,
     )
     assert first_ema is not None
-    assert first_ema.ema_download_period == 300.0
+    assert first_ema.estimated_source_stream_period == 300.0
     assert second_ema is not None
-    assert second_ema.ema_download_period == 350.0
+    assert second_ema.estimated_source_stream_period == 350.0
 
     stored = get_network_registry(connection, "win").source_streams[stream_id]
     assert stored["last_observed_image_marker"] == "second-good-marker"
     assert stored["last_download_timestamp"] == second_timestamp
     assert stored["last_observed_provider_timestamp"] == second_timestamp
     assert stored["last_processed_timestamp"] == second_timestamp
-    assert stored["ema_download_period"] == 350.0
+    assert stored["estimated_source_stream_period"] == 350.0
 
 
 def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
@@ -419,13 +447,13 @@ def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
     ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
     assert stored["last_download_timestamp"] == timestamp
-    assert stored["ema_download_period"] is None
+    assert stored["estimated_source_stream_period"] is None
 
     assert apply_ingestion_state_updates(
         connection, [update], apply_ema=True
     ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
-    assert stored["ema_download_period"] == 300.0
+    assert stored["estimated_source_stream_period"] == 300.0
 
 
 def test_unselected_freshness_snapshot_is_not_persisted(

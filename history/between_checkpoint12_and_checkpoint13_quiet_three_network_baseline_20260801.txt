@@ -1,0 +1,87 @@
+Quiet three-network baseline between checkpoints 12 and 13 (2026-08-01)
+===========================================================================
+
+Purpose
+-------
+
+This 90-minute run checked that the retained Windy polling configuration could
+operate beside reduced-resource Fintraffic and Skaping workers while two
+sequential discovery-and-cleanup cycles ran on the same eight-core VM.
+
+Configuration
+-------------
+
+- Windy: 6 CPUs, 84 worker threads, batched freshness, bounded-minimum source
+  period estimator, 9-minute polling floor, lambda 0.7, and deterministic
+  10-minute initial staggering.
+- Fintraffic: 0.5 CPU, 4 worker threads, and an 8-minute polling floor.
+- Skaping: 0.5 CPU, 2 worker threads, and a 4-minute polling floor.
+- Maintenance: one container limited to 0.5 CPU. At T+20 and T+60 minutes it
+  ran Windy, Fintraffic, and Skaping discovery sequentially, followed by
+  cleanup of T0V0 objects older than 24 hours.
+
+Outcome
+-------
+
+All four containers exited with status 0. Both maintenance cycles completed
+without failed deletions or discovery failures.
+
+| Result | Windy | Fintraffic | Skaping |
+|---|---:|---:|---:|
+| Completed epochs | 165 | 296 | 360 |
+| Published images | 194,521 | 15,844 | 276 |
+| Publications per 5 minutes | 10,807 | 880 | 15 |
+| P50 epoch duration | 7.81 s | 1.74 s | 2.23 s |
+| P90 epoch duration | 108.98 s | 30.44 s | 3.55 s |
+| P95 epoch duration | 146.25 s | 35.91 s | 4.02 s |
+| Maximum epoch duration | 238.61 s | 66.71 s | 5.16 s |
+| Download errors | 8 | 4,703 | 0 |
+| Failed batched freshness requests | 0 | not applicable | not applicable |
+| Throttled batched freshness requests | 0 | not applicable | not applicable |
+
+The first maintenance cycle lasted about 26 minutes. Its cleanup removed an
+existing backlog of 441,972 objects (8.90 GB) without failures. The second
+cycle lasted about 10 minutes 49 seconds and removed 3,512 objects (63.4 MB),
+also without failures. The second Windy discovery inserted no streams and
+made no activation changes after the first pass.
+
+Windy throughput comparison
+----------------------------
+
+| Experiment | Completed MQTT publications per 5 minutes |
+|---|---:|
+| 2026-07-23 steady window | 10,269 |
+| Later documented two-hour Windy run | 10,013 |
+| Adaptive polling without a floor | 10,751 |
+| No adaptive polling | 10,721 |
+| 9-minute polling floor | 10,833 |
+| Quiet three-network baseline | 10,807 |
+
+The quiet baseline was only 0.24 percent below the preceding 9-minute-floor
+experiment. Concurrent Fintraffic and Skaping ingestion plus discovery and
+cleanup therefore caused no material loss of Windy publication throughput.
+
+Latency interpretation
+----------------------
+
+Prometheus did not retain the historical series from these one-off worker
+containers after they exited. A database snapshot over 23,767 Windy streams
+whose final recorded download occurred during the run gave provider-to-download
+P50 157.74 seconds, P90 207.83 seconds, P95 230.47 seconds, and mean 298.19
+seconds.
+
+Those values are one terminal observation per stream. They are not directly
+comparable with the earlier Prometheus values, which included every publication
+in a selected time window. In particular, the database P95 of 3.84 minutes
+must not be interpreted as a demonstrated improvement over the earlier final
+10-minute Prometheus P95 of 4.78 minutes. Throughput stability is demonstrated;
+latency improvement is not.
+
+Conclusion
+----------
+
+The resource allocation and sequential maintenance arrangement are suitable
+as the quiet baseline for checkpoint-13 recovery work. Container restart and
+recovery tests should retain this workload shape. The significant Fintraffic
+download-error rate remains a separate provider/download investigation rather
+than an orchestration failure.

@@ -1,0 +1,104 @@
+Work between checkpoints 12 and 13 - Windy polling optimization
+================================================================
+
+Date: 2026-08-01
+
+Status and purpose
+------------------
+
+This work was performed after checkpoint 12 and before the checkpoint 13
+recovery and operational drills. Its purpose was to reduce Windy freshness
+traffic and provider-to-download latency before running the three ingestion
+networks together in a quiet full-system baseline.
+
+The experiments kept the main execution conditions comparable: the complete
+Windy registry, batched freshness requests, 100 worker threads, deterministic
+ten-minute initial staggering, a five-minute per-stream successful-publication
+guard, a fifteen-second minimum epoch period, and two hours of execution.
+
+Redefinition of the former EMA
+------------------------------
+
+The old `ema_download_period` quantity was originally an exponentially
+weighted estimate derived from effective download gaps. That interpretation
+was too sensitive to missed observations: one provider or acquisition gap
+could inflate the estimate and defer later freshness checks, which could in
+turn reinforce the overestimate.
+
+For Windy, the quantity is now understood conceptually as the estimated source
+stream period. The tested estimator is initialized as `NULL` and learns from
+differences between successive distinct Windy provider timestamps. Once an
+estimate exists, it keeps the bounded running minimum of the prior estimate
+and the newly observed provider-timestamp gap, with a five-minute lower bound
+against irregular or invalid gaps. The update remains deferred to the end of
+an eligible epoch and preserves the existing first-epoch and overlong-epoch
+guards.
+
+Immediately after these experiments, migration 007 renamed the shared database
+column from the legacy `ema_download_period` name to
+`estimated_source_stream_period` without changing any stored value. The neutral
+name is shared by all networks, while their estimators and polling floors remain
+network-specific.
+
+Experiments and results
+-----------------------
+
+The first adaptive run used the redefined bounded-minimum estimate and lambda
+0.7. The control disabled adaptive selection but continued learning the same
+estimate. The final run restored lambda 0.7 and imposed the polling guard:
+
+    max(9 minutes, 0.7 * estimated source-stream period)
+
+The nine-minute value is a polling-interval floor. It neither overwrites nor
+clamps the stored period estimate. The independent five-minute
+successful-publication guard remains unchanged.
+
+| Metric | Adaptive, no polling floor | No adaptive polling | 9-minute polling floor |
+|---|---:|---:|---:|
+| Epochs | 222 | 214 | 222 |
+| Selected stream jobs | 2,348,300 | 2,618,655 | 1,603,284 |
+| Successful batched provider requests | 47,071 | 52,480 | 32,166 |
+| Published images | 258,024 | 257,303 | 259,996 |
+| Mean epoch duration | 27.27 s | 29.20 s | 25.70 s |
+| P50 epoch duration | 10.63 s | 10.19 s | 5.70 s |
+| P90 epoch duration | 79.06 s | 92.14 s | 94.26 s |
+| P95 epoch duration | 147.77 s | 163.53 s | 132.01 s |
+| Maximum epoch duration | 233.23 s | 323.48 s | 192.21 s |
+| Whole-run provider-to-download P50 | 2.61 min | 2.82 min | 2.56 min |
+| Whole-run provider-to-download P95 | 7.22 min | 7.30 min | 6.14 min |
+| Final 10-minute provider-to-download P50 | 2.34 min | 3.48 min | 2.77 min |
+| Final 10-minute provider-to-download P95 | 4.97 min | 5.82 min | 4.78 min |
+| Download errors | 68 | 31 | 15 |
+| Storage errors | 2 | 1 | 2 |
+| Failed batched requests | 0 | 0 | 0 |
+| Throttled batched requests | 0 | 0 | 0 |
+
+Interpretation and retained threshold
+-------------------------------------
+
+Removing adaptive polling increased selected jobs and provider requests by
+about 11.5 percent without increasing publication throughput or improving
+latency. Adaptive selection is therefore useful.
+
+After the first experiments, 24,391 of 25,043 active Windy streams had an
+estimate. The mean was 16.91 minutes and P05 was 10 minutes. There were 591
+estimates at the explicit five-minute estimator floor, none strictly between
+five and 7.5 minutes, and the next value was 599 seconds. This distribution is
+compatible with the shorter gaps being provider irregularities rather than a
+stable refresh period, although it does not prove their cause.
+
+Compared with adaptive polling without a polling floor, the nine-minute floor
+reduced selected jobs and provider requests by 31.7 percent while publishing
+0.8 percent more images. Whole-run P95 latency improved from 7.22 to 6.14
+minutes. More importantly for the steady part of the run, final-window P95
+remained below five minutes and improved from 4.97 to 4.78 minutes. This means
+the threshold helps the operational P95 remain below five minutes; it does not
+guarantee that every individual image is downloaded within five minutes.
+
+The nine-minute polling floor with lambda 0.7 is retained as the most efficient
+tested Windy setting before optimizing the quiet three-network run. Provider
+requests fell substantially, publication throughput was preserved, no
+throttling occurred, and the latency objective was maintained. Synchronized
+provider waves remain visible in the P90 epoch duration and should be observed
+during the upcoming three-network baseline rather than addressed with another
+Windy-only scheduling change at this stage.

@@ -186,6 +186,9 @@ def _run_epoch(
                 "fin",
                 timedelta(seconds=fintraffic.minimum_ingestion_interval_s),
                 polling_interval_factor=fintraffic.polling_interval_factor,
+                minimum_polling_interval=timedelta(
+                    seconds=fintraffic.minimum_polling_interval_s
+                ),
                 limit=max_jobs,
             )
             connection.commit()

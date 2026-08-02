@@ -7,6 +7,7 @@ from config.deployment_config import (
     DatabaseConfig,
     DiscoveryMetricsConfig,
     FintrafficConfig,
+    FintrafficIngestionConfig,
     SkapingConfig,
     SkapingIngestionConfig,
     WindyConfig,
@@ -204,8 +205,9 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.freshness_query_retry_count == 0
     assert config.download_retry_count == 0
     assert config.image_max_bytes == 10_000_000
-    assert config.minimum_ingestion_interval_s == 120
-    assert config.polling_interval_factor == 0.5
+    assert config.minimum_ingestion_interval_s == 300
+    assert config.minimum_polling_interval_s == 540
+    assert config.polling_interval_factor == 0.7
     assert config.initial_ema_seconds == 120
     assert WorkerConfig.from_environment().initial_stagger_window_s == 600
 
@@ -217,7 +219,14 @@ def test_skaping_ingestion_config_has_zero_retry_defaults() -> None:
     assert config.freshness_query_retry_count == 0
     assert config.download_retry_count == 0
     assert config.minimum_ingestion_interval_s == 300
+    assert config.minimum_polling_interval_s == 240
     assert config.polling_interval_factor == 0.7
+
+
+def test_fintraffic_ingestion_config_has_eight_minute_polling_floor() -> None:
+    config = FintrafficIngestionConfig.from_environment()
+
+    assert config.minimum_polling_interval_s == 480
 
 
 def test_checkpoint6_configuration_defaults(monkeypatch) -> None:

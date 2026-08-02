@@ -70,7 +70,7 @@ class WindyIngestionJobResult:
     height: int | None = None
     image_format: str | None = None
     color_mode: str | None = None
-    ema_download_period: float | None = None
+    estimated_source_stream_period: float | None = None
     derived_size_bytes: int | None = None
     derived_width: int | None = None
     derived_height: int | None = None
@@ -143,6 +143,9 @@ def run_ingestion(
             selected_limit,
             timedelta(seconds=config.minimum_ingestion_interval_s),
             polling_interval_factor=config.polling_interval_factor,
+            minimum_polling_interval=timedelta(
+                seconds=config.minimum_polling_interval_s
+            ),
         )
         results = tuple(
             _process_job(
@@ -177,6 +180,7 @@ def _process_job(
     dry_run: bool,
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
+    running_minimum_floor_seconds: float | None = None,
     transformation: TransformationConfig | None = None,
     storage: S3Storage | None = None,
     publisher: MqttPublisher | None = None,
@@ -194,6 +198,7 @@ def _process_job(
     observed_marker: str | None = None
     ema_candidate: EmaUpdateCandidate | None = None
     state_update: IngestionStateUpdate | None = None
+    estimated_period_band = _estimated_period_band(job.estimated_source_stream_period)
 
     def finish(outcome: JobOutcome, **values: Any) -> WindyIngestionJobResult:
         if "ema_update_candidate" not in values:
@@ -223,7 +228,11 @@ def _process_job(
                 download_to_end_s = (finished_at - download_timestamp).total_seconds()
                 event_observer(
                     "image_latency",
-                    {"measure": "download_to_job_end", "duration_s": download_to_end_s},
+                    {
+                        "measure": "download_to_job_end",
+                        "duration_s": download_to_end_s,
+                        "estimated_period_band": estimated_period_band,
+                    },
                 )
                 if provider_to_download_s is not None:
                     event_observer(
@@ -231,6 +240,7 @@ def _process_job(
                         {
                             "measure": "provider_to_job_end",
                             "duration_s": provider_to_download_s + download_to_end_s,
+                            "estimated_period_band": estimated_period_band,
                         },
                     )
         return _job_result(job, name, outcome, **values)
@@ -261,6 +271,7 @@ def _process_job(
         provider_update_timestamp=provider_update_timestamp,
         ema_alpha=ema_alpha,
         initial_ema_seconds=initial_ema_seconds,
+        running_minimum_floor_seconds=running_minimum_floor_seconds,
     )
     state_update = IngestionStateUpdate(
         source_stream_id=job.source_stream_id,
@@ -331,6 +342,7 @@ def _process_job(
                     {
                         "measure": "provider_to_download",
                         "duration_s": provider_to_download_s,
+                        "estimated_period_band": estimated_period_band,
                     },
                 )
     selected_transformation = transformation or TransformationConfig.from_environment()
@@ -524,6 +536,7 @@ def _select_country_sample(
     minimum_ingestion_interval: timedelta,
     *,
     polling_interval_factor: float = 0.7,
+    minimum_polling_interval: timedelta = timedelta(0),
 ) -> list[DueSourceStream]:
     """Select a small deterministic sample without starving later countries."""
     selected: list[DueSourceStream] = []
@@ -537,6 +550,7 @@ def _select_country_sample(
                     NETWORK_ID,
                     minimum_ingestion_interval,
                     polling_interval_factor=polling_interval_factor,
+                    minimum_polling_interval=minimum_polling_interval,
                     countries=(country,),
                     limit=country_limit,
                 )
@@ -550,6 +564,16 @@ def _parse_provider_timestamp(marker: str) -> datetime | None:
     except ValueError:
         return None
     return parsed.astimezone(UTC) if parsed.utcoffset() is not None else None
+
+
+def _estimated_period_band(value: float | None) -> str:
+    if value is None:
+        return "unknown"
+    if value <= 600:
+        return "le_10m"
+    if value <= 3600:
+        return "10m_to_60m"
+    return "gt_60m"
 
 
 def _parse_countries(value: str) -> tuple[str, ...]:

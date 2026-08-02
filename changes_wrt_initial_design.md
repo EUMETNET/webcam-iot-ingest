@@ -117,7 +117,7 @@ The implemented due query uses two conditions:
 1. current time is at least
    `last_processed_timestamp + minimum_ingestion_interval`; and
 2. current time is at least
-   `last_observed_provider_timestamp + 0.7 * ema_download_period`, when an
+   `last_observed_provider_timestamp + 0.7 * estimated_source_stream_period`, when an
    observed timestamp and EMA exist.
 
 The current minimum ingestion interval is 300 seconds. The earlier proposed
@@ -430,7 +430,7 @@ is due when both conditions hold:
 
     now >= last_download_timestamp
            + max(minimum_ingestion_interval,
-                 polling_interval_factor * ema_download_period)
+                 polling_interval_factor * estimated_source_stream_period)
 
 A missing freshness or download timestamp makes only its corresponding guard
 immediately eligible. Consequently, a never-successful stream may be tried
@@ -663,7 +663,22 @@ A read-only 1,000-stream visibility probe found that changed Windy
 `lastUpdatedOn` values became visible after approximately 40 seconds at p50
 and 70 seconds at p95, while the registry's latest provider-to-download gap
 was 2.60 minutes at p50. To test EMA-driven polling as the remaining cause,
-Windy now uses a 120-second minimum publication interval, a 120-second initial
-EMA, and a polling factor of 0.5. Fintraffic and Skaping keep their existing
-300-second and 0.7 defaults. These Windy values remain subject to the next
-controlled 40-minute benchmark.
+The initial latency experiment used a 120-second minimum publication interval,
+a 120-second initial EMA, and a polling factor of 0.5. It did not improve the
+full-window latency. Windy has therefore returned to a 300-second minimum and
+a polling factor of 0.7. The current bounded-minimum experiment initializes the
+period estimate as `NULL` and learns it from differences between successive
+provider timestamps; Fintraffic and Skaping retain their existing EMA behavior.
+
+### 2026-08-01 — Windy polling interval has a nine-minute floor
+
+**Affected component:** Windy ingestion scheduling only.
+
+A two-hour full-scale control without adaptive polling increased selected jobs
+and batched provider requests by about 11.5 percent without increasing image
+publication throughput or improving latency. Adaptive polling is retained with
+lambda 0.7. Its provider-time guard is now
+`max(540 seconds, 0.7 * estimated source-stream period)`, in addition to the
+separate 300-second successful-publication guard. The 540-second floor affects
+selection only and does not clamp the stored estimate. Fintraffic and Skaping
+are unchanged.

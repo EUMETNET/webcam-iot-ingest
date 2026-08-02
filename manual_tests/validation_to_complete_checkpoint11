@@ -49,7 +49,7 @@ provider metadata:
     docker compose exec postgres psql \
       -U webcam_ingestion -d webcam_ingestion -P pager=off -c \
       "SELECT source_stream_id, last_provider_image_marker,
-              last_download_timestamp, ema_download_period
+              last_download_timestamp, estimated_source_stream_period
        FROM source_stream ss JOIN site s USING (site_id)
        WHERE s.network_id='ska'
        ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 10;"
@@ -57,7 +57,7 @@ provider metadata:
 After a failed HEAD or download, verify the same stream is not selected again
 until at least 300 seconds after `last_freshness_query_timestamp`. An unchanged
 successful stream is governed by both that freshness-query guard and
-`last_download_timestamp + max(300 seconds, 0.7 * ema_download_period)`.
+`last_download_timestamp + max(300 seconds, 0.7 * estimated_source_stream_period)`.
 
 4. Monitored worker
 -------------------

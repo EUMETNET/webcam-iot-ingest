@@ -17,7 +17,12 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         ("provider_to_job_end", 122),
     ):
         metrics.observe_event(
-            "image_latency", {"measure": measure, "duration_s": duration}
+            "image_latency",
+            {
+                "measure": measure,
+                "duration_s": duration,
+                "estimated_period_band": "le_10m",
+            },
         )
     metrics.observe_event(
         "transformation", {"version": "T0V0", "outcome": "success"}
@@ -110,6 +115,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     ):
         assert metric_name in body
     assert b"source_stream_id" not in body
+    assert b'estimated_period_band="le_10m"' in body
 
 
 def test_health_and_metrics_endpoints() -> None:

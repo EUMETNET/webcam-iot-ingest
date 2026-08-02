@@ -271,6 +271,19 @@ ingest-skaping *args:
 monitoring:
     docker compose --env-file .env --profile monitoring up -d
 
+# Full-scale Windy test using a NULL-initialized bounded provider-period estimate.
+windy-period-test duration="2h":
+    just ingestion-test all_windy "{{ duration }}" staggered-batched-period-min
+
+# Full-scale Windy control test without adaptive polling. The per-stream
+# successful-publication guard remains active.
+windy-no-adaptive-test duration="2h":
+    just ingestion-test all_windy "{{ duration }}" staggered-batched-no-adaptive
+
+# Full-scale Windy test with max(9 minutes, 0.7 * estimated period) polling.
+windy-nine-minute-floor-test duration="2h":
+    just ingestion-test all_windy "{{ duration }}" staggered-batched-nine-minute-floor
+
 # Run a monitored Windy ingestion benchmark in a detached screen session.
 # Scope is "all_windy" for every EUMETNET country, or a comma-separated list such as FR,DE.
 ingestion-test scope duration mode="":
@@ -291,8 +304,8 @@ ingestion-test scope duration mode="":
         echo "duration must be a positive number followed by s, m, or h (for example 20m)" >&2
         exit 2
     fi
-    if [[ -n "$mode" && "$mode" != "staggered" && "$mode" != "batched" && "$mode" != "staggered-batched" ]]; then
-        echo "optional mode must be 'staggered', 'batched', or 'staggered-batched'" >&2
+    if [[ -n "$mode" && "$mode" != "staggered" && "$mode" != "batched" && "$mode" != "staggered-batched" && "$mode" != "staggered-batched-period-min" && "$mode" != "staggered-batched-no-adaptive" && "$mode" != "staggered-batched-nine-minute-floor" ]]; then
+        echo "unsupported Windy benchmark mode: $mode" >&2
         exit 2
     fi
     value="${duration::-1}"
@@ -323,14 +336,32 @@ _ingestion-test-foreground scope run_seconds mode="":
     countries=()
     stagger=()
     batching=()
+    period_estimator=()
+    polling_factor=0.7
+    polling_floor=540
     if [[ "$scope" != "all_windy" ]]; then
         countries=(--countries "${scope^^}")
     fi
-    if [[ "$mode" == "staggered" || "$mode" == "staggered-batched" ]]; then
+    if [[ "$mode" == "staggered" || "$mode" == "staggered-batched" || "$mode" == "staggered-batched-period-min" || "$mode" == "staggered-batched-no-adaptive" || "$mode" == "staggered-batched-nine-minute-floor" ]]; then
         stagger=(--stagger-initial-polling)
     fi
-    if [[ "$mode" == "batched" || "$mode" == "staggered-batched" ]]; then
+    if [[ "$mode" == "batched" || "$mode" == "staggered-batched" || "$mode" == "staggered-batched-period-min" || "$mode" == "staggered-batched-no-adaptive" || "$mode" == "staggered-batched-nine-minute-floor" ]]; then
         batching=(--batch-freshness)
+    fi
+    if [[ "$mode" == "staggered-batched-period-min" ]]; then
+        period_estimator=(
+            --windy-bounded-minimum-period
+            --reset-windy-period-estimates
+        )
+        polling_factor=0.7
+    fi
+    if [[ "$mode" == "staggered-batched-no-adaptive" ]]; then
+        period_estimator=(--windy-bounded-minimum-period)
+        polling_factor=0
+        polling_floor=0
+    fi
+    if [[ "$mode" == "staggered-batched-nine-minute-floor" ]]; then
+        period_estimator=(--windy-bounded-minimum-period)
     fi
     exec env \
         MQTT_HOST=127.0.0.1 \
@@ -338,13 +369,14 @@ _ingestion-test-foreground scope run_seconds mode="":
         INGESTION_WORKER_THREADS=100 \
         INGESTION_DATABASE_POOL_SIZE=64 \
         INGESTION_MAX_JOBS_PER_EPOCH=30000 \
-        WINDY_MINIMUM_INGESTION_INTERVAL_S=120 \
+        WINDY_MINIMUM_INGESTION_INTERVAL_S=300 \
         INGESTION_MIN_EPOCH_PERIOD_S=15 \
         INGESTION_IDLE_DELAY_S=0 \
         INITIAL_STAGGER_WINDOW_S=600 \
         INGESTION_HEALTH_HOST=0.0.0.0 \
         INGESTION_HEALTH_PORT=8013 \
-        WINDY_POLLING_INTERVAL_FACTOR=0.5 \
+        WINDY_POLLING_INTERVAL_FACTOR="$polling_factor" \
+        WINDY_MINIMUM_POLLING_INTERVAL_S="$polling_floor" \
         WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120 \
         UV_CACHE_DIR=/tmp/webcam-uv-cache \
         uv run --env-file .env python -m ingestion.worker \
@@ -354,6 +386,7 @@ _ingestion-test-foreground scope run_seconds mode="":
             --verbose \
             "${stagger[@]}" \
             "${batching[@]}" \
+            "${period_estimator[@]}" \
             "${countries[@]}"
 
 # Run the Fintraffic worker for a duration in a detached, monitored screen.
@@ -481,6 +514,170 @@ _ingestion-test-skaping-foreground run_seconds mode="":
             --run-for-seconds "$1" \
             --verbose \
             "${stagger[@]}"
+
+# Run concurrent, containerized Fintraffic and Skaping benchmarks. Each
+# container is limited to half a CPU while retaining the
+# intended I/O thread count. Containers remain available for log inspection.
+ingestion-test-fintraffic-skaping duration="40m":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    duration="$1"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*[smh]$ ]]; then
+        echo "duration must be a positive number followed by s, m, or h" >&2
+        exit 2
+    fi
+    value="${duration::-1}"
+    case "${duration: -1}" in
+        s) run_seconds="$value" ;;
+        m) run_seconds="$((value * 60))" ;;
+        h) run_seconds="$((value * 3600))" ;;
+    esac
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-${duration}-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    fin_name="webcam-fintraffic-${duration}-${run_hash}"
+    ska_name="webcam-skaping-${duration}-${run_hash}"
+
+    docker compose --env-file .env --profile monitoring up -d \
+        postgres mqtt prometheus grafana
+    docker compose --env-file .env build webcam-job
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$fin_name" \
+        --publish 127.0.0.1:8014:8014 \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 \
+        -e INGESTION_HEALTH_PORT=8014 \
+        -e INGESTION_WORKER_THREADS=4 \
+        -e INGESTION_DATABASE_POOL_SIZE=8 \
+        -e INGESTION_MAX_JOBS_PER_EPOCH=3000 \
+        -e MINIMUM_INGESTION_INTERVAL_S=300 \
+        -e FINTRAFFIC_MINIMUM_POLLING_INTERVAL_S=480 \
+        -e POLLING_INTERVAL_FACTOR=0.7 \
+        -e INGESTION_MIN_EPOCH_PERIOD_S=15 \
+        -e INGESTION_IDLE_DELAY_S=0 \
+        -e INITIAL_STAGGER_WINDOW_S=600 \
+        -e FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT=0 \
+        -e FINTRAFFIC_DOWNLOAD_RETRY_COUNT=0 \
+        webcam-job python -m ingestion.fintraffic.worker \
+            --max-jobs 3000 --run-for-seconds "$run_seconds" \
+            --stagger-initial-polling --verbose
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$ska_name" \
+        --publish 127.0.0.1:8015:8015 \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 \
+        -e INGESTION_HEALTH_PORT=8015 \
+        -e INGESTION_WORKER_THREADS=2 \
+        -e INGESTION_DATABASE_POOL_SIZE=4 \
+        -e INGESTION_MAX_JOBS_PER_EPOCH=100 \
+        -e MINIMUM_INGESTION_INTERVAL_S=300 \
+        -e SKAPING_MINIMUM_POLLING_INTERVAL_S=240 \
+        -e POLLING_INTERVAL_FACTOR=0.7 \
+        -e INGESTION_MIN_EPOCH_PERIOD_S=15 \
+        -e INGESTION_IDLE_DELAY_S=0 \
+        -e INITIAL_STAGGER_WINDOW_S=600 \
+        -e SKAPING_FRESHNESS_QUERY_RETRY_COUNT=0 \
+        -e SKAPING_DOWNLOAD_RETRY_COUNT=0 \
+        webcam-job python -m ingestion.skaping.worker \
+            --max-jobs 100 --run-for-seconds "$run_seconds" \
+            --stagger-initial-polling --verbose
+
+    docker update --cpus 0.5 "$fin_name" "$ska_name" >/dev/null
+    echo "Fintraffic container: $fin_name (0.5 CPU, 4 threads, 8-minute floor)"
+    echo "Skaping container:    $ska_name (0.5 CPU, 2 threads, 4-minute floor)"
+    echo "Follow logs: docker logs -f $fin_name"
+    echo "Follow logs: docker logs -f $ska_name"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
+# Run all three ingestion networks through the complete publication pipeline.
+# The worker and maintenance quotas total 7.5 CPUs, leaving 0.5 CPU on an
+# eight-core VM for PostgreSQL, MQTT, and monitoring.
+ingestion-test-three-networks duration="90m":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    duration="$1"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*[smh]$ ]]; then
+        echo "duration must be a positive number followed by s, m, or h" >&2
+        exit 2
+    fi
+    value="${duration::-1}"
+    case "${duration: -1}" in
+        s) run_seconds="$value" ;;
+        m) run_seconds="$((value * 60))" ;;
+        h) run_seconds="$((value * 3600))" ;;
+    esac
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-${duration}-three-networks-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    win_name="webcam-windy-${duration}-${run_hash}"
+    fin_name="webcam-fintraffic-${duration}-${run_hash}"
+    ska_name="webcam-skaping-${duration}-${run_hash}"
+    maintenance_name="webcam-maintenance-${duration}-${run_hash}"
+
+    docker compose --env-file .env --profile monitoring up -d \
+        postgres mqtt prometheus grafana
+    docker compose --env-file .env build webcam-job
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$win_name" --publish 127.0.0.1:8013:8013 \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8013 \
+        -e INGESTION_WORKER_THREADS=84 -e INGESTION_DATABASE_POOL_SIZE=64 \
+        -e INGESTION_MAX_JOBS_PER_EPOCH=30000 \
+        -e WINDY_MINIMUM_INGESTION_INTERVAL_S=300 \
+        -e WINDY_MINIMUM_POLLING_INTERVAL_S=540 \
+        -e WINDY_POLLING_INTERVAL_FACTOR=0.7 \
+        -e WINDY_INGESTION_REQUEST_DELAY_S=0.01 \
+        -e INGESTION_MIN_EPOCH_PERIOD_S=15 -e INGESTION_IDLE_DELAY_S=0 \
+        -e INITIAL_STAGGER_WINDOW_S=600 \
+        webcam-job python -m ingestion.worker --network win \
+            --max-jobs 30000 --run-for-seconds "$run_seconds" \
+            --stagger-initial-polling --batch-freshness \
+            --windy-bounded-minimum-period --verbose
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$fin_name" --publish 127.0.0.1:8014:8014 \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8014 \
+        -e INGESTION_WORKER_THREADS=4 -e INGESTION_DATABASE_POOL_SIZE=8 \
+        -e INGESTION_MAX_JOBS_PER_EPOCH=3000 \
+        -e MINIMUM_INGESTION_INTERVAL_S=300 \
+        -e FINTRAFFIC_MINIMUM_POLLING_INTERVAL_S=480 \
+        -e POLLING_INTERVAL_FACTOR=0.7 \
+        -e INGESTION_MIN_EPOCH_PERIOD_S=15 -e INGESTION_IDLE_DELAY_S=0 \
+        -e INITIAL_STAGGER_WINDOW_S=600 \
+        -e FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT=0 \
+        -e FINTRAFFIC_DOWNLOAD_RETRY_COUNT=0 \
+        webcam-job python -m ingestion.fintraffic.worker \
+            --max-jobs 3000 --run-for-seconds "$run_seconds" \
+            --stagger-initial-polling --verbose
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$ska_name" --publish 127.0.0.1:8015:8015 \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8015 \
+        -e INGESTION_WORKER_THREADS=2 -e INGESTION_DATABASE_POOL_SIZE=4 \
+        -e INGESTION_MAX_JOBS_PER_EPOCH=100 \
+        -e MINIMUM_INGESTION_INTERVAL_S=300 \
+        -e SKAPING_MINIMUM_POLLING_INTERVAL_S=240 \
+        -e POLLING_INTERVAL_FACTOR=0.7 \
+        -e INGESTION_MIN_EPOCH_PERIOD_S=15 -e INGESTION_IDLE_DELAY_S=0 \
+        -e INITIAL_STAGGER_WINDOW_S=600 \
+        -e SKAPING_FRESHNESS_QUERY_RETRY_COUNT=0 \
+        -e SKAPING_DOWNLOAD_RETRY_COUNT=0 \
+        webcam-job python -m ingestion.skaping.worker \
+            --max-jobs 100 --run-for-seconds "$run_seconds" \
+            --stagger-initial-polling --verbose
+
+    docker compose --env-file .env run -d --no-deps \
+        --name "$maintenance_name" \
+        --volume "$PWD/deployment/benchmarks:/benchmarks:ro" \
+        webcam-job bash /benchmarks/run-quiet-maintenance 1200 3600 24
+
+    docker update --cpus 6.0 "$win_name" >/dev/null
+    docker update --cpus 0.5 "$fin_name" "$ska_name" >/dev/null
+    docker update --cpus 0.5 "$maintenance_name" >/dev/null
+    echo "Windy container:      $win_name (6 CPUs, 84 threads, 9-minute floor)"
+    echo "Fintraffic container: $fin_name (0.5 CPU, 4 threads, 8-minute floor)"
+    echo "Skaping container:    $ska_name (0.5 CPU, 2 threads, 4-minute floor)"
+    echo "Maintenance container: $maintenance_name (0.5 CPU; cycles at T+20m and T+60m)"
+    echo "Logs: docker logs -f <container-name>"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
 
 # Stop all containers and remove their volumes (destructive: deletes local data)
 destroy:

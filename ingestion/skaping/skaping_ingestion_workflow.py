@@ -70,6 +70,9 @@ def run_ingestion(
             "ska",
             timedelta(seconds=config.minimum_ingestion_interval_s),
             polling_interval_factor=config.polling_interval_factor,
+            minimum_polling_interval=timedelta(
+                seconds=config.minimum_polling_interval_s
+            ),
             limit=limit or config.default_limit,
         )
         results = tuple(

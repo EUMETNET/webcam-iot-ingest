@@ -66,11 +66,11 @@ state before running it again:
       -U webcam_ingestion -d webcam_ingestion -c \
       "SELECT source_stream_id, last_freshness_query_timestamp,
               last_download_timestamp, last_provider_image_marker,
-              ema_download_period,
+              estimated_source_stream_period,
               last_download_timestamp + interval '300 seconds'
                   AS download_guard_ends,
               last_provider_image_marker::timestamptz
-                  + (0.7 * ema_download_period) * interval '1 second'
+                  + (0.7 * estimated_source_stream_period) * interval '1 second'
                   AS provider_ema_guard_ends
        FROM source_stream ss JOIN site s USING (site_id)
        WHERE s.network_id = 'win' AND s.country = 'DK'

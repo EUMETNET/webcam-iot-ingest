@@ -186,6 +186,9 @@ def _run_epoch(
                 "ska",
                 timedelta(seconds=skaping.minimum_ingestion_interval_s),
                 polling_interval_factor=skaping.polling_interval_factor,
+                minimum_polling_interval=timedelta(
+                    seconds=skaping.minimum_polling_interval_s
+                ),
                 limit=max_jobs,
             )
             connection.commit()

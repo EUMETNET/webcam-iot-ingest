@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS source_stream (
     last_observed_provider_timestamp timestamptz,
     last_observed_image_marker text,
     last_processed_timestamp timestamptz,
-    ema_download_period double precision,
+    estimated_source_stream_period double precision,
     CONSTRAINT source_stream_id_not_empty CHECK (source_stream_id <> ''),
     CONSTRAINT source_stream_provider_id_not_empty CHECK (provider_source_stream_id <> ''),
     CONSTRAINT source_stream_rendition_not_empty CHECK (selected_rendition <> ''),
@@ -62,8 +62,8 @@ CREATE TABLE IF NOT EXISTS source_stream (
     CONSTRAINT source_stream_provider_metadata_is_object CHECK (
         jsonb_typeof(provider_metadata) = 'object'
     ),
-    CONSTRAINT source_stream_ema_nonnegative CHECK (
-        ema_download_period IS NULL OR ema_download_period >= 0
+    CONSTRAINT source_stream_estimated_period_nonnegative CHECK (
+        estimated_source_stream_period IS NULL OR estimated_source_stream_period >= 0
     ),
     CONSTRAINT source_stream_provider_id_per_site_unique UNIQUE (
         site_id,

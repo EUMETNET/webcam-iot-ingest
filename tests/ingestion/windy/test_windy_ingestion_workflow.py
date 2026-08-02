@@ -2,11 +2,12 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from unittest.mock import Mock
 
-from database.registry_queries import DueSourceStream
+from database.registry_queries import DueSourceStream, build_ema_update_candidate
 from ingestion.fintraffic.fintraffic_image_access import FintrafficImageReference
 from ingestion.windy.windy_image_access import WindyImageReference
 from ingestion.windy.windy_ingestion_workflow import (
     _available_freshness_unchanged,
+    _estimated_period_band,
     _process_job,
     _select_country_sample,
     _validate_countries,
@@ -48,7 +49,7 @@ def job(
         last_observed_provider_timestamp=provider_timestamp,
         last_observed_image_marker=marker,
         last_processed_timestamp=provider_timestamp,
-        ema_download_period=None,
+        estimated_source_stream_period=None,
     )
 
 
@@ -137,7 +138,50 @@ def test_windy_initial_ema_is_configurable() -> None:
     )
 
     assert result.ema_update_candidate is not None
-    assert result.ema_update_candidate.ema_download_period == 120
+    assert result.ema_update_candidate.estimated_source_stream_period == 120
+
+
+def test_bounded_minimum_period_starts_null_and_uses_provider_gaps() -> None:
+    previous = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
+    first = build_ema_update_candidate(
+        job(),
+        provider_update_timestamp=previous,
+        ema_alpha=0.2,
+        running_minimum_floor_seconds=300,
+    )
+    assert first is None
+
+    without_estimate = job(provider_timestamp=previous)
+    learned = build_ema_update_candidate(
+        without_estimate,
+        provider_update_timestamp=previous + timedelta(seconds=620),
+        ema_alpha=0.2,
+        running_minimum_floor_seconds=300,
+    )
+    assert learned is not None and learned.estimated_source_stream_period == 620
+
+    existing = replace(without_estimate, estimated_source_stream_period=600)
+    long_gap = build_ema_update_candidate(
+        existing,
+        provider_update_timestamp=previous + timedelta(seconds=1200),
+        ema_alpha=0.2,
+        running_minimum_floor_seconds=300,
+    )
+    short_gap = build_ema_update_candidate(
+        existing,
+        provider_update_timestamp=previous + timedelta(seconds=100),
+        ema_alpha=0.2,
+        running_minimum_floor_seconds=300,
+    )
+    assert long_gap is not None and long_gap.estimated_source_stream_period == 600
+    assert short_gap is not None and short_gap.estimated_source_stream_period == 300
+
+
+def test_estimated_period_band_preserves_unknown_initial_state() -> None:
+    assert _estimated_period_band(None) == "unknown"
+    assert _estimated_period_band(600) == "le_10m"
+    assert _estimated_period_band(601) == "10m_to_60m"
+    assert _estimated_period_band(3601) == "gt_60m"
 
 
 def test_published_job_emits_latency_payload_derived_and_duration() -> None:
@@ -180,6 +224,11 @@ def test_published_job_emits_latency_payload_derived_and_duration() -> None:
         "download_to_job_end",
         "provider_to_job_end",
     }
+    assert {
+        values["estimated_period_band"]
+        for event, values in events
+        if event == "image_latency"
+    } == {"unknown"}
     assert sum(event == "job_completed" for event, _ in events) == 1
     assert sum(event == "derived_image" for event, _ in events) == 1
 

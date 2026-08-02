@@ -19,7 +19,7 @@ Apply migrations through the Compose gate and run the database tests:
 Confirm `source_stream` contains only these five ingestion-state columns:
 `last_observed_provider_timestamp`, `last_observed_image_marker`,
 `last_download_timestamp`, `last_processed_timestamp`, and
-`ema_download_period`. Confirm `publication_outbox` no longer exists.
+`estimated_source_stream_period`. Confirm `publication_outbox` no longer exists.
 
 2. Container build and bounded jobs
 -----------------------------------

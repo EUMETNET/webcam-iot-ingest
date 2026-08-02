@@ -357,9 +357,17 @@
         {
           "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_image_latency_seconds_bucket{source_network=\"win\"}[5m])) by (le, measure))",
           "legendFormat": "p95 {{measure}}"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(webcam_ingestion_image_latency_seconds_bucket{source_network=\"win\",measure=\"provider_to_download\",estimated_period_band!=\"\"}[5m])) by (le, estimated_period_band))",
+          "legendFormat": "p50 provider_to_download · {{estimated_period_band}}"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(webcam_ingestion_image_latency_seconds_bucket{source_network=\"win\",measure=\"provider_to_download\",estimated_period_band!=\"\"}[5m])) by (le, estimated_period_band))",
+          "legendFormat": "p95 provider_to_download · {{estimated_period_band}}"
         }
       ],
-      "description": "Approximate p50 and p95 image-latency values from Prometheus histogram samples observed during the trailing 5 minutes.",
+      "description": "Approximate p50 and p95 image latency over the trailing 5 minutes. Provider-to-download latency is also split by the source-stream period estimate attached to the selected job; unknown identifies the intentional NULL initialization.",
       "title": "Provider → download → completed MQTT latency",
       "type": "timeseries"
     },

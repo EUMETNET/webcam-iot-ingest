@@ -63,7 +63,7 @@ Run one applied camera, then repeat the same command:
 Inspect the affected state:
 
     docker compose exec postgres psql -U webcam_ingestion -d webcam_ingestion -c \
-      "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp, ema_download_period FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' AND s.country = 'DK' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 5;"
+      "SELECT source_stream_id, last_provider_image_marker, last_download_timestamp, estimated_source_stream_period FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id = 'win' AND s.country = 'DK' ORDER BY last_download_timestamp DESC NULLS LAST LIMIT 5;"
 
 The first successful changed image records its marker, UTC timestamp, and EMA.
 If the same stream is selected and its Windy marker has not changed, its outcome

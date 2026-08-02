@@ -77,7 +77,7 @@ class WorkerMetrics:
         self.image_latency = Histogram(
             "webcam_ingestion_image_latency_seconds",
             "Provider, download, and completed-publication latency",
-            ["source_network", "measure"],
+            ["source_network", "measure", "estimated_period_band"],
             buckets=(1, 5, 10, 30, 60, 120, 180, 300, 365, 600, 900, 1800, 3600, 21600, 86400),
             registry=self.registry,
         )
@@ -214,9 +214,13 @@ class WorkerMetrics:
                 float(values["duration_s"])
             )
         elif event == "image_latency":
-            self.image_latency.labels(self.source_network, str(values["measure"])).observe(
-                float(values["duration_s"])
-            )
+            self.image_latency.labels(
+                self.source_network,
+                str(values["measure"]),
+                _bounded_estimated_period_band(
+                    values.get("estimated_period_band")
+                ),
+            ).observe(float(values["duration_s"]))
         elif event == "transformation":
             self.transformations.labels(
                 self.source_network, str(values["version"]), str(values["outcome"])
@@ -324,6 +328,13 @@ def _bounded_color_mode(value: object) -> str:
     return normalized if normalized in {
         "1", "L", "LA", "P", "RGB", "RGBA", "CMYK", "YCbCr", "I", "F", "HSV"
     } else "OTHER"
+
+
+def _bounded_estimated_period_band(value: object) -> str:
+    normalized = str(value)
+    return normalized if normalized in {
+        "unknown", "le_10m", "10m_to_60m", "gt_60m"
+    } else "unknown"
 
 
 @dataclass

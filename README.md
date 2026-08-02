@@ -330,16 +330,83 @@ worker prints the seed and phase window in its log.
 
 The benchmark keeps two independent timing controls explicit:
 
-- `WINDY_MINIMUM_INGESTION_INTERVAL_S=120` is the Windy per-webcam
+- `WINDY_MINIMUM_INGESTION_INTERVAL_S=300` is the Windy per-webcam
   successful-publication guard;
 - after a download, normal selection also waits until the stored provider
-  timestamp plus `WINDY_POLLING_INTERVAL_FACTOR * ema_download_period`; the
-  Windy factor is currently `0.5`;
-- `WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120` initializes a Windy stream whose
-  update period has not yet been learned;
+  timestamp plus `WINDY_POLLING_INTERVAL_FACTOR * estimated_source_stream_period`; the
+  Windy factor is currently `0.7`;
+- `WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120` remains available to the legacy EMA
+  estimator; the bounded-minimum experiment instead initializes its database
+  estimate as `NULL` and learns it from two provider timestamps;
 - `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
 - `INGESTION_IDLE_DELAY_S=0` adds no post-epoch pause; the 15-second minimum
   epoch period still prevents a tight loop for short or empty epochs.
+
+To test the provider-timestamp bounded-minimum period estimator on the full
+Windy registry for two hours, resetting only Windy's existing period estimates
+to `NULL` before the run, use:
+
+```bash
+just windy-period-test 2h
+```
+
+The recipe retains the five-minute successful-publication guard, uses batched
+freshness, deterministic initial staggering, a 15-second minimum epoch period,
+and a polling factor of 0.7. Provider, download, and processed timestamps are
+preserved by the estimate reset.
+
+For a directly comparable two-hour control run without adaptive polling, use:
+
+```bash
+just windy-no-adaptive-test 2h
+```
+
+This keeps full-registry batched freshness queries, deterministic initial
+staggering, the five-minute per-stream successful-publication guard, and the
+15-second minimum epoch period. It sets the polling factor to zero, so stored
+period estimates do not defer freshness queries. It does not reset them and
+continues updating them with the same bounded-minimum estimator, isolating the
+effect of job selection. Compare API request rate, epoch duration, and
+provider-to-download latency with `windy-period-test` in the same Grafana
+dashboard.
+
+The follow-up adaptive experiment applies
+`max(9 minutes, 0.7 * estimated period)` as its provider-time polling guard,
+without resetting the learned estimates:
+
+```bash
+just windy-nine-minute-floor-test 2h
+```
+
+To run concurrent 40-minute Fintraffic and Skaping validation workers through
+the complete publication pipeline, with half a Docker CPU per worker, use:
+
+```bash
+just ingestion-test-fintraffic-skaping 40m
+```
+
+The reduced-bandwidth comparison uses four Fintraffic threads with an
+eight-minute polling floor and two Skaping threads with a four-minute polling
+floor. Each container is limited to 0.5 CPU. Both
+use deterministic ten-minute staggering, separate metrics ports 8014/8015,
+normal S3 and MQTT publication, and remain available after completion for
+`docker logs` inspection.
+
+For a quiet three-network run on an eight-core VM, use:
+
+```bash
+just ingestion-test-three-networks 90m
+```
+
+This assigns Windy 6 CPUs and 84 threads, Fintraffic 0.5 CPU and 4 threads,
+and Skaping 0.5 CPU and 2 threads. A separate 0.5-CPU maintenance container
+runs sequential Windy, Fintraffic, and Skaping discovery followed by cleanup
+of T0V0 images older than 24 hours at T+20 and T+60 minutes. At peak, the
+configured quotas total 7.5 CPUs, leaving approximately 0.5 CPU on an
+eight-core VM for PostgreSQL, MQTT, and monitoring. All three workers use
+their network-specific polling floors and the complete S3/MQTT publication
+path. If the first maintenance cycle overruns T+60, the second starts as soon
+as the first completes rather than overlapping it.
 
 ### Reproducible monitoring versions
 

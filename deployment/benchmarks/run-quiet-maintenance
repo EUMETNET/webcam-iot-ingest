@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+first_offset_s="${1:-1200}"
+second_offset_s="${2:-3600}"
+cleanup_age_h="${3:-24}"
+started_epoch="$(date +%s)"
+status=0
+
+wait_until_offset() {
+    local offset_s="$1"
+    local remaining_s=$((started_epoch + offset_s - $(date +%s)))
+    if ((remaining_s > 0)); then
+        sleep "$remaining_s"
+    fi
+}
+
+run_cycle() {
+    local cycle="$1"
+    echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"started\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+    python -m discovery.windy.windy_discovery_workflow || status=1
+    python -m discovery.fintraffic.fintraffic_discovery_workflow || status=1
+    python -m discovery.skaping.skaping_discovery_workflow || status=1
+    python -m storage.s3_spool_cleanup \
+        --older-than-hours "$cleanup_age_h" \
+        --transformation-prefix T0V0 || status=1
+    echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"completed\",\"status\":${status},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+}
+
+wait_until_offset "$first_offset_s"
+run_cycle 1
+wait_until_offset "$second_offset_s"
+run_cycle 2
+exit "$status"

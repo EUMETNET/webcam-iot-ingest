@@ -73,6 +73,9 @@ def run_ingestion(
             "fin",
             timedelta(seconds=config.minimum_ingestion_interval_s),
             polling_interval_factor=config.polling_interval_factor,
+            minimum_polling_interval=timedelta(
+                seconds=config.minimum_polling_interval_s
+            ),
             limit=selected_limit,
         )
         results = tuple(
