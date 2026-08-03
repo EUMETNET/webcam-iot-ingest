@@ -750,6 +750,16 @@
       "description": "One-minute-smoothed payload throughput in bytes per second. Source download bytes count completed image HTTP responses; S3 bytes count only data transferred by successful PUT requests and exclude immutable-object reuse.",
       "title": "External download and S3 throughput",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Applied period-estimate updates. Direct replacements are selected deterministically from source-stream ID and provider timestamp; initial learning is shown separately.",
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 68},
+      "id": 18,
+      "targets": [{"expr": "sum by (method) (increase(webcam_ingestion_period_estimate_update_total{source_network=\"ska\"}[30m]))", "legendFormat": "{{method}}"}],
+      "title": "Period-estimate updates over 30 minutes",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

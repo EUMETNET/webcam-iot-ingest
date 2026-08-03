@@ -44,6 +44,7 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
         "ema_candidates": 0,
         "state_updates_applied": 0,
         "ema_updates_applied": 0,
+        "direct_period_replacements_applied": 0,
     }
     connection.close.assert_called_once()
 

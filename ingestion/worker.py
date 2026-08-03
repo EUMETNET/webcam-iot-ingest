@@ -540,6 +540,8 @@ def _run_epoch(
                     apply_ema=ema_update_eligible,
                 )
                 connection.commit()
+            if ema_update_eligible:
+                metrics.observe_period_estimate_updates(applicable_candidates)
     outcomes: dict[str, int] = {}
     for result in results:
         outcomes[result.outcome] = outcomes.get(result.outcome, 0) + 1
@@ -550,6 +552,14 @@ def _run_epoch(
         "state_updates_applied": state_updates_applied,
         "ema_updates_applied": (
             len(applicable_candidates) if ema_update_eligible else 0
+        ),
+        "direct_period_replacements_applied": (
+            sum(
+                candidate.update_method == "direct_replacement"
+                for candidate in applicable_candidates
+            )
+            if ema_update_eligible
+            else 0
         ),
     }
     if batch_summary is not None:
@@ -604,6 +614,7 @@ def _process_due_job(
             if bounded_minimum_period
             else None
         ),
+        direct_replacement_modulus=windy.period_direct_replacement_modulus,
         transformation=TransformationConfig.from_environment(),
         storage=storage,
         publisher=publisher,

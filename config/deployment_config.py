@@ -419,6 +419,7 @@ class WindyIngestionConfig:
     retry_backoff_s: float
     ema_alpha: float
     initial_ema_seconds: float
+    period_direct_replacement_modulus: int
     default_limit: int
 
     @classmethod
@@ -461,6 +462,9 @@ class WindyIngestionConfig:
             initial_ema_seconds=float(
                 os.getenv("WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S", "120")
             ),
+            period_direct_replacement_modulus=int(
+                os.getenv("WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
+            ),
             default_limit=int(os.getenv("WINDY_INGESTION_DEFAULT_LIMIT", "10")),
         )
         config.validate()
@@ -490,6 +494,8 @@ class WindyIngestionConfig:
             raise ValueError("EMA alpha must be between 0 and 1")
         if self.default_limit < 1:
             raise ValueError("Windy ingestion default limit must be positive")
+        if self.period_direct_replacement_modulus < 1:
+            raise ValueError("Windy direct-replacement modulus must be positive")
 
     def read_api_key(self) -> str:
         api_key = self.api_key_file.read_text(encoding="utf-8").strip()
@@ -514,6 +520,7 @@ class FintrafficIngestionConfig:
     download_retry_count: int
     retry_backoff_s: float
     ema_alpha: float
+    period_direct_replacement_modulus: int
     default_limit: int
 
     @classmethod
@@ -555,6 +562,9 @@ class FintrafficIngestionConfig:
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
             ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            period_direct_replacement_modulus=int(
+                os.getenv("FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
+            ),
             default_limit=int(os.getenv("FINTRAFFIC_INGESTION_DEFAULT_LIMIT", "10")),
         )
         config.validate()
@@ -583,6 +593,8 @@ class FintrafficIngestionConfig:
             raise ValueError("Fintraffic retry counts cannot be negative")
         if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
             raise ValueError("invalid Fintraffic EMA alpha or default limit")
+        if self.period_direct_replacement_modulus < 1:
+            raise ValueError("Fintraffic direct-replacement modulus must be positive")
 
 
 @dataclass(frozen=True)
@@ -599,6 +611,7 @@ class SkapingIngestionConfig:
     download_retry_count: int
     retry_backoff_s: float
     ema_alpha: float
+    period_direct_replacement_modulus: int
     default_limit: int
 
     @classmethod
@@ -632,6 +645,9 @@ class SkapingIngestionConfig:
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
             ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
+            period_direct_replacement_modulus=int(
+                os.getenv("SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
+            ),
             default_limit=int(os.getenv("SKAPING_INGESTION_DEFAULT_LIMIT", "10")),
         )
         config.validate()
@@ -654,6 +670,8 @@ class SkapingIngestionConfig:
             raise ValueError("Skaping retry counts cannot be negative")
         if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
             raise ValueError("invalid Skaping EMA alpha or default limit")
+        if self.period_direct_replacement_modulus < 1:
+            raise ValueError("Skaping direct-replacement modulus must be positive")
 
     def read_api_key(self) -> str:
         api_key = self.api_key_file.read_text(encoding="utf-8").strip()

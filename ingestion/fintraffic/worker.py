@@ -273,6 +273,8 @@ def _run_epoch(
                     connection, state_updates, apply_ema=ema_update_eligible
                 )
                 connection.commit()
+            if ema_update_eligible:
+                metrics.observe_period_estimate_updates(candidates)
     outcomes = Counter(result.outcome for result in results)
     return {
         "selected": len(jobs),
@@ -281,6 +283,14 @@ def _run_epoch(
         "ema_candidates": len(candidates),
         "state_updates_applied": applied,
         "ema_updates_applied": len(candidates) if ema_update_eligible else 0,
+        "direct_period_replacements_applied": (
+            sum(
+                candidate.update_method == "direct_replacement"
+                for candidate in candidates
+            )
+            if ema_update_eligible
+            else 0
+        ),
         "stagger_deferred": deferred,
     }
 
@@ -299,6 +309,7 @@ def _process_due_job(
         job,
         dry_run=dry_run,
         ema_alpha=fintraffic.ema_alpha,
+        direct_replacement_modulus=fintraffic.period_direct_replacement_modulus,
         transformation=TransformationConfig.from_environment(),
         storage=storage,
         publisher=publisher,

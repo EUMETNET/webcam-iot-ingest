@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any, Literal, Mapping, Sequence
 
 import psycopg
@@ -97,6 +98,7 @@ class EmaUpdateCandidate:
     source_stream_id: str
     anchor_timestamp: datetime
     estimated_source_stream_period: float
+    update_method: str = "recurrent"
 
 
 @dataclass(frozen=True)
@@ -369,6 +371,7 @@ def build_ema_update_candidate(
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
     running_minimum_floor_seconds: float | None = None,
+    direct_replacement_modulus: int = 250,
 ) -> EmaUpdateCandidate | None:
     """Apply the established EMA formula without writing source state."""
     if not 0 <= ema_alpha <= 1:
@@ -380,6 +383,8 @@ def build_ema_update_candidate(
         and running_minimum_floor_seconds <= 0
     ):
         raise ValueError("running-minimum floor must be positive")
+    if direct_replacement_modulus < 1:
+        raise ValueError("direct-replacement modulus must be positive")
     previous_timestamp = job.last_observed_provider_timestamp
     if (
         provider_update_timestamp is None
@@ -390,17 +395,30 @@ def build_ema_update_candidate(
         return None
     if previous_timestamp is None:
         next_ema = initial_ema_seconds
+        update_method = "recurrent"
     else:
         elapsed = (provider_update_timestamp - previous_timestamp).total_seconds()
-        if elapsed < 0:
+        if elapsed <= 0:
             return None
-        if running_minimum_floor_seconds is not None:
+        direct_replacement = (
+            job.estimated_source_stream_period is not None
+            and use_direct_period_replacement(
+                job.source_stream_id,
+                provider_update_timestamp,
+                direct_replacement_modulus,
+            )
+        )
+        if direct_replacement:
+            next_ema = max(running_minimum_floor_seconds or 0, elapsed)
+            update_method = "direct_replacement"
+        elif running_minimum_floor_seconds is not None:
             next_ema = max(
                 running_minimum_floor_seconds,
                 min(float(job.estimated_source_stream_period), elapsed)
                 if job.estimated_source_stream_period is not None
                 else elapsed,
             )
+            update_method = "recurrent"
         else:
             baseline = (
                 float(job.estimated_source_stream_period)
@@ -408,7 +426,33 @@ def build_ema_update_candidate(
                 else initial_ema_seconds
             )
             next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
-    return EmaUpdateCandidate(job.source_stream_id, provider_update_timestamp, next_ema)
+            update_method = "recurrent"
+    if job.estimated_source_stream_period is None:
+        update_method = "initial"
+    return EmaUpdateCandidate(
+        job.source_stream_id,
+        provider_update_timestamp,
+        next_ema,
+        update_method,
+    )
+
+
+def use_direct_period_replacement(
+    source_stream_id: str,
+    provider_update_timestamp: datetime,
+    modulus: int,
+) -> bool:
+    """Return a stable, uniformly distributed rare replacement decision."""
+    if modulus < 1:
+        raise ValueError("direct-replacement modulus must be positive")
+    _require_aware_datetime(provider_update_timestamp, "provider timestamp")
+    canonical_timestamp = provider_update_timestamp.astimezone(
+        timezone.utc
+    ).isoformat(timespec="microseconds")
+    digest = hashlib.sha256(
+        f"{source_stream_id}\0{canonical_timestamp}".encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:8], "big") % modulus == 0
 
 
 def reset_network_period_estimates(

@@ -732,3 +732,20 @@ The worker fault is injected by signalling PID 1 inside the container; success
 requires Docker's restart count to increase and the replacement process to
 become healthy. Maintenance locking uses a UID-specific user-writable lock;
 lock creation failure is distinct from a legitimate overlapping run.
+
+### 2026-08-03 — Deterministic rare period-estimate replacement
+
+**Affected component:** adaptive ingestion polling for all three networks.
+
+The bounded recurrent source-period estimate could retain an anomalous old
+minimum indefinitely. Without adding a counter or schema field, each valid
+provider-timestamp update now hashes the source-stream ID and canonical UTC
+provider timestamp with SHA-256. One digest in a network-configurable modulus
+directly replaces the estimate with the latest positive provider-timestamp
+gap; all other updates retain the established network rule. The default
+modulus is 250 independently for Windy, Fintraffic, and Skaping.
+
+Direct replacement requires a non-null existing estimate. Initial learning,
+the first-epoch exclusion, initial-stagger exclusion, excessive-epoch guard,
+epoch-end batching, and Windy's minimum estimate floor are retained. Applied
+updates are observable as `initial`, `recurrent`, or `direct_replacement`.

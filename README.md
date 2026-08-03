@@ -248,6 +248,9 @@ just ingest-skaping --limit 4 --publish
 | `DATABASE_USER` | `webcam_ingestion` | PostgreSQL user |
 | `DATABASE_PASSWORD_FILE` | `.secrets/database_password` | Path to the database password file |
 | `FINTRAFFIC_USER_HEADER` | `webcam-iot-ingest` | Non-secret application identifier sent as `Digitraffic-User` |
+| `WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS` | `250` | Deterministic one-in-N direct period-estimate replacement for Windy |
+| `FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS` | `250` | Deterministic one-in-N direct period-estimate replacement for Fintraffic |
+| `SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS` | `250` | Deterministic one-in-N direct period-estimate replacement for Skaping |
 | `FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Fintraffic bulk freshness request |
 | `FINTRAFFIC_DOWNLOAD_RETRY_COUNT` | `0` | Retries after the initial Fintraffic JPEG request |
 | `SKAPING_FRESHNESS_QUERY_RETRY_COUNT` | `0` | Retries after the initial Skaping HEAD/ETag request |
@@ -529,6 +532,22 @@ just checkpoint13-unquiet-test 90m
 The command prints its detached `screen` session and log path. Detailed
 acceptance checks are in
 [`manual_tests/validation_to_complete_checkpoint13`](manual_tests/validation_to_complete_checkpoint13).
+
+Period estimates normally retain their network-specific recurrent update
+rule. On a deterministic rare event derived from SHA-256 of the source-stream
+ID and newly observed provider timestamp, the latest valid provider-timestamp
+gap directly replaces the estimate. This permits recovery from an erroneous
+running minimum without counters or additional database state. Initial
+learning is separate: direct replacement requires an existing estimate, and
+the established first-epoch and excessive-epoch guards remain effective.
+
+The bounded validation resets only the three networks' period estimates,
+uses `N=10`, runs for 30 minutes, prints a final database/Prometheus snapshot,
+and stops the workers:
+
+```bash
+just period-replacement-test 30m 10
+```
 
 ## Running tests
 

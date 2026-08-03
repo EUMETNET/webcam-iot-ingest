@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+run_seconds="${1:-1800}"
+modulus="${2:-10}"
+if [[ ! "$run_seconds" =~ ^[1-9][0-9]*$ ]] || ((run_seconds < 600)); then
+    echo "duration must be an integer of at least 600 seconds" >&2
+    exit 2
+fi
+if [[ ! "$modulus" =~ ^[1-9][0-9]*$ ]]; then
+    echo "modulus must be a positive integer" >&2
+    exit 2
+fi
+
+stop_workers() {
+    docker compose --env-file .env --profile application stop \
+        windy-worker fintraffic-worker skaping-worker >/dev/null 2>&1 || true
+}
+trap stop_workers EXIT
+
+stop_workers
+export WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS="$modulus"
+export FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS="$modulus"
+export SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS="$modulus"
+export WINDY_CPU_LIMIT=6.0
+export FINTRAFFIC_CPU_LIMIT=0.5
+export SKAPING_CPU_LIMIT=0.5
+export WINDY_WORKER_THREADS=84
+export FINTRAFFIC_WORKER_THREADS=4
+export SKAPING_WORKER_THREADS=2
+export WINDY_DATABASE_POOL_SIZE=64
+export FINTRAFFIC_DATABASE_POOL_SIZE=8
+export SKAPING_DATABASE_POOL_SIZE=4
+
+docker compose --env-file .env --profile monitoring up -d \
+    postgres mqtt prometheus grafana pushgateway
+docker compose --env-file .env build webcam-job \
+    windy-worker fintraffic-worker skaping-worker
+docker compose --env-file .env --profile jobs run --rm \
+    webcam-job python -m database.reset_period_estimates \
+    --networks win,fin,ska --confirm RESET_PERIOD_ESTIMATES
+docker compose --env-file .env exec -T postgres psql \
+    --username webcam_ingestion --dbname webcam_ingestion \
+    --tuples-only --no-align --command \
+    "SELECT s.network_id, count(*) FILTER (WHERE ss.estimated_source_stream_period IS NULL), count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id IN ('win','fin','ska') GROUP BY s.network_id ORDER BY s.network_id;"
+
+started="$(date +%s)"
+echo "{\"period_replacement_test\":{\"event\":\"started\",\"duration_s\":$run_seconds,\"modulus\":$modulus,\"timestamp\":$started}}"
+docker compose --env-file .env --profile application up -d \
+    windy-worker fintraffic-worker skaping-worker
+
+sleep "$run_seconds"
+
+echo '{"period_replacement_test":{"event":"metric_snapshot"}}'
+curl --fail --silent --show-error --get \
+    http://127.0.0.1:9090/api/v1/query \
+    --data-urlencode \
+    'query=sum by (source_network,method) (webcam_ingestion_period_estimate_update_total)'
+echo
+docker compose --env-file .env exec -T postgres psql \
+    --username webcam_ingestion --dbname webcam_ingestion \
+    --tuples-only --no-align --command \
+    "SELECT s.network_id, count(*) FILTER (WHERE ss.estimated_source_stream_period IS NOT NULL), count(*) FROM source_stream ss JOIN site s USING (site_id) WHERE s.network_id IN ('win','fin','ska') GROUP BY s.network_id ORDER BY s.network_id;"
+stop_workers
+trap - EXIT
+echo "{\"period_replacement_test\":{\"event\":\"completed\",\"timestamp\":$(date +%s)}}"

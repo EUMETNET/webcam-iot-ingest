@@ -75,6 +75,30 @@ def test_discovery_metrics_config_can_be_disabled(monkeypatch) -> None:
     assert DiscoveryMetricsConfig.from_environment().enabled is False
 
 
+def test_period_direct_replacement_modulus_defaults_per_network(
+    monkeypatch,
+) -> None:
+    for name in (
+        "WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS",
+        "FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS",
+        "SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    assert (
+        WindyIngestionConfig.from_environment().period_direct_replacement_modulus
+        == 250
+    )
+    assert (
+        FintrafficIngestionConfig.from_environment().period_direct_replacement_modulus
+        == 250
+    )
+    assert (
+        SkapingIngestionConfig.from_environment().period_direct_replacement_modulus
+        == 250
+    )
+
+
 def test_windy_config_loads_query_discs(monkeypatch, tmp_path: Path) -> None:
     areas_file = tmp_path / "areas.json"
     areas_file.write_text(

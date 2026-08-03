@@ -181,6 +181,7 @@ def _process_job(
     ema_alpha: float,
     initial_ema_seconds: float = 300.0,
     running_minimum_floor_seconds: float | None = None,
+    direct_replacement_modulus: int = 250,
     transformation: TransformationConfig | None = None,
     storage: S3Storage | None = None,
     publisher: MqttPublisher | None = None,
@@ -272,6 +273,7 @@ def _process_job(
         ema_alpha=ema_alpha,
         initial_ema_seconds=initial_ema_seconds,
         running_minimum_floor_seconds=running_minimum_floor_seconds,
+        direct_replacement_modulus=direct_replacement_modulus,
     )
     state_update = IngestionStateUpdate(
         source_stream_id=job.source_stream_id,

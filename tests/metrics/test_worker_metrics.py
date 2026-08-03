@@ -4,12 +4,30 @@ import pytest
 from prometheus_client import generate_latest
 
 from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
+from database.registry_queries import EmaUpdateCandidate
+from datetime import datetime, timezone
 
 
 def test_structured_job_observability_is_low_cardinality() -> None:
     metrics = WorkerMetrics()
     metrics.observe_event(
         "job_completed", {"outcome": "published", "duration_s": 1.5}
+    )
+    metrics.observe_period_estimate_updates(
+        [
+            EmaUpdateCandidate(
+                "stream-1",
+                datetime(2026, 8, 3, tzinfo=timezone.utc),
+                300,
+                "initial",
+            ),
+            EmaUpdateCandidate(
+                "stream-2",
+                datetime(2026, 8, 3, tzinfo=timezone.utc),
+                600,
+                "direct_replacement",
+            ),
+        ]
     )
     for measure, duration in (
         ("provider_to_download", 120),
@@ -112,10 +130,12 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         b"webcam_ingestion_freshness_batch_total",
         b"webcam_ingestion_freshness_batch_stream_total",
         b"webcam_ingestion_freshness_batch_size",
+        b"webcam_ingestion_period_estimate_update_total",
     ):
         assert metric_name in body
     assert b"source_stream_id" not in body
     assert b'estimated_period_band="le_10m"' in body
+    assert b'method="direct_replacement"' in body
 
 
 def test_health_and_metrics_endpoints() -> None:

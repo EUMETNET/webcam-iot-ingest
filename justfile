@@ -759,6 +759,32 @@ checkpoint13-unquiet-test duration="90m":
     echo "log: $log"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
 
+# Reset all learned periods, then exercise deterministic direct replacement.
+period-replacement-test duration="30m" modulus="10":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    duration="$1"
+    modulus="$2"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*[smh]$ ]]; then
+        echo "duration must be a positive number followed by s, m, or h" >&2
+        exit 2
+    fi
+    value="${duration::-1}"
+    case "${duration: -1}" in
+        s) run_seconds="$value" ;;
+        m) run_seconds="$((value * 60))" ;;
+        h) run_seconds="$((value * 3600))" ;;
+    esac
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-${duration}-${modulus}-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    session="period-replacement-${duration}-n${modulus}-${run_hash}"
+    log="/tmp/${session}-${timestamp}.log"
+    screen -L -Logfile "$log" -dmS "$session" \
+        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-period-replacement-test '$run_seconds' '$modulus'"
+    echo "started screen session: $session"
+    echo "log: $log"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
 # Stop all containers and remove their volumes (destructive: deletes local data)
 destroy:
     docker compose --profile monitoring down --volumes

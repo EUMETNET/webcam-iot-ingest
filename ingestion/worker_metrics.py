@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter as CollectionCounter
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
@@ -204,6 +205,21 @@ class WorkerMetrics:
             ["source_network"],
             registry=self.registry,
         )
+        self.period_estimate_updates = Counter(
+            "webcam_ingestion_period_estimate_update_total",
+            "Applied source-stream period estimate updates by method",
+            ["source_network", "method"],
+            registry=self.registry,
+        )
+
+    def observe_period_estimate_updates(self, candidates) -> None:
+        methods = CollectionCounter(
+            candidate.update_method for candidate in candidates
+        )
+        for method, count in methods.items():
+            self.period_estimate_updates.labels(
+                self.source_network, method
+            ).inc(count)
 
     def observe_stage(self, stage: str, outcome: str, duration_s: float) -> None:
         self.stage_duration.labels(self.source_network, stage, outcome).observe(duration_s)
