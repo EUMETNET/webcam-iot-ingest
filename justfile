@@ -785,6 +785,23 @@ period-replacement-test duration="30m" modulus="10":
     echo "log: $log"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
 
+# Run all production-scope workers for 24 hours and trigger exactly one
+# cleanup-first maintenance sequence at the next 00:00 UTC.
+one-day-quiet-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-one-day-quiet-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    session="one-day-quiet-${run_hash}"
+    log="/tmp/${session}-${timestamp}.log"
+    screen -L -Logfile "$log" -dmS "$session" \
+        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-one-day-quiet"
+    echo "started screen session: $session"
+    echo "log: $log"
+    echo "maintenance: once at the next 00:00 UTC"
+    echo "period direct-replacement modulus: 250 for win, fin, and ska"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
 # Stop all containers and remove their volumes (destructive: deletes local data)
 destroy:
     docker compose --profile monitoring down --volumes

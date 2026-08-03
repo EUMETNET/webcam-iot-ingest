@@ -48,14 +48,15 @@ During the subsequent run, Prometheus observed initial learning before any
 direct replacement. The later applied updates included:
 
     network  recurrent  direct replacement  direct share of later updates
-    win           6,020                 675                         10.08%
-    fin           1,010                 116                         10.30%
-    ska              14                   1                          6.67%
+    win          23,430               2,602                         10.00%
+    fin           2,739                 317                         10.37%
+    ska              32                   2                          5.88%
 
 Windy and Fintraffic therefore match the intended one-in-ten validation
 frequency. Skaping produced only 15 later updates in this observation, which
 is sufficient to prove the path is active but too small for a meaningful
-frequency estimate. At that snapshot, initial learning had been applied to
-22,013 Windy, 2,144 Fintraffic, and 31 Skaping streams. These observations
-validate that deterministic replacement follows rather than interferes with
+frequency estimate. At the final snapshot, initial learning had been applied
+to 23,239 Windy, 2,160 Fintraffic, and 33 Skaping streams. The runner then
+stopped all three validation workers and completed successfully. These
+observations validate that deterministic replacement follows rather than interferes with
 initial learning. The production default remains one in 250 per network.

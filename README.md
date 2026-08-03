@@ -439,6 +439,19 @@ their network-specific polling floors and the complete S3/MQTT publication
 path. If the first maintenance cycle overruns T+60, the second starts as soon
 as the first completes rather than overlapping it.
 
+For a production-scope one-day quiet test with exactly one maintenance run at
+the next 00:00 UTC, use:
+
+```bash
+just one-day-quiet-test
+```
+
+The detached run lasts 24 hours from worker startup. It explicitly restores
+the deterministic period-replacement modulus to 250 for Windy, Fintraffic,
+and Skaping, uses the validated 6/0.5/0.5 CPU and 84/4/2 thread allocation,
+and invokes the cleanup-first production maintenance sequence once. The
+printed screen-session name and `/tmp` log path can be used to follow it.
+
 ### Reproducible monitoring versions
 
 | Component | Version | Pin location |

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+run_seconds=86400
+maintenance_pid=""
+
+stop_workers() {
+    docker compose --env-file .env --profile application stop \
+        windy-worker fintraffic-worker skaping-worker >/dev/null 2>&1 || true
+}
+
+finish() {
+    if [[ -n "$maintenance_pid" ]]; then
+        kill "$maintenance_pid" >/dev/null 2>&1 || true
+    fi
+    stop_workers
+}
+trap finish EXIT
+
+# Make the production value explicit even if a caller's shell still contains
+# the N=10 validation override.
+export WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS=250
+export FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS=250
+export SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS=250
+
+export WINDY_CPU_LIMIT=6.0
+export FINTRAFFIC_CPU_LIMIT=0.5
+export SKAPING_CPU_LIMIT=0.5
+export WINDY_WORKER_THREADS=84
+export FINTRAFFIC_WORKER_THREADS=4
+export SKAPING_WORKER_THREADS=2
+export WINDY_DATABASE_POOL_SIZE=64
+export FINTRAFFIC_DATABASE_POOL_SIZE=8
+export SKAPING_DATABASE_POOL_SIZE=4
+
+stop_workers
+docker compose --env-file .env --profile monitoring up -d \
+    postgres mqtt prometheus grafana pushgateway
+docker compose --env-file .env build \
+    windy-worker fintraffic-worker skaping-worker webcam-job
+docker compose --env-file .env --profile application up -d \
+    windy-worker fintraffic-worker skaping-worker
+
+started="$(date +%s)"
+utc_seconds_today=$((10#$(date -u +%H) * 3600 + 10#$(date -u +%M) * 60 + 10#$(date -u +%S)))
+seconds_until_midnight=$(((86400 - utc_seconds_today) % 86400))
+maintenance_epoch=$((started + seconds_until_midnight))
+deadline=$((started + run_seconds))
+
+echo "{\"one_day_quiet_test\":{\"event\":\"started\",\"timestamp\":$started,\"deadline\":$deadline,\"maintenance_timestamp\":$maintenance_epoch,\"period_replacement_modulus\":250}}"
+
+(
+    if ((seconds_until_midnight > 0)); then
+        sleep "$seconds_until_midnight"
+    fi
+    echo "{\"one_day_quiet_test\":{\"event\":\"maintenance_started\",\"timestamp\":$(date +%s)}}"
+    result=0
+    deployment/systemd/pilot/run-maintenance-sequence || result=$?
+    echo "{\"one_day_quiet_test\":{\"event\":\"maintenance_completed\",\"result\":$result,\"timestamp\":$(date +%s)}}"
+    exit "$result"
+) &
+maintenance_pid="$!"
+
+remaining=$((deadline - $(date +%s)))
+if ((remaining > 0)); then
+    sleep "$remaining"
+fi
+
+if wait "$maintenance_pid"; then
+    maintenance_result=0
+else
+    maintenance_result=$?
+fi
+maintenance_pid=""
+stop_workers
+trap - EXIT
+echo "{\"one_day_quiet_test\":{\"event\":\"completed\",\"maintenance_result\":$maintenance_result,\"timestamp\":$(date +%s)}}"
+exit "$maintenance_result"
