@@ -108,6 +108,28 @@ SHA-256 metadata after upload. Only after that verification, it removes the
 latest preceding available daily dump when it belongs to the same month. The
 last dump of each preceding month and every malformed key are retained.
 
+List or safely validate stored dumps without changing PostgreSQL:
+
+```bash
+just list-database-backups
+just validate-database-backup backups/postgresql/YYYY/MM/DD/<dump>.dump
+just validate-database-restore backups/postgresql/YYYY/MM/DD/<dump>.dump
+```
+
+The last command restores into a disposable validation database and removes
+that database afterward. A live restore is deliberately explicit:
+
+```bash
+just restore-database backups/postgresql/YYYY/MM/DD/<dump>.dump
+```
+
+It requires the exact selected object key, stops all three ingestion workers,
+verifies and restores the dump, validates the restored registry, applies any
+pending schema migrations, and restarts the workers only after success. It
+preserves ingestion state, including `estimated_source_stream_period`. A
+normal PostgreSQL restart always reuses the persistent volume; it never
+automatically restores an S3 dump.
+
 ## Containerized pilot deployment
 
 Build and start PostgreSQL, MQTT, monitoring, and the three continuous
@@ -152,13 +174,19 @@ just container-stack-stop
 ```
 
 The production-oriented units in `deployment/systemd/pilot/` let systemd start
-the Compose stack at VM boot and schedule sequential discovery daily at
-12:00 UTC plus backup/cleanup maintenance daily at 01:00 UTC. Compose owns
-worker restart policies; systemd does not launch host Python workers.
+the Compose stack at VM boot and trigger one non-overlapping maintenance
+sequence daily at 12:00 UTC. The sequence attempts S3 image cleanup first,
+then Windy, Fintraffic, and Skaping discovery, then a verified PostgreSQL
+backup and its conservative retention cleanup. Every step has a timeout;
+failure is recorded but does not suppress later steps. Compose owns worker
+restart policies; systemd does not launch host Python workers.
+When upgrading an earlier pilot installation, disable the superseded
+`webcam-discovery.timer`; discovery now belongs to the maintenance sequence.
 The worker health and Prometheus endpoints use internal ports 8002 (Windy),
 8003 (Fintraffic), and 8004 (Skaping). CPU, memory, and graceful-stop limits
 are configurable through the deployment environment; reproducible defaults
-are listed in `.env.example`.
+are listed in `.env.example`. Readiness windows are deliberately longer than
+a normal epoch so a healthy long epoch cannot trigger a false restart.
 
 ## Webcam discovery
 
@@ -487,6 +515,20 @@ test is in
 It includes unit installation, restricted sudo policy, start/inspection/stop
 commands, daily 12:00 UTC discovery, 24-hour spool retention, daily backup,
 and the automatic four-day deadline.
+
+The checkpoint-13 unquiet recovery exercise starts the full three-network
+stack, crashes only the Windy worker process after 15 minutes, restarts PostgreSQL
+after 30 minutes, and starts cleanup-first maintenance after 45 minutes. It
+stops ingestion after the requested duration but lets active maintenance
+finish:
+
+```bash
+just checkpoint13-unquiet-test 90m
+```
+
+The command prints its detached `screen` session and log path. Detailed
+acceptance checks are in
+[`manual_tests/validation_to_complete_checkpoint13`](manual_tests/validation_to_complete_checkpoint13).
 
 ## Running tests
 

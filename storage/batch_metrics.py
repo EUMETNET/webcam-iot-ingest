@@ -17,6 +17,7 @@ class BatchJobMetrics:
             "spool_cleanup",
             "database_backup",
             "database_backup_cleanup",
+            "database_restore",
         }:
             raise ValueError("unsupported operational batch job")
         self.job_name = job_name

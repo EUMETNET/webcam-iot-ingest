@@ -8,13 +8,19 @@ groups:
           severity: warning
         annotations:
           summary: "Infrastructure scrape target {{ $labels.job }} is down"
-      - alert: WebcamCheckpointWorkerDown
-        expr: up{job=~"checkpoint12-.*-worker"} == 0
+      - alert: WebcamIngestionWorkerDown
+        expr: up{job=~"windy-worker|fintraffic-worker|skaping-worker"} == 0
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Checkpoint-12 worker {{ $labels.job }} is down"
+          summary: "Ingestion worker {{ $labels.job }} is down"
+      - alert: WebcamIngestionWorkerRestartLoop
+        expr: changes(container_start_time_seconds{container_label_com_docker_compose_service=~"windy-worker|fintraffic-worker|skaping-worker"}[15m]) > 2
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ingestion worker {{ $labels.container_label_com_docker_compose_service }} restarted repeatedly"
       - alert: WebcamHostDiskSpaceLow
         expr: |
           (
@@ -46,3 +52,15 @@ groups:
           severity: critical
         annotations:
           summary: "The PostgreSQL S3 backup job failed"
+      - alert: WebcamDatabaseRestoreFailed
+        expr: increase(webcam_batch_run_total{batch_job="database_restore",result="failure"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "An explicit PostgreSQL restore attempt failed"
+      - alert: WebcamMaintenanceSequenceFailed
+        expr: webcam_maintenance_sequence_last_run_unixtime{result="failure"} > time() - 86400
+        labels:
+          severity: critical
+        annotations:
+          summary: "The latest cleanup-first maintenance sequence failed"

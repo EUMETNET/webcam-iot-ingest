@@ -1,8 +1,12 @@
 [Unit]
-Description=Daily verified backup followed by S3 image cleanup
+Description=Cleanup-first failure-tolerant webcam maintenance sequence
 Requires=webcam-stack.service
 After=webcam-stack.service network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/opt/webcam-ingestion/deployment/systemd/pilot/run-maintenance-sequence
+User=codexuser
+Group=codexuser
+WorkingDirectory=/home/codexuser/src/webcam-iot-ingest
+ExecStart=/home/codexuser/src/webcam-iot-ingest/deployment/systemd/pilot/run-maintenance-sequence
+TimeoutStartSec=infinity

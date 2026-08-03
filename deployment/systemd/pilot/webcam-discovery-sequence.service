@@ -1,8 +1,0 @@
-[Unit]
-Description=Sequential containerized webcam discovery
-Requires=webcam-stack.service
-After=webcam-stack.service network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/opt/webcam-ingestion/deployment/systemd/pilot/run-discovery-sequence

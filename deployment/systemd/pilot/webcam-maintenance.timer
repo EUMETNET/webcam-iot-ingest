@@ -1,8 +1,8 @@
 [Unit]
-Description=Daily webcam backup and cleanup maintenance
+Description=Daily cleanup, discovery, and backup maintenance
 
 [Timer]
-OnCalendar=*-*-* 01:00:00 UTC
+OnCalendar=*-*-* 12:00:00 UTC
 Persistent=true
 Unit=webcam-maintenance-sequence.service
 

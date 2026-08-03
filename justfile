@@ -71,6 +71,57 @@ backup-database *args:
     set -euo pipefail
     exec just container-backup-database "$@"
 
+# List canonical PostgreSQL dumps available in S3.
+list-database-backups:
+    docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.database_restore --list
+
+# Download, checksum, and inspect a dump without changing PostgreSQL.
+validate-database-backup object_key:
+    docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.database_restore \
+        --object-key "{{ object_key }}" --dry-run
+
+# Restore into a disposable database, validate it, and remove it afterwards.
+validate-database-restore object_key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    object_key="$1"
+    test_database="webcam_restore_validation_$(date -u +%Y%m%d%H%M%S)_${RANDOM}"
+    cleanup() {
+        docker compose --env-file .env exec -T postgres \
+            dropdb --if-exists --force --username webcam_ingestion \
+            "$test_database" >/dev/null 2>&1 || true
+    }
+    trap cleanup EXIT
+    docker compose --env-file .env exec -T postgres \
+        createdb --username webcam_ingestion "$test_database"
+    docker compose --env-file .env --profile jobs run --rm \
+        -e BATCH_METRICS_ENABLED=false \
+        webcam-job python -m database.database_restore \
+        --object-key "$object_key" --confirm-object-key "$object_key" \
+        --target-database "$test_database"
+    echo "Isolated restore validated in $test_database; removing it now."
+
+# Explicit destructive maintenance operation. Workers stay stopped on failure.
+restore-database object_key:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    object_key="$1"
+    echo "Stopping ingestion workers before restoring: $object_key"
+    docker compose --env-file .env --profile application stop \
+        windy-worker fintraffic-worker skaping-worker
+    if ! docker compose --env-file .env --profile jobs run --rm \
+        webcam-job python -m database.database_restore \
+        --object-key "$object_key" --confirm-object-key "$object_key"; then
+        echo "Restore failed; ingestion workers remain stopped." >&2
+        exit 1
+    fi
+    docker compose --env-file .env run --rm schema-migrate
+    docker compose --env-file .env --profile application start \
+        windy-worker fintraffic-worker skaping-worker
+    echo "Restore validated; ingestion workers restarted."
+
 # Build and start the final containerized ingestion and monitoring stack.
 container-stack-up:
     docker compose --env-file .env --profile application --profile monitoring up -d --build
@@ -677,6 +728,35 @@ ingestion-test-three-networks duration="90m":
     echo "Skaping container:    $ska_name (0.5 CPU, 2 threads, 4-minute floor)"
     echo "Maintenance container: $maintenance_name (0.5 CPU; cycles at T+20m and T+60m)"
     echo "Logs: docker logs -f <container-name>"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
+# Checkpoint-13 recovery drill: full workers, Windy crash, PostgreSQL restart,
+# then the cleanup-first production maintenance sequence. Runs in screen.
+checkpoint13-unquiet-test duration="90m":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    duration="$1"
+    if [[ ! "$duration" =~ ^[1-9][0-9]*[mh]$ ]]; then
+        echo "duration must be a positive number followed by m or h" >&2
+        exit 2
+    fi
+    value="${duration::-1}"
+    case "${duration: -1}" in
+        m) run_seconds="$((value * 60))" ;;
+        h) run_seconds="$((value * 3600))" ;;
+    esac
+    if ((run_seconds < 3600)); then
+        echo "checkpoint-13 unquiet test must last at least 60 minutes" >&2
+        exit 2
+    fi
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-${duration}-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    session="checkpoint13-unquiet-${duration}-${run_hash}"
+    log="/tmp/${session}-${timestamp}.log"
+    screen -L -Logfile "$log" -dmS "$session" \
+        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-checkpoint13-unquiet '$run_seconds'"
+    echo "started screen session: $session"
+    echo "log: $log"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
 
 # Stop all containers and remove their volumes (destructive: deletes local data)

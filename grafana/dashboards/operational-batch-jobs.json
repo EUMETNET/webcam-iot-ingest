@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Persistent Pushgateway metrics for S3 spool cleanup and PostgreSQL backup.",
+  "description": "Persistent Pushgateway metrics for cleanup, discovery/maintenance sequencing, PostgreSQL backup, and explicit restore.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [
@@ -83,11 +83,36 @@
       "targets": [{"expr": "webcam_batch_run_total", "legendFormat": "{{batch_job}} · {{result}}"}],
       "title": "Batch outcomes",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Latest cleanup-first sequence step outcome. Each failed or timed-out step is retained even though later steps continue.",
+      "fieldConfig": {"defaults": {"unit": "dateTimeFromNow"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 20},
+      "id": 8,
+      "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [{"expr": "webcam_maintenance_step_last_run_unixtime * 1000", "legendFormat": "{{step}} · {{result}}"}],
+      "title": "Latest maintenance-step outcomes",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "description": "Latest complete maintenance sequence and explicit database-restore evidence.",
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "gridPos": {"h": 6, "w": 12, "x": 12, "y": 20},
+      "id": 9,
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
+      "targets": [
+        {"expr": "webcam_maintenance_sequence_last_duration_seconds", "legendFormat": "maintenance · {{result}}"},
+        {"expr": "webcam_batch_last_duration_seconds{batch_job=\"database_restore\"}", "legendFormat": "latest successful restore"}
+      ],
+      "title": "Maintenance and recovery duration",
+      "type": "stat"
     }
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["webcam", "operations", "cleanup", "backup"],
+  "tags": ["webcam", "operations", "cleanup", "backup", "recovery"],
   "templating": {"list": [{"current": {"text": "Prometheus", "value": "Prometheus"}, "hide": 2, "name": "DS_PROMETHEUS", "query": "prometheus", "type": "datasource"}]},
   "time": {"from": "now-24h", "to": "now"},
   "timezone": "browser",

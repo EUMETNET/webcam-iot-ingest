@@ -803,6 +803,7 @@ class WorkerConfig:
     database_pool_size: int = 16
     minimum_epoch_period_s: float = 15
     initial_stagger_window_s: float = 600
+    readiness_window_s: float = 600
 
     @classmethod
     def from_environment(cls) -> "WorkerConfig":
@@ -820,6 +821,9 @@ class WorkerConfig:
             ),
             initial_stagger_window_s=float(
                 os.getenv("INITIAL_STAGGER_WINDOW_S", "600")
+            ),
+            readiness_window_s=float(
+                os.getenv("INGESTION_READINESS_WINDOW_S", "600")
             ),
         )
         config.validate()
@@ -841,5 +845,7 @@ class WorkerConfig:
             raise ValueError("worker delays cannot be negative")
         if self.initial_stagger_window_s <= 0:
             raise ValueError("initial stagger window must be positive")
+        if self.readiness_window_s <= 0:
+            raise ValueError("worker readiness window must be positive")
         if not self.health_host or not 1 <= self.health_port <= 65535:
             raise ValueError("invalid worker health host or port")

@@ -82,7 +82,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "-m", "ingestion.worker", "--network", "win", "--stagger-initial-polling"]
+    command:
+      - python
+      - -m
+      - ingestion.worker
+      - --network
+      - win
+      - --stagger-initial-polling
+      - --batch-freshness
+      - --windy-bounded-minimum-period
     env_file:
       - .env
     restart: unless-stopped
@@ -120,6 +128,9 @@ services:
       INGESTION_WORKER_THREADS: ${WINDY_WORKER_THREADS:-60}
       INGESTION_DATABASE_POOL_SIZE: ${WINDY_DATABASE_POOL_SIZE:-24}
       INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
+      INGESTION_MIN_EPOCH_PERIOD_S: ${INGESTION_MIN_EPOCH_PERIOD_S:-15}
+      INGESTION_IDLE_DELAY_S: ${INGESTION_IDLE_DELAY_S:-0}
+      INGESTION_READINESS_WINDOW_S: ${WINDY_READINESS_WINDOW_S:-600}
     secrets:
       - database_password
       - windy_api_key
@@ -174,6 +185,9 @@ services:
       INGESTION_WORKER_THREADS: ${FINTRAFFIC_WORKER_THREADS:-20}
       INGESTION_DATABASE_POOL_SIZE: ${FINTRAFFIC_DATABASE_POOL_SIZE:-8}
       INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
+      INGESTION_MIN_EPOCH_PERIOD_S: ${INGESTION_MIN_EPOCH_PERIOD_S:-15}
+      INGESTION_IDLE_DELAY_S: ${INGESTION_IDLE_DELAY_S:-0}
+      INGESTION_READINESS_WINDOW_S: ${FINTRAFFIC_READINESS_WINDOW_S:-300}
     secrets:
       - database_password
       - s3_access_key
@@ -227,6 +241,9 @@ services:
       INGESTION_WORKER_THREADS: ${SKAPING_WORKER_THREADS:-4}
       INGESTION_DATABASE_POOL_SIZE: ${SKAPING_DATABASE_POOL_SIZE:-4}
       INGESTION_MAX_JOBS_PER_EPOCH: ${INGESTION_MAX_JOBS_PER_EPOCH:-30000}
+      INGESTION_MIN_EPOCH_PERIOD_S: ${INGESTION_MIN_EPOCH_PERIOD_S:-15}
+      INGESTION_IDLE_DELAY_S: ${INGESTION_IDLE_DELAY_S:-0}
+      INGESTION_READINESS_WINDOW_S: ${SKAPING_READINESS_WINDOW_S:-300}
     secrets:
       - database_password
       - skaping_api_key
@@ -251,6 +268,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    cpus: ${WEBCAM_JOB_CPU_LIMIT:-0.5}
+    mem_limit: ${WEBCAM_JOB_MEMORY_LIMIT:-1g}
     environment:
       DATABASE_HOST: postgres
       DATABASE_PORT: 5432

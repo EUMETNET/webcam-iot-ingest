@@ -710,3 +710,25 @@ operation and never an automatic restart response. A restored dump retains
 `estimated_source_stream_period` and the other ingestion-state fields. The
 earlier idea of clearing legacy EMA-related state after restoration is dropped:
 the bounded-minimum period estimator does not require that reset.
+
+The implemented restore command additionally requires the selected canonical
+S3 key to be repeated as an exact confirmation, verifies stored length and
+SHA-256 metadata, validates the custom archive, and checks the restored
+registry. A separate validation command performs the complete restore in a
+disposable database without replacing live data. Workers remain stopped after
+any failed live restore and restart only after successful validation.
+
+Worker readiness is network-specific rather than tied to the short failure
+backoff. The Windy readiness window is ten minutes and the Fintraffic and
+Skaping windows are five minutes by default. This prevents legitimate long
+epochs from being interpreted as failed worker health while retaining an
+observable bound for stalled workers.
+
+The checkpoint-13 unquiet drill uses the same containerized production path.
+It injects a Windy container kill, a PostgreSQL restart that reuses the
+persistent volume, and cleanup-first maintenance while all networks are
+active. No destructive database restoration is part of that automated drill.
+The worker fault is injected by signalling PID 1 inside the container; success
+requires Docker's restart count to increase and the replacement process to
+become healthy. Maintenance locking uses a UID-specific user-writable lock;
+lock creation failure is distinct from a legitimate overlapping run.

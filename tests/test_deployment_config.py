@@ -210,6 +210,7 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.polling_interval_factor == 0.7
     assert config.initial_ema_seconds == 120
     assert WorkerConfig.from_environment().initial_stagger_window_s == 600
+    assert WorkerConfig.from_environment().readiness_window_s == 600
 
 
 def test_skaping_ingestion_config_has_zero_retry_defaults() -> None:

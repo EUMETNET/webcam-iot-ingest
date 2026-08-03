@@ -91,17 +91,22 @@ def test_persistent_state_and_short_lived_job_are_declared() -> None:
 def test_systemd_only_orchestrates_compose_and_scheduled_jobs() -> None:
     directory = ROOT / "deployment/systemd/pilot"
     stack = (directory / "webcam-stack.service").read_text()
-    discovery_timer = (directory / "webcam-discovery.timer").read_text()
     maintenance_timer = (directory / "webcam-maintenance.timer").read_text()
     maintenance = (directory / "run-maintenance-sequence").read_text()
 
     assert "--profile application --profile monitoring up -d" in stack
     assert "python -m ingestion" not in stack
-    assert "OnCalendar=*-*-* 12:00:00 UTC" in discovery_timer
-    assert "OnCalendar=*-*-* 01:00:00 UTC" in maintenance_timer
-    assert maintenance.index("webcam-db-backup.service") < maintenance.index(
-        "webcam-spool-cleanup.service"
-    )
+    assert "OnCalendar=*-*-* 12:00:00 UTC" in maintenance_timer
+    expected = [
+        "storage.s3_spool_cleanup",
+        "run-discovery windy",
+        "run-discovery fintraffic",
+        "run-discovery skaping",
+        "database.database_backup",
+    ]
+    positions = [maintenance.index(value) for value in expected]
+    assert positions == sorted(positions)
+    assert "flock -n" in maintenance
 
 
 def test_operational_just_recipes_use_container_jobs() -> None:
@@ -147,3 +152,17 @@ def test_checkpoint13_quiet_baseline_has_one_delayed_sequential_workflow() -> No
     assert "PartOf=webcam-checkpoint13-baseline.target" not in workflow_service
     assert "--profile application up -d --build" in stack
     assert "stop windy-worker fintraffic-worker skaping-worker" in stack
+
+
+def test_checkpoint13_unquiet_crashes_process_without_operator_stopping_service() -> None:
+    runner = (
+        ROOT / "deployment/benchmarks/run-checkpoint13-unquiet"
+    ).read_text()
+
+    assert "/bin/sh -c 'kill -TERM 1'" in runner
+    assert "compose --env-file .env kill" not in runner
+    assert "RestartCount" in runner
+    assert "restarted_and_healthy" in runner
+    assert runner.index("windy_termination_started") < runner.index(
+        "postgres_restart_started"
+    ) < runner.index("maintenance_started")

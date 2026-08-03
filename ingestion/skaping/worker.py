@@ -68,7 +68,7 @@ def run_worker(
     maximum = max_jobs or worker.max_jobs_per_epoch
     stop = stop_event or threading.Event()
     metrics = WorkerMetrics(source_network="ska")
-    health = WorkerHealth(readiness_window_s=max(60.0, worker.failure_backoff_s * 3))
+    health = WorkerHealth(readiness_window_s=worker.readiness_window_s)
     server = HealthServer(worker.health_host, worker.health_port, health, metrics)
     server.start()
     gate = RateGate(skaping.request_delay_s)

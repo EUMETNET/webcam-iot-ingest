@@ -16,6 +16,7 @@ COPY "./storage" "${DOCKER_PATH}/storage/"
 COPY "pyproject.toml" "${DOCKER_PATH}/"
 COPY "README.md" "${DOCKER_PATH}/"
 COPY --from=postgres-client /usr/lib/postgresql/16/bin/pg_dump /usr/local/bin/pg_dump
+COPY --from=postgres-client /usr/lib/postgresql/16/bin/pg_restore /usr/local/bin/pg_restore
 
 WORKDIR "${DOCKER_PATH}"
 

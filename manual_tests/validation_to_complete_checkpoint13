@@ -1,0 +1,125 @@
+Checkpoint 13 owner validation
+==============================
+
+Status: implementation ready; owner recovery drill pending.
+
+Safety boundary
+---------------
+
+Routine recovery restarts containers and reuses the PostgreSQL persistent
+volume. It never restores an S3 dump automatically. A live dump restore is a
+separate operator-approved command and is not required for the unquiet run.
+
+1. Validate repository material
+-------------------------------
+
+Run as `codexuser` from the repository root:
+
+    UV_CACHE_DIR=/tmp/webcam-uv-cache uv run pytest -q tests
+    docker compose --env-file .env --profile application \
+      --profile monitoring --profile jobs config --quiet
+    bash -n deployment/systemd/pilot/run-maintenance-sequence
+    bash -n deployment/benchmarks/run-checkpoint13-unquiet
+    systemd-analyze verify deployment/systemd/pilot/*.service \
+      deployment/systemd/pilot/*.timer
+    git diff --check
+
+Confirm the workers use `restart: unless-stopped`, have health checks, and
+Windy enables batched freshness plus the bounded-minimum period strategy.
+
+2. Install the production pilot units
+-------------------------------------
+
+Run from the administrator's own checkout:
+
+    REPO_ROOT=$(git rev-parse --show-toplevel)
+    sudo install -m 0644 "$REPO_ROOT"/deployment/systemd/pilot/*.service \
+      "$REPO_ROOT"/deployment/systemd/pilot/*.timer \
+      /etc/systemd/system/
+    sudo systemctl disable --now webcam-discovery.timer \
+      webcam-discovery-sequence.service 2>/dev/null || true
+    sudo systemctl daemon-reload
+    sudo systemd-analyze verify \
+      /etc/systemd/system/webcam-stack.service \
+      /etc/systemd/system/webcam-maintenance-sequence.service \
+      /etc/systemd/system/webcam-maintenance.timer
+
+The units intentionally run as `codexuser`; the administrator only installs
+and controls them. The disabled discovery timer is the superseded two-schedule
+checkpoint-12/early-checkpoint-13 unit; the cleanup-first timer replaces it.
+Enable boot integration after the unquiet test is accepted:
+
+    sudo systemctl enable webcam-stack.service
+    sudo systemctl enable webcam-maintenance.timer
+
+3. Validate a real backup without touching the live database
+-------------------------------------------------------------
+
+    just list-database-backups
+    just validate-database-backup <canonical-object-key>
+    just validate-database-restore <canonical-object-key>
+
+Confirm length and SHA-256 match, `pg_restore --list` succeeds, the disposable
+database contains `network`, `site`, and `source_stream`, and it is removed.
+
+Do not run `just restore-database` here. If a live restore is later approved,
+use the exact listed key. Confirm workers stop first, remain stopped after any
+failure, and restart only after schema validation succeeds. Confirm
+`estimated_source_stream_period` and other ingestion state are preserved.
+
+4. Run the 90-minute unquiet exercise
+-------------------------------------
+
+Ensure no earlier benchmark workers or maintenance process is active, then:
+
+    just checkpoint13-unquiet-test 90m
+
+The command prints a unique screen session and `/tmp` log. It leaves
+PostgreSQL, MQTT, and monitoring running, but stops ingestion at the end:
+
+    T+00  build/start monitoring and all three full workers
+    T+15  terminate Windy's PID 1 internally; require an increased Docker
+          restart count and healthy status
+    T+30  restart PostgreSQL; workers reconnect without S3 restoration
+    T+45  start cleanup-first maintenance while ingestion remains active
+    T+90  stop ingestion after any active maintenance sequence completes
+
+Follow it with:
+
+    screen -ls
+    tail -f <printed-log-path>
+    docker compose --env-file .env ps
+    docker compose --env-file .env logs --since 10m \
+      windy-worker fintraffic-worker skaping-worker postgres
+
+Through the port-3000 tunnel, inspect all ingestion dashboards plus
+Infrastructure health and Operational batch jobs. Confirm:
+
+- every worker is initially healthy and produces completed epochs;
+- Windy restarts after the injected kill, then resumes publication;
+- PostgreSQL restart causes neither a worker restart loop nor dump restore;
+- cleanup is attempted before every discovery and backup;
+- a failed/timed-out discovery cannot suppress subsequent steps or backup;
+- the maintenance lock prevents overlap and aggregate status is accurate;
+- restore, maintenance, worker-health, and restart metrics are visible;
+- resource use, throughput, epoch duration, and latency remain acceptable.
+
+If maintenance outlives T+90, waiting for it is intentional: interrupting
+cleanup or backup would invalidate the drill.
+
+5. Reboot and explicit restore drills
+-------------------------------------
+
+After accepting the unquiet run, separately schedule an operator-supervised VM
+reboot. Confirm the stack, worker health, monitoring, and maintenance timer
+return. Keep any live restore separate and require explicit owner approval.
+
+Email notification is deferred. Ignored local address/password files are only
+placeholders and must not be committed or used without valid SMTP credentials.
+
+Acceptance record
+-----------------
+
+Record: date, commit, backup key, isolated restore result, screen/log name,
+restart times, maintenance outcomes, dashboard observations, reboot result,
+and owner decision.

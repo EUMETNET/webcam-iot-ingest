@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+run_seconds="${1:-5400}"
+if [[ ! "$run_seconds" =~ ^[1-9][0-9]*$ ]] || ((run_seconds < 3600)); then
+    echo "run duration must be an integer of at least 3600 seconds" >&2
+    exit 2
+fi
+
+started="$(date +%s)"
+maintenance_pid=""
+
+wait_until() {
+    local offset="$1"
+    local remaining=$((started + offset - $(date +%s)))
+    if ((remaining > 0)); then
+        sleep "$remaining"
+    fi
+}
+
+container_state() {
+    docker compose --env-file .env ps --format json \
+        windy-worker fintraffic-worker skaping-worker postgres
+}
+
+wait_healthy() {
+    local container="$1"
+    local label="$2"
+    for _ in $(seq 1 24); do
+        if [[ "$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || true)" == "healthy" ]]; then
+            echo "{\"checkpoint13_unquiet\":{\"event\":\"${label}_healthy\",\"timestamp\":$(date +%s)}}"
+            return 0
+        fi
+        sleep 5
+    done
+    echo "${label} did not become healthy within 120 seconds" >&2
+    return 1
+}
+
+wait_restarted_and_healthy() {
+    local container="$1"
+    local label="$2"
+    local previous_restarts="$3"
+    for _ in $(seq 1 24); do
+        local current_restarts health
+        current_restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo 0)"
+        health="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || true)"
+        if ((current_restarts > previous_restarts)) && [[ "$health" == "healthy" ]]; then
+            echo "{\"checkpoint13_unquiet\":{\"event\":\"${label}_restarted_and_healthy\",\"restart_count\":$current_restarts,\"timestamp\":$(date +%s)}}"
+            return 0
+        fi
+        sleep 5
+    done
+    echo "${label} did not restart and become healthy within 120 seconds" >&2
+    return 1
+}
+
+stop_workers() {
+    docker compose --env-file .env --profile application stop \
+        windy-worker fintraffic-worker skaping-worker >/dev/null 2>&1 || true
+}
+
+echo "{\"checkpoint13_unquiet\":{\"event\":\"started\",\"duration_s\":$run_seconds,\"timestamp\":$started}}"
+export WINDY_CPU_LIMIT=6.0
+export FINTRAFFIC_CPU_LIMIT=0.5
+export SKAPING_CPU_LIMIT=0.5
+export WINDY_WORKER_THREADS=84
+export FINTRAFFIC_WORKER_THREADS=4
+export SKAPING_WORKER_THREADS=2
+export WINDY_DATABASE_POOL_SIZE=64
+export FINTRAFFIC_DATABASE_POOL_SIZE=8
+export SKAPING_DATABASE_POOL_SIZE=4
+export INGESTION_MIN_EPOCH_PERIOD_S=15
+export INGESTION_IDLE_DELAY_S=0
+docker compose --env-file .env --profile application --profile monitoring up -d --build
+trap stop_workers EXIT
+container_state
+
+wait_until 900
+echo "{\"checkpoint13_unquiet\":{\"event\":\"windy_termination_started\",\"timestamp\":$(date +%s)}}"
+windy_restarts_before="$(docker inspect --format '{{.RestartCount}}' iot-webcam-ingest-windy-worker-1)"
+# Ask the worker's PID 1 to terminate from inside the namespace. Unlike
+# `docker compose stop/kill`, this is not an administrative container stop, so
+# `unless-stopped` must restart it.
+docker compose --env-file .env exec -T windy-worker \
+    /bin/sh -c 'kill -TERM 1'
+wait_restarted_and_healthy \
+    iot-webcam-ingest-windy-worker-1 windy "$windy_restarts_before"
+container_state
+
+wait_until 1800
+echo "{\"checkpoint13_unquiet\":{\"event\":\"postgres_restart_started\",\"timestamp\":$(date +%s)}}"
+docker compose --env-file .env restart postgres
+wait_healthy iot-webcam-ingest-postgres-1 postgres
+container_state
+
+wait_until 2700
+echo "{\"checkpoint13_unquiet\":{\"event\":\"maintenance_started\",\"timestamp\":$(date +%s)}}"
+deployment/systemd/pilot/run-maintenance-sequence &
+maintenance_pid="$!"
+
+wait_until "$run_seconds"
+if [[ -n "$maintenance_pid" ]]; then
+    wait "$maintenance_pid" || true
+fi
+container_state
+stop_workers
+trap - EXIT
+echo "{\"checkpoint13_unquiet\":{\"event\":\"completed\",\"timestamp\":$(date +%s)}}"
