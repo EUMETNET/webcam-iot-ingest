@@ -1,4 +1,4 @@
-"""Low-cardinality metrics and health endpoints for ingestion workers."""
+"""Provider-neutral metrics and health endpoints for ingestion workers."""
 
 from __future__ import annotations
 

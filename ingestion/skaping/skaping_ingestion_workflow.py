@@ -21,9 +21,9 @@ from config.deployment_config import (
 from database.registry_queries import apply_ingestion_state_updates, get_due_source_streams
 from ingestion.notification.mqtt_publisher import MqttPublisher
 from ingestion.skaping.skaping_image_access import SkapingImageClient
-from ingestion.windy.windy_ingestion_workflow import (
-    WindyIngestionJobResult,
-    _process_job,
+from ingestion.shared.source_processing import (
+    IngestionJobResult,
+    process_job,
 )
 from storage.s3_storage import S3Storage
 
@@ -34,7 +34,7 @@ class SkapingIngestionResult:
     publish: bool
     selected: int
     outcomes: dict[str, int]
-    jobs: tuple[WindyIngestionJobResult, ...]
+    jobs: tuple[IngestionJobResult, ...]
 
 
 def run_ingestion(
@@ -76,7 +76,7 @@ def run_ingestion(
             limit=limit or config.default_limit,
         )
         results = tuple(
-            _process_job(
+            process_job(
                 client,
                 job,
                 dry_run=dry_run,

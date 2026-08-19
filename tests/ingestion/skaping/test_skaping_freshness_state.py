@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 from database.registry_queries import DueSourceStream
 from ingestion.skaping.skaping_image_access import SkapingImageReference
-from ingestion.windy.windy_ingestion_workflow import _process_job
+from ingestion.shared.source_processing import process_job
 
 
 PNG_1PX = (
@@ -58,7 +58,7 @@ def test_unchanged_etag_stops_even_when_last_modified_changes() -> None:
         marker='"etag-v1"', timestamp=previous + timedelta(minutes=5)
     )
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=False,
@@ -73,7 +73,7 @@ def test_unchanged_etag_stops_even_when_last_modified_changes() -> None:
 def test_changed_etag_downloads_without_last_modified() -> None:
     client = _client(marker='"etag-v2"', timestamp=None)
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=None, marker='"etag-v1"'),
         dry_run=True,

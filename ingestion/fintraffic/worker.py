@@ -29,17 +29,17 @@ from database.registry_queries import (
 )
 from ingestion.fintraffic.fintraffic_ingestion_workflow import _new_client
 from ingestion.notification.mqtt_publisher import MqttPublisher
-from ingestion.windy.windy_ingestion_workflow import _process_job
-from ingestion.worker import (
+from ingestion.shared.source_processing import process_job
+from ingestion.shared.worker_support import (
     DatabaseConnectionPool,
     InitialPollingStagger,
     RateGate,
-    _completed_future_result,
-    _period_update_allowed,
-    _epoch_wait_s,
-    _progress,
+    completed_future_result,
+    period_update_allowed,
+    epoch_wait_s,
+    progress,
 )
-from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
+from ingestion.shared.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
 from storage.s3_storage import S3Storage
 
 
@@ -112,7 +112,7 @@ def run_worker(
                 summaries.append(summary)
                 epoch_index += 1
                 if epochs is None or epoch_index < epochs:
-                    delay = _epoch_wait_s(
+                    delay = epoch_wait_s(
                         duration_s,
                         worker.minimum_epoch_period_s,
                         worker.idle_delay_s,
@@ -226,7 +226,7 @@ def _run_epoch(
                 done, _ = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     job = futures.pop(future)
-                    result = _completed_future_result(
+                    result = completed_future_result(
                         future,
                         job,
                         network_id="fin",
@@ -238,7 +238,7 @@ def _run_epoch(
                 if verbose and (now - last_report >= 1 or not futures):
                     print(
                         json.dumps(
-                            _progress(epoch_number, len(jobs), results),
+                            progress(epoch_number, len(jobs), results),
                             sort_keys=True,
                         ),
                         flush=True,
@@ -261,7 +261,7 @@ def _run_epoch(
             if isinstance(result.period_estimate_candidate, PeriodEstimateCandidate)
             and result.period_estimate_candidate.source_stream_id not in initial_release_ids
         ]
-        period_update_eligible = not dry_run and _period_update_allowed(
+        period_update_eligible = not dry_run and period_update_allowed(
             epoch_number,
             time.monotonic() - epoch_started,
             fintraffic.minimum_ingestion_interval_s,
@@ -304,7 +304,7 @@ def _process_due_job(
     publisher,
     metrics,
 ):
-    return _process_job(
+    return process_job(
         client,
         job,
         dry_run=dry_run,

@@ -85,7 +85,7 @@ services:
     command:
       - python
       - -m
-      - ingestion.worker
+      - ingestion.windy.worker
       - --network
       - win
       - --stagger-initial-polling

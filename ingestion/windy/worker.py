@@ -1,24 +1,17 @@
-"""Continuous provider ingestion worker with bounded validation controls."""
+"""Continuous Windy ingestion worker with bounded validation controls."""
 
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass, replace
+from contextlib import ExitStack
+from dataclasses import asdict, replace
 from datetime import timedelta
-import hashlib
 import json
 import logging
-from queue import Empty, LifoQueue
 import signal
 import threading
 import time
-from typing import Callable
-
-import psycopg
-from psycopg.pq import TransactionStatus
 
 from config.deployment_config import (
     DatabaseConfig,
@@ -37,211 +30,25 @@ from database.registry_queries import (
     reset_network_period_estimates,
 )
 from ingestion.notification.mqtt_publisher import MqttPublisher
+from ingestion.shared.source_processing import process_job
+from ingestion.shared.worker_support import (
+    DatabaseConnectionPool,
+    InitialPollingStagger,
+    RateGate,
+    completed_future_result,
+    connect_database,
+    epoch_wait_s,
+    period_update_allowed,
+    progress,
+)
 from ingestion.windy.windy_image_access import WindyImageClient
-from ingestion.windy.windy_ingestion_workflow import _process_job, _validate_countries
-from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
+from ingestion.windy.windy_ingestion_workflow import _validate_countries
+from ingestion.shared.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
 from storage.s3_storage import S3Storage
 
 
 logger = logging.getLogger(__name__)
 DEFAULT_INITIAL_STAGGER_SEED = "windy-benchmark-v1"
-
-
-class InitialPollingStagger:
-    """Deterministically spread each stream's first check without DB writes."""
-
-    def __init__(
-        self,
-        seed: str,
-        window_s: float,
-        started_monotonic: float | None = None,
-    ) -> None:
-        if not seed:
-            raise ValueError("initial polling stagger seed cannot be empty")
-        if window_s <= 0:
-            raise ValueError("initial polling stagger window must be positive")
-        self.seed = seed
-        self.window_s = window_s
-        self.started_monotonic = (
-            time.monotonic() if started_monotonic is None else started_monotonic
-        )
-        self._released: set[str] = set()
-
-    def select(
-        self,
-        jobs: list[DueSourceStream],
-        now_monotonic: float | None = None,
-    ) -> tuple[list[DueSourceStream], int, set[str]]:
-        elapsed_s = max(
-            0.0,
-            (time.monotonic() if now_monotonic is None else now_monotonic)
-            - self.started_monotonic,
-        )
-        selected: list[DueSourceStream] = []
-        released_now: set[str] = set()
-        for job in jobs:
-            already_released = job.source_stream_id in self._released
-            if already_released or elapsed_s >= _initial_phase_s(
-                job, self.seed, self.window_s
-            ):
-                self._released.add(job.source_stream_id)
-                selected.append(job)
-                if not already_released:
-                    released_now.add(job.source_stream_id)
-        return selected, len(jobs) - len(selected), released_now
-
-
-def _initial_phase_s(job: DueSourceStream, seed: str, window_s: float) -> float:
-    digest = hashlib.sha256(
-        f"{seed}\0{job.source_stream_id}".encode("utf-8")
-    ).digest()
-    fraction = int.from_bytes(digest[:8], "big") / 2**64
-    return fraction * window_s
-
-
-class DatabaseConnectionPool:
-    """Small bounded pool that avoids holding a connection during provider I/O."""
-
-    def __init__(self, config: DatabaseConfig, max_size: int, observer=None) -> None:
-        self._config = config
-        self._max_size = max_size
-        self._available: LifoQueue = LifoQueue()
-        self._created = 0
-        self._lock = threading.Lock()
-        self._all: list[object] = []
-        self._observer = observer
-        self._discarded_slots = 0
-
-    @contextmanager
-    def connection(self):
-        started = time.monotonic()
-        try:
-            connection = self._available.get_nowait()
-        except Empty:
-            with self._lock:
-                if self._created < self._max_size:
-                    connection = _connect(self._config)
-                    self._created += 1
-                    self._all.append(connection)
-                    if self._discarded_slots:
-                        self._discarded_slots -= 1
-                        if self._observer is not None:
-                            self._observer(
-                                "database_pool_cleanup",
-                                "replacement",
-                                time.monotonic() - started,
-                            )
-                else:
-                    connection = None
-            if connection is None:
-                connection = self._available.get()
-        if self._observer is not None:
-            self._observer("database_pool_wait", "success", time.monotonic() - started)
-        try:
-            yield connection
-        finally:
-            if self._restore(connection):
-                self._available.put(connection)
-
-    def _restore(self, connection: object) -> bool:
-        """Return whether a borrowed connection is safe to reuse."""
-
-        if getattr(connection, "closed", False):
-            self._discard(connection)
-            return False
-        started = time.monotonic()
-        try:
-            status = connection.info.transaction_status
-            if status != TransactionStatus.IDLE:
-                connection.rollback()
-                if connection.info.transaction_status != TransactionStatus.IDLE:
-                    raise RuntimeError("database connection rollback did not restore IDLE")
-                if self._observer is not None:
-                    self._observer(
-                        "database_pool_cleanup",
-                        "rollback",
-                        time.monotonic() - started,
-                    )
-            return True
-        except Exception:
-            logger.exception("Discarding database connection that could not be restored")
-            try:
-                connection.close()
-            except Exception:
-                logger.exception("Failed to close discarded database connection")
-            self._discard(connection)
-            if self._observer is not None:
-                self._observer(
-                    "database_pool_cleanup",
-                    "discard",
-                    time.monotonic() - started,
-                )
-            return False
-
-    def _discard(self, connection: object) -> None:
-        with self._lock:
-            if connection in self._all:
-                self._all.remove(connection)
-                self._created -= 1
-                self._discarded_slots += 1
-
-    def close(self) -> None:
-        for connection in self._all:
-            connection.close()
-        self._all.clear()
-
-
-@dataclass(frozen=True)
-class InternalErrorResult:
-    """Accounting result for an unexpected exception escaping a source job."""
-
-    source_stream_id: str
-    outcome: str = "internal_error"
-    period_estimate_candidate: None = None
-
-
-def _completed_future_result(
-    future: Future,
-    job: DueSourceStream,
-    *,
-    network_id: str,
-    epoch_number: int,
-    metrics: WorkerMetrics,
-):
-    try:
-        result = future.result()
-    except Exception:
-        logger.exception(
-            "Unexpected source job failure: source_stream_id=%s network=%s epoch=%s",
-            job.source_stream_id,
-            network_id,
-            epoch_number,
-        )
-        metrics.jobs.labels(network_id, "internal_error").inc()
-        metrics.observe_event(
-            "failure",
-            {"stage": "source_job", "reason": "internal_error"},
-        )
-        return InternalErrorResult(job.source_stream_id)
-    metrics.jobs.labels(network_id, result.outcome).inc()
-    return result
-
-
-class RateGate:
-    """Serialize request starts across threads at a configured interval."""
-
-    def __init__(self, interval_s: float) -> None:
-        self._interval_s = interval_s
-        self._lock = threading.Lock()
-        self._next = 0.0
-
-    def __call__(self) -> None:
-        with self._lock:
-            now = time.monotonic()
-            wait = max(0.0, self._next - now)
-            self._next = max(now, self._next) + self._interval_s
-        if wait:
-            time.sleep(wait)
 
 
 def run_worker(
@@ -270,7 +77,7 @@ def run_worker(
     worker = WorkerConfig.from_environment()
     windy = WindyIngestionConfig.from_environment()
     if reset_windy_period_estimates:
-        with _connect(DatabaseConfig.from_environment()) as connection:
+        with connect_database(DatabaseConfig.from_environment()) as connection:
             reset_count = reset_network_period_estimates(connection, "win")
         print(
             json.dumps(
@@ -335,7 +142,7 @@ def run_worker(
                 epoch_index += 1
                 metrics.epoch_duration.labels("win").observe(duration_s)
                 if epochs is None or epoch_index < epochs:
-                    wait_s = _epoch_wait_s(
+                    wait_s = epoch_wait_s(
                         time.monotonic() - started,
                         worker.minimum_epoch_period_s,
                         worker.idle_delay_s,
@@ -354,23 +161,6 @@ def run_worker(
         health.intake_enabled = False
         server.close()
     return summaries
-
-
-def _epoch_wait_s(
-    elapsed_s: float, minimum_period_s: float, idle_delay_s: float
-) -> float:
-    """Enforce a minimum epoch start-to-start period and an idle floor."""
-    return max(idle_delay_s, minimum_period_s - elapsed_s, 0)
-
-
-def _period_update_allowed(
-    epoch_number: int, epoch_duration_s: float, minimum_ingestion_interval_s: float
-) -> bool:
-    """Keep the established first-epoch and overlong-epoch period guards."""
-    return (
-        epoch_number > 1
-        and epoch_duration_s < minimum_ingestion_interval_s
-    )
 
 
 def _run_epoch(
@@ -489,7 +279,7 @@ def _run_epoch(
                 done, _ = wait(futures, timeout=1, return_when=FIRST_COMPLETED)
                 for future in done:
                     job = futures.pop(future)
-                    result = _completed_future_result(
+                    result = completed_future_result(
                         future,
                         job,
                         network_id="win",
@@ -499,7 +289,7 @@ def _run_epoch(
                     results.append(result)
                 now = time.monotonic()
                 if verbose and (now - last_report >= 1 or not futures):
-                    print(json.dumps(_progress(epoch_number, len(jobs), results), sort_keys=True), flush=True)
+                    print(json.dumps(progress(epoch_number, len(jobs), results), sort_keys=True), flush=True)
                     last_report = now
         state_updates = [
             result.state_update
@@ -523,7 +313,7 @@ def _run_epoch(
             if candidate.source_stream_id not in initial_release_ids
         ]
         state_updates_applied = 0
-        period_update_eligible = not dry_run and _period_update_allowed(
+        period_update_eligible = not dry_run and period_update_allowed(
             epoch_number,
             time.monotonic() - epoch_started,
             windy.minimum_ingestion_interval_s,
@@ -568,26 +358,6 @@ def _run_epoch(
     return summary
 
 
-def _progress(epoch: int, selected: int, results: list[object]) -> dict[str, object]:
-    outcomes = Counter(result.outcome for result in results)
-    downloaded = sum(
-        outcomes[name]
-        for name in ("downloaded", "published", "storage_error", "mqtt_error")
-    )
-    uploaded = outcomes["published"] + outcomes["mqtt_error"]
-    return {
-        "worker_progress": {
-            "epoch": epoch,
-            "position": f"{len(results)}/{selected}",
-            "completed": len(results),
-            "selected": selected,
-            "downloaded": downloaded,
-            "uploaded": uploaded,
-            "throttled": outcomes["throttled"],
-        }
-    }
-
-
 def _process_due_job(
     job: DueSourceStream,
     dry_run: bool,
@@ -598,7 +368,7 @@ def _process_due_job(
     stage_observer,
     event_observer,
 ):
-    return _process_job(
+    return process_job(
         client,
         job,
         dry_run=dry_run,
@@ -609,17 +379,6 @@ def _process_due_job(
         publisher=publisher,
         stage_observer=stage_observer,
         event_observer=event_observer,
-    )
-
-
-def _connect(config: DatabaseConfig):
-    return psycopg.connect(
-        host=config.host,
-        port=config.port,
-        dbname=config.name,
-        user=config.user,
-        password=config.read_password(),
-        connect_timeout=5,
     )
 
 

@@ -46,7 +46,7 @@ Confirm outbox enqueue, stage transition, completion, and rollback tests pass.
 This exercises selection, Windy access, decoding, concurrency, and epochs but
 does not write ingestion state, S3 objects, or MQTT messages:
 
-    uv run --env-file .env python -m ingestion.worker \
+    uv run --env-file .env python -m ingestion.windy.worker \
       --network win --countries DK --max-jobs 2 --epochs 2 --dry-run
 
 Confirm each epoch selects no more than two jobs and the command terminates
@@ -59,7 +59,7 @@ not the validation of adaptive exclusion.
 For an applied bounded check, run one DK job once, then inspect its scheduler
 state before running it again:
 
-    uv run --env-file .env python -m ingestion.worker \
+    uv run --env-file .env python -m ingestion.windy.worker \
       --network win --countries DK --max-jobs 1 --epochs 1
 
     docker compose --env-file .env exec postgres psql \
@@ -85,7 +85,7 @@ due only after both displayed guard timestamps have passed.
 
 Start the foreground worker in one terminal with a small bounded intake:
 
-    uv run --env-file .env python -m ingestion.worker \
+    uv run --env-file .env python -m ingestion.windy.worker \
       --network win --countries DK --max-jobs 1 --dry-run
 
 From another terminal run:

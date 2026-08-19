@@ -5,10 +5,12 @@ from unittest.mock import Mock
 from database.registry_queries import DueSourceStream, build_period_estimate_candidate
 from ingestion.fintraffic.fintraffic_image_access import FintrafficImageReference
 from ingestion.windy.windy_image_access import WindyImageReference
-from ingestion.windy.windy_ingestion_workflow import (
+from ingestion.shared.source_processing import (
     _available_freshness_unchanged,
     _estimated_period_band,
-    _process_job,
+    process_job,
+)
+from ingestion.windy.windy_ingestion_workflow import (
     _select_country_sample,
     _validate_countries,
 )
@@ -59,7 +61,7 @@ def test_unchanged_provider_timestamp_skips_download() -> None:
         "42", "2026-07-30T12:00:00Z", "https://images.example/a.jpg"
     )
 
-    result = _process_job(
+    result = process_job(
         client,
         job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
         dry_run=True,
@@ -98,7 +100,7 @@ def test_unchanged_freshness_does_not_create_state_update() -> None:
     client.get_current_image.return_value = WindyImageReference(
         "42", "2026-07-30T12:00:00Z", "https://images.example/a.jpg"
     )
-    result = _process_job(
+    result = process_job(
         client,
         job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
         dry_run=False,
@@ -115,7 +117,7 @@ def test_dry_run_decodes_image_without_database_update() -> None:
         "42", "new", "https://images.example/a.png"
     )
     client.download.return_value = PNG_1PX
-    result = _process_job(client, job(), dry_run=True, minimum_period_seconds=300)
+    result = process_job(client, job(), dry_run=True, minimum_period_seconds=300)
 
     assert result.outcome == "downloaded"
     assert (result.width, result.height, result.image_format) == (1, 1, "PNG")
@@ -129,7 +131,7 @@ def test_first_provider_observation_does_not_invent_a_period() -> None:
     )
     client.download.return_value = PNG_1PX
 
-    result = _process_job(
+    result = process_job(
         client,
         job(),
         dry_run=True,
@@ -192,7 +194,7 @@ def test_published_job_emits_latency_payload_derived_and_duration() -> None:
     publisher = Mock()
     publisher.publish.return_value = "webcam/T0V0"
     events = []
-    result = _process_job(
+    result = process_job(
         client,
         job(),
         dry_run=False,
@@ -233,8 +235,8 @@ def test_download_failure_leaves_processed_state_for_next_attempt() -> None:
         "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
     )
     client.download.side_effect = [WindyImageAccessError("temporary"), PNG_1PX]
-    first = _process_job(client, job(), dry_run=False, minimum_period_seconds=300)
-    second = _process_job(client, job(), dry_run=False, minimum_period_seconds=300)
+    first = process_job(client, job(), dry_run=False, minimum_period_seconds=300)
+    second = process_job(client, job(), dry_run=False, minimum_period_seconds=300)
 
     assert first.outcome == "download_error"
     assert second.outcome == "downloaded"
@@ -261,7 +263,7 @@ def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
         MqttPublicationError("ambiguous failure"),
         "webcam/T0V0",
     ]
-    first = _process_job(
+    first = process_job(
         client,
         job(),
         dry_run=False,
@@ -269,7 +271,7 @@ def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
         storage=storage,
         publisher=publisher,
     )
-    second = _process_job(
+    second = process_job(
         client,
         job(),
         dry_run=False,
@@ -302,7 +304,7 @@ def test_fintraffic_unchanged_etag_discards_image_but_returns_decision_state() -
     client.download.return_value = PNG_1PX
     client.downloaded_marker.return_value = '"same-etag"'
 
-    result = _process_job(
+    result = process_job(
         client, fintraffic_job, dry_run=False, minimum_period_seconds=300
     )
 

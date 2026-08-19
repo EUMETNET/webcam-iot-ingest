@@ -201,7 +201,7 @@ checkpoint12-ingest network limit="5":
     limit="$2"
     case "$network" in
         windy)
-            module="ingestion.worker"
+            module="ingestion.windy.worker"
             network_args=(--network win --countries DK)
             port=8113
             ;;
@@ -238,7 +238,7 @@ checkpoint13-ingest network:
     set -euo pipefail
     case "$1" in
         windy)
-            module="ingestion.worker"
+            module="ingestion.windy.worker"
             max_jobs=30000
             threads=100
             pool_size=60
@@ -424,7 +424,7 @@ _ingestion-test-foreground scope run_seconds mode="":
         WINDY_POLLING_INTERVAL_FACTOR="$polling_factor" \
         WINDY_MINIMUM_POLLING_INTERVAL_S="$polling_floor" \
         UV_CACHE_DIR=/tmp/webcam-uv-cache \
-        uv run --env-file .env python -m ingestion.worker \
+        uv run --env-file .env python -m ingestion.windy.worker \
             --network win \
             --max-jobs 30000 \
             --run-for-seconds "$2" \
@@ -672,7 +672,7 @@ ingestion-test-three-networks duration="90m":
         -e WINDY_INGESTION_REQUEST_DELAY_S=0.01 \
         -e INGESTION_MIN_EPOCH_PERIOD_S=15 -e INGESTION_IDLE_DELAY_S=0 \
         -e INITIAL_STAGGER_WINDOW_S=600 \
-        webcam-job python -m ingestion.worker --network win \
+        webcam-job python -m ingestion.windy.worker --network win \
             --max-jobs 30000 --run-for-seconds "$run_seconds" \
             --stagger-initial-polling --batch-freshness --verbose
 

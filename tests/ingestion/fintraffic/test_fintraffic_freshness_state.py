@@ -6,7 +6,7 @@ from ingestion.fintraffic.fintraffic_image_access import (
     FintrafficImageAccessError,
     FintrafficImageReference,
 )
-from ingestion.windy.windy_ingestion_workflow import _process_job
+from ingestion.shared.source_processing import process_job
 from storage.s3_storage import StoredObject
 
 
@@ -56,7 +56,7 @@ def test_equal_bulk_timestamp_stops_before_jpeg_download() -> None:
     timestamp = datetime(2026, 8, 19, 12, tzinfo=UTC)
     client = _client(timestamp, '"etag-v1"')
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=timestamp, marker='"etag-v1"'),
         dry_run=False,
@@ -73,7 +73,7 @@ def test_new_bulk_timestamp_and_same_etag_retains_download_decision_state() -> N
     current = previous + timedelta(minutes=10)
     client = _client(current, '"etag-v1"')
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=False,
@@ -97,7 +97,7 @@ def test_failure_before_etag_observation_retains_timestamp_only() -> None:
     client.download.side_effect = FintrafficImageAccessError("temporary failure")
     client.downloaded_marker.return_value = None
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=False,
@@ -119,7 +119,7 @@ def test_body_failure_retains_already_validated_etag_observation() -> None:
     client.download.side_effect = FintrafficImageAccessError("invalid body")
     client.downloaded_marker.return_value = '"etag-v2"'
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=False,
@@ -140,7 +140,7 @@ def test_new_bulk_timestamp_and_new_etag_continues_image_processing() -> None:
     current = previous + timedelta(minutes=10)
     client = _client(current, '"etag-v2"')
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=True,
@@ -168,7 +168,7 @@ def test_measured_time_reaches_notification_and_processed_state_after_publish() 
     publisher = Mock()
     publisher.publish.return_value = "webcam/T0V0"
 
-    result = _process_job(
+    result = process_job(
         client,
         _job(timestamp=previous, marker='"etag-v1"'),
         dry_run=False,

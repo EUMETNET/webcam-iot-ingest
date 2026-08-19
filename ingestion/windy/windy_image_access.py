@@ -10,13 +10,15 @@ from typing import Any, Callable, Mapping, Sequence
 
 import httpx
 
+from ingestion.shared.provider_access import ProviderImageAccessError
+
 
 WEBCAM_URL = "https://api.windy.com/webcams/api/v3/webcams/{webcam_id}"
 WEBCAMS_URL = "https://api.windy.com/webcams/api/v3/webcams"
 WINDY_WEBCAM_IDS_LIMIT = 50
 
 
-class WindyImageAccessError(RuntimeError):
+class WindyImageAccessError(ProviderImageAccessError):
     """Windy metadata or image content could not be retrieved safely."""
 
     def __init__(self, message: str, *, throttled: bool = False) -> None:
