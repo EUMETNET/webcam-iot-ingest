@@ -783,3 +783,19 @@ GET, whose ETag must repeat the HEAD value.
 the provider timestamp used for scheduling, period learning, latency, and
 notification metadata. Its absence or invalidity neither determines freshness
 nor rejects an otherwise ETag-consistent image.
+
+### 2026-08-19 — Symmetric provider workers and shared ingestion machinery
+
+**Affected component:** ingestion code ownership and runtime entry points.
+
+Provider-independent source-job processing and continuous-worker machinery no
+longer live in Windy-owned or top-level ingestion modules. Common processing,
+provider access contracts, scheduling support, connection pooling, rate
+gating, deterministic startup staggering, progress and unexpected-error
+handling, and worker metrics now live under `ingestion/shared/`.
+
+Windy, Fintraffic, and Skaping expose symmetric provider-owned worker entry
+points. Compose and current validation commands invoke those entry points
+directly. This is a structural refactor: provider freshness rules, epoch-end
+state batching, period learning, publication behavior, and metric definitions
+remain unchanged.

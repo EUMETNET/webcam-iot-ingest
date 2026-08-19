@@ -6,7 +6,7 @@ from database.registry_queries import (
     build_period_estimate_candidate,
     use_direct_period_replacement,
 )
-from ingestion.worker import _period_update_allowed
+from ingestion.shared.worker_support import period_update_allowed
 
 
 def job(
@@ -114,6 +114,6 @@ def test_reset_sequence_learns_before_replacement_can_run() -> None:
     assert epoch_one is not None and epoch_one.update_method == "initial"
     assert epoch_two is not None and epoch_two.update_method == "initial"
     assert epoch_two.estimated_source_stream_period == 300
-    assert not _period_update_allowed(1, 10, 300)
-    assert _period_update_allowed(2, 10, 300)
-    assert not _period_update_allowed(2, 300, 300)
+    assert not period_update_allowed(1, 10, 300)
+    assert period_update_allowed(2, 10, 300)
+    assert not period_update_allowed(2, 300, 300)

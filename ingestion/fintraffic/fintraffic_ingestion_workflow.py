@@ -21,9 +21,9 @@ from config.deployment_config import (
 from database.registry_queries import apply_ingestion_state_updates, get_due_source_streams
 from ingestion.fintraffic.fintraffic_image_access import FintrafficImageClient
 from ingestion.notification.mqtt_publisher import MqttPublisher
-from ingestion.windy.windy_ingestion_workflow import (
-    WindyIngestionJobResult,
-    _process_job,
+from ingestion.shared.source_processing import (
+    IngestionJobResult,
+    process_job,
 )
 from storage.s3_storage import S3Storage
 
@@ -35,7 +35,7 @@ class FintrafficIngestionResult:
     selected: int
     freshness_presets: int
     outcomes: dict[str, int]
-    jobs: tuple[WindyIngestionJobResult, ...]
+    jobs: tuple[IngestionJobResult, ...]
 
 
 def run_ingestion(
@@ -79,7 +79,7 @@ def run_ingestion(
             limit=selected_limit,
         )
         results = tuple(
-            _process_job(
+            process_job(
                 client,
                 job,
                 dry_run=dry_run,

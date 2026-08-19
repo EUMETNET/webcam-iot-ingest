@@ -5,19 +5,21 @@ import pytest
 from psycopg.pq import TransactionStatus
 
 from config.deployment_config import WindyIngestionConfig, WorkerConfig
-from ingestion.worker import (
-    DEFAULT_INITIAL_STAGGER_SEED,
+from ingestion.shared.worker_support import (
     DatabaseConnectionPool,
     InitialPollingStagger,
-    _completed_future_result,
-    _period_update_allowed,
-    _epoch_wait_s,
     _initial_phase_s,
-    _progress,
+    completed_future_result as _completed_future_result,
+    epoch_wait_s as _epoch_wait_s,
+    period_update_allowed as _period_update_allowed,
+    progress as _progress,
+)
+from ingestion.windy.worker import (
+    DEFAULT_INITIAL_STAGGER_SEED,
     _run_epoch,
     run_worker,
 )
-from ingestion.worker_metrics import WorkerMetrics
+from ingestion.shared.worker_metrics import WorkerMetrics
 from ingestion.windy.windy_image_access import WindyBatchFreshnessResult
 from tests.ingestion.windy.test_windy_ingestion_workflow import job
 
@@ -27,10 +29,10 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
     jobs[1] = jobs[1].__class__(**{**jobs[1].__dict__, "source_stream_id": "win43"})
     connection = Mock(closed=False)
     connection.info.transaction_status = TransactionStatus.IDLE
-    monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
-    monkeypatch.setattr("ingestion.worker.get_due_source_streams", lambda *a, **k: jobs)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", lambda config: connection)
+    monkeypatch.setattr("ingestion.windy.worker.get_due_source_streams", lambda *a, **k: jobs)
     result = Mock(outcome="downloaded")
-    monkeypatch.setattr("ingestion.worker._process_due_job", lambda *a, **k: result)
+    monkeypatch.setattr("ingestion.windy.worker._process_due_job", lambda *a, **k: result)
     worker = WorkerConfig(2, 2, 0, 0, 1, "127.0.0.1", 0, 10)
     windy = WindyIngestionConfig.from_environment()
 
@@ -52,10 +54,10 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
 def test_stopped_epoch_does_not_start_jobs(monkeypatch) -> None:
     connection = Mock(closed=False)
     connection.info.transaction_status = TransactionStatus.IDLE
-    monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
-    monkeypatch.setattr("ingestion.worker.get_due_source_streams", lambda *a, **k: [job()])
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", lambda config: connection)
+    monkeypatch.setattr("ingestion.windy.worker.get_due_source_streams", lambda *a, **k: [job()])
     process = Mock()
-    monkeypatch.setattr("ingestion.worker._process_due_job", process)
+    monkeypatch.setattr("ingestion.windy.worker._process_due_job", process)
     stop = Event()
     stop.set()
 
@@ -73,13 +75,13 @@ def test_epoch_can_prime_batched_freshness_before_jobs(monkeypatch) -> None:
     selected = job()
     connection = Mock(closed=False)
     connection.info.transaction_status = TransactionStatus.IDLE
-    monkeypatch.setattr("ingestion.worker._connect", lambda config: connection)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", lambda config: connection)
     monkeypatch.setattr(
-        "ingestion.worker.get_due_source_streams", lambda *a, **k: [selected]
+        "ingestion.windy.worker.get_due_source_streams", lambda *a, **k: [selected]
     )
     result = Mock(outcome="unchanged", period_estimate_candidate=None)
     monkeypatch.setattr(
-        "ingestion.worker._process_due_job", lambda *a, **k: result
+        "ingestion.windy.worker._process_due_job", lambda *a, **k: result
     )
     refresh = Mock(
         return_value=WindyBatchFreshnessResult(
@@ -92,7 +94,7 @@ def test_epoch_can_prime_batched_freshness_before_jobs(monkeypatch) -> None:
         )
     )
     monkeypatch.setattr(
-        "ingestion.worker.WindyImageClient.refresh", refresh
+        "ingestion.windy.worker.WindyImageClient.refresh", refresh
     )
 
     summary = _run_epoch(
@@ -156,7 +158,7 @@ def test_pool_rolls_back_non_idle_connection(monkeypatch, initial_status) -> Non
 
     connection.rollback.side_effect = rollback
     connector = Mock(return_value=connection)
-    monkeypatch.setattr("ingestion.worker._connect", connector)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", connector)
     pool = DatabaseConnectionPool(Mock(), 1)
 
     with pool.connection():
@@ -173,7 +175,7 @@ def test_pool_returns_idle_connection_without_rollback(monkeypatch) -> None:
     connection = Mock(closed=False)
     connection.info.transaction_status = TransactionStatus.IDLE
     connector = Mock(return_value=connection)
-    monkeypatch.setattr("ingestion.worker._connect", connector)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", connector)
     pool = DatabaseConnectionPool(Mock(), 1)
 
     with pool.connection():
@@ -192,7 +194,7 @@ def test_pool_replaces_connection_closed_by_borrower(monkeypatch) -> None:
     replacement = Mock(closed=False)
     replacement.info.transaction_status = TransactionStatus.IDLE
     connector = Mock(side_effect=[closed, replacement])
-    monkeypatch.setattr("ingestion.worker._connect", connector)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", connector)
     pool = DatabaseConnectionPool(Mock(), 1)
 
     with pool.connection():
@@ -211,7 +213,7 @@ def test_pool_discards_connection_when_rollback_fails(monkeypatch) -> None:
     replacement = Mock(closed=False)
     replacement.info.transaction_status = TransactionStatus.IDLE
     connector = Mock(side_effect=[broken, replacement])
-    monkeypatch.setattr("ingestion.worker._connect", connector)
+    monkeypatch.setattr("ingestion.shared.worker_support.connect_database", connector)
     pool = DatabaseConnectionPool(Mock(), 1)
 
     with pool.connection() as connection:
@@ -231,7 +233,7 @@ def test_pool_observes_discard_and_replacement(monkeypatch) -> None:
     replacement = Mock(closed=False)
     replacement.info.transaction_status = TransactionStatus.IDLE
     monkeypatch.setattr(
-        "ingestion.worker._connect", Mock(side_effect=[broken, replacement])
+        "ingestion.shared.worker_support.connect_database", Mock(side_effect=[broken, replacement])
     )
     events = []
     pool = DatabaseConnectionPool(

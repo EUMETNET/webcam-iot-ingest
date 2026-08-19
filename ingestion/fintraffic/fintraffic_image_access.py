@@ -12,10 +12,10 @@ from urllib.parse import quote
 
 import httpx
 
-from ingestion.windy.windy_image_access import WindyImageAccessError
+from ingestion.shared.provider_access import ProviderImageAccessError
 
 
-class FintrafficImageAccessError(WindyImageAccessError):
+class FintrafficImageAccessError(ProviderImageAccessError):
     """Fintraffic metadata or image content could not be retrieved safely."""
 
 @dataclass(frozen=True)

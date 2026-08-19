@@ -338,6 +338,13 @@ the physical capture time. The sanitized resolved target path is included in
 MQTT source-image provider metadata without treating the timestamp-like path
 component as authoritative.
 
+The three symmetric worker entry points are `ingestion.windy.worker`,
+`ingestion.fintraffic.worker`, and `ingestion.skaping.worker`. Their common
+per-stream processing, scheduling support, connection pooling, rate gating,
+startup staggering, error accounting, and worker metrics live under
+`ingestion.shared`; provider-neutral modules do not depend on a provider
+package.
+
 All networks use the provider timestamp for period learning, adaptive polling,
 latency measurement, and notification metadata when it is available.
 Freshness comparison uses the timestamp, opaque marker, or both, according to

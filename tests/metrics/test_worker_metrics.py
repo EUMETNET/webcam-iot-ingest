@@ -3,7 +3,7 @@ import urllib.request
 import pytest
 from prometheus_client import generate_latest
 
-from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
+from ingestion.shared.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
 from database.registry_queries import PeriodEstimateCandidate
 from datetime import datetime, timezone
 

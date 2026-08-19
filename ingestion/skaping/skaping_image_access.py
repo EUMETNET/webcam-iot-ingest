@@ -11,10 +11,10 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from ingestion.windy.windy_image_access import WindyImageAccessError
+from ingestion.shared.provider_access import ProviderImageAccessError
 
 
-class SkapingImageAccessError(WindyImageAccessError):
+class SkapingImageAccessError(ProviderImageAccessError):
     """Skaping freshness metadata or image content is unusable."""
 
 
