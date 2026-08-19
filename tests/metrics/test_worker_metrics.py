@@ -4,7 +4,7 @@ import pytest
 from prometheus_client import generate_latest
 
 from ingestion.worker_metrics import HealthServer, WorkerHealth, WorkerMetrics
-from database.registry_queries import EmaUpdateCandidate
+from database.registry_queries import PeriodEstimateCandidate
 from datetime import datetime, timezone
 
 
@@ -15,13 +15,13 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     )
     metrics.observe_period_estimate_updates(
         [
-            EmaUpdateCandidate(
+            PeriodEstimateCandidate(
                 "stream-1",
                 datetime(2026, 8, 3, tzinfo=timezone.utc),
                 300,
                 "initial",
             ),
-            EmaUpdateCandidate(
+            PeriodEstimateCandidate(
                 "stream-2",
                 datetime(2026, 8, 3, tzinfo=timezone.utc),
                 600,

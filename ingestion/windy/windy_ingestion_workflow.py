@@ -23,10 +23,10 @@ from config.deployment_config import (
 )
 from database.registry_queries import (
     DueSourceStream,
-    EmaUpdateCandidate,
+    PeriodEstimateCandidate,
     IngestionStateUpdate,
     apply_ingestion_state_updates,
-    build_ema_update_candidate,
+    build_period_estimate_candidate,
     get_due_source_streams,
 )
 from ingestion.notification.mqtt_publisher import MqttPublicationError, MqttPublisher
@@ -78,7 +78,7 @@ class WindyIngestionJobResult:
     image_id: str | None = None
     object_key: str | None = None
     mqtt_topic: str | None = None
-    ema_update_candidate: EmaUpdateCandidate | None = None
+    period_estimate_candidate: PeriodEstimateCandidate | None = None
     state_update: IngestionStateUpdate | None = None
 
 
@@ -152,8 +152,7 @@ def run_ingestion(
                 client,
                 job,
                 dry_run=dry_run,
-                ema_alpha=config.ema_alpha,
-                initial_ema_seconds=config.initial_ema_seconds,
+                minimum_period_seconds=config.minimum_ingestion_interval_s,
                 transformation=transformation,
                 storage=storage,
                 publisher=publisher,
@@ -164,7 +163,7 @@ def run_ingestion(
             apply_ingestion_state_updates(
                 connection,
                 [result.state_update for result in results if result.state_update],
-                apply_ema=True,
+                apply_period_estimate=True,
             )
             connection.commit()
     outcomes = dict(sorted(Counter(item.outcome for item in results).items()))
@@ -178,9 +177,7 @@ def _process_job(
     job: DueSourceStream,
     *,
     dry_run: bool,
-    ema_alpha: float,
-    initial_ema_seconds: float = 300.0,
-    running_minimum_floor_seconds: float | None = None,
+    minimum_period_seconds: float,
     direct_replacement_modulus: int = 250,
     transformation: TransformationConfig | None = None,
     storage: S3Storage | None = None,
@@ -197,13 +194,13 @@ def _process_job(
     provider_update_timestamp: datetime | None = None
     provider_to_download_s: float | None = None
     observed_marker: str | None = None
-    ema_candidate: EmaUpdateCandidate | None = None
+    period_candidate: PeriodEstimateCandidate | None = None
     state_update: IngestionStateUpdate | None = None
     estimated_period_band = _estimated_period_band(job.estimated_source_stream_period)
 
     def finish(outcome: JobOutcome, **values: Any) -> WindyIngestionJobResult:
-        if "ema_update_candidate" not in values:
-            values["ema_update_candidate"] = ema_candidate
+        if "period_estimate_candidate" not in values:
+            values["period_estimate_candidate"] = period_candidate
         if "state_update" not in values:
             values["state_update"] = state_update
         finished_at = datetime.now(UTC)
@@ -254,10 +251,13 @@ def _process_job(
         )
     except WindyImageAccessError as error:
         return finish("throttled" if error.throttled else "provider_error")
+    reference_marker = getattr(reference, "marker", None)
     provider_update_timestamp = getattr(reference, "provider_update_timestamp", None)
     if provider_update_timestamp is None and job.network_id == "win":
-        provider_update_timestamp = _parse_provider_timestamp(reference.marker)
-    observed_marker = reference.marker if job.network_id in {"ska", "fin"} else None
+        provider_update_timestamp = _parse_provider_timestamp(reference_marker)
+    # Fintraffic bulk freshness exposes only measuredTime. Its opaque image
+    # marker is the ETag learned later from the full JPEG GET.
+    observed_marker = reference_marker if job.network_id == "ska" else None
     if _available_freshness_unchanged(
         job,
         marker=observed_marker,
@@ -265,14 +265,12 @@ def _process_job(
     ):
         if observed_marker is not None and event_observer is not None:
             event_observer("marker_unchanged_skip", {})
-        return finish("unchanged", provider_marker=reference.marker)
+        return finish("unchanged", provider_marker=reference_marker)
     download_timestamp = datetime.now(UTC)
-    ema_candidate = build_ema_update_candidate(
+    period_candidate = build_period_estimate_candidate(
         job,
         provider_update_timestamp=provider_update_timestamp,
-        ema_alpha=ema_alpha,
-        initial_ema_seconds=initial_ema_seconds,
-        running_minimum_floor_seconds=running_minimum_floor_seconds,
+        minimum_period_seconds=minimum_period_seconds,
         direct_replacement_modulus=direct_replacement_modulus,
     )
     state_update = IngestionStateUpdate(
@@ -280,14 +278,26 @@ def _process_job(
         provider_update_timestamp=provider_update_timestamp,
         provider_image_marker=observed_marker,
         download_timestamp=download_timestamp,
-        ema_update_candidate=ema_candidate,
+        period_estimate_candidate=period_candidate,
     )
     try:
         content = client.download(reference.image_url)
     except WindyImageAccessError as error:
+        downloaded_marker = getattr(client, "downloaded_marker", lambda _url: None)(
+            reference.image_url
+        )
+        if downloaded_marker is not None:
+            observed_marker = downloaded_marker
+            state_update = IngestionStateUpdate(
+                source_stream_id=job.source_stream_id,
+                provider_update_timestamp=provider_update_timestamp,
+                provider_image_marker=observed_marker,
+                download_timestamp=download_timestamp,
+                period_estimate_candidate=period_candidate,
+            )
         return finish(
             "throttled" if error.throttled else "download_error",
-            provider_marker=reference.marker,
+            provider_marker=observed_marker or reference_marker,
         )
     downloaded_marker = getattr(client, "downloaded_marker", lambda _url: None)(
         reference.image_url
@@ -299,7 +309,7 @@ def _process_job(
             provider_update_timestamp=provider_update_timestamp,
             provider_image_marker=observed_marker,
             download_timestamp=download_timestamp,
-            ema_update_candidate=ema_candidate,
+            period_estimate_candidate=period_candidate,
         )
         if (
             job.network_id == "fin"
@@ -308,6 +318,7 @@ def _process_job(
             if event_observer is not None:
                 event_observer("marker_unchanged_skip", {})
             return finish("unchanged", provider_marker=downloaded_marker)
+    result_marker = observed_marker if observed_marker is not None else reference_marker
     if event_observer is not None:
         event_observer(
             "source_download_bytes",
@@ -318,7 +329,7 @@ def _process_job(
     except InvalidSourceImageError:
         return finish(
             "invalid_image",
-            provider_marker=reference.marker,
+            provider_marker=result_marker,
             size_bytes=len(content),
         )
     if event_observer is not None:
@@ -393,7 +404,7 @@ def _process_job(
                 "transformation",
                 {"version": selected_transformation.version, "outcome": "failure"},
             )
-        return finish("transformation_error", provider_marker=reference.marker)
+        return finish("transformation_error", provider_marker=result_marker)
     if stage_observer is not None:
         stage_observer(
             "transformation", "success", time.monotonic() - transformation_started
@@ -434,13 +445,13 @@ def _process_job(
         try:
             stored = storage.upload(prepared.object_key, prepared.derived.content)
         except S3StorageError:
-            return finish("storage_error", provider_marker=reference.marker)
+            return finish("storage_error", provider_marker=result_marker)
         try:
             topic = publisher.publish(
                 selected_transformation.version, prepared.notification
             )
         except MqttPublicationError:
-            return finish("mqtt_error", provider_marker=reference.marker)
+            return finish("mqtt_error", provider_marker=result_marker)
         publication = PublicationResult(
             prepared.derived,
             prepared.derived_stream_id,
@@ -455,18 +466,18 @@ def _process_job(
             provider_update_timestamp=provider_update_timestamp,
             provider_image_marker=observed_marker,
             download_timestamp=download_timestamp,
-            ema_update_candidate=ema_candidate,
+            period_estimate_candidate=period_candidate,
             processed_timestamp=download_timestamp,
         )
     return finish(
         "published" if storage is not None else "downloaded",
-        provider_marker=reference.marker,
+        provider_marker=result_marker,
         size_bytes=source.size_bytes,
         width=source.width,
         height=source.height,
         image_format=source.format,
         color_mode=source.color_mode,
-        ema_update_candidate=ema_candidate,
+        period_estimate_candidate=period_candidate,
         state_update=state_update,
         derived_size_bytes=publication.derived.size_bytes,
         derived_width=publication.derived.width,
@@ -484,6 +495,11 @@ def _available_freshness_unchanged(
     marker: str | None,
     provider_timestamp: datetime | None,
 ) -> bool:
+    # Skaping's resolved-object ETag is authoritative for content freshness.
+    # Last-Modified is optional timing metadata and must not force a download
+    # when that ETag is unchanged.
+    if job.network_id == "ska" and marker is not None:
+        return marker == job.last_observed_image_marker
     comparisons: list[bool] = []
     if marker is not None:
         comparisons.append(marker == job.last_observed_image_marker)
@@ -609,7 +625,7 @@ def main() -> None:
     )
     payload = asdict(result)
     for job_payload in payload["jobs"]:
-        job_payload.pop("ema_update_candidate", None)
+        job_payload.pop("period_estimate_candidate", None)
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 

@@ -80,7 +80,7 @@ def run_ingestion(
                 client,
                 job,
                 dry_run=dry_run,
-                ema_alpha=config.ema_alpha,
+                minimum_period_seconds=config.minimum_ingestion_interval_s,
                 transformation=TransformationConfig.from_environment(),
                 storage=storage,
                 publisher=publisher,
@@ -91,7 +91,7 @@ def run_ingestion(
             apply_ingestion_state_updates(
                 connection,
                 [result.state_update for result in results if result.state_update],
-                apply_ema=True,
+                apply_period_estimate=True,
             )
             connection.commit()
     outcomes = dict(sorted(Counter(item.outcome for item in results).items()))

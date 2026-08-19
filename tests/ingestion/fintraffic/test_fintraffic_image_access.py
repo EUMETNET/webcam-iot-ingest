@@ -40,7 +40,7 @@ def _client(handler, **kwargs):
     )
 
 
-def test_bulk_snapshot_exposes_measured_time_and_skips_null_marker():
+def test_bulk_snapshot_exposes_measured_time_as_timestamp_not_marker():
     def handler(request):
         assert request.headers["Digitraffic-User"] == "test-application"
         return httpx.Response(200, json=_payload())
@@ -48,7 +48,7 @@ def test_bulk_snapshot_exposes_measured_time_and_skips_null_marker():
     client = _client(handler)
     assert client.refresh() == 1
     reference = client.get_current_image("C0150301", "full_jpeg")
-    assert reference.marker is None
+    assert not hasattr(reference, "marker")
     assert reference.provider_update_timestamp == datetime(
         2026, 7, 23, 10, 5, tzinfo=UTC
     )
@@ -99,6 +99,56 @@ def test_download_rejects_metadata_image_race():
     client.refresh()
     with pytest.raises(FintrafficImageAccessError):
         client.download("https://images.test/C0150301.jpg")
+
+
+def test_download_requires_etag_even_when_last_modified_is_coherent():
+    def handler(request):
+        if request.url.path.endswith("/data"):
+            return httpx.Response(200, json=_payload())
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "image/jpeg",
+                "last-modified": format_datetime(
+                    datetime(2026, 7, 23, 10, 5, tzinfo=UTC), usegmt=True
+                ),
+            },
+            content=b"jpeg",
+        )
+
+    client = _client(handler)
+    client.refresh()
+    with pytest.raises(FintrafficImageAccessError) as raised:
+        client.download("https://images.test/C0150301.jpg")
+    assert isinstance(raised.value.__cause__, FintrafficImageAccessError)
+    assert "no ETag" in str(raised.value.__cause__)
+    assert client.downloaded_marker("https://images.test/C0150301.jpg") is None
+
+
+def test_validated_etag_remains_observable_when_body_read_fails():
+    def handler(request):
+        if request.url.path.endswith("/data"):
+            return httpx.Response(200, json=_payload())
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "image/jpeg",
+                "last-modified": format_datetime(
+                    datetime(2026, 7, 23, 10, 5, tzinfo=UTC), usegmt=True
+                ),
+                "etag": '"fin-image-v2"',
+            },
+            content=b"x" * 1001,
+        )
+
+    client = _client(handler)
+    client.refresh()
+    with pytest.raises(FintrafficImageAccessError):
+        client.download("https://images.test/C0150301.jpg")
+    assert (
+        client.downloaded_marker("https://images.test/C0150301.jpg")
+        == '"fin-image-v2"'
+    )
 
 
 def test_zero_retries_means_one_metadata_and_one_image_attempt():

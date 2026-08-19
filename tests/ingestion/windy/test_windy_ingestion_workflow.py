@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from unittest.mock import Mock
 
-from database.registry_queries import DueSourceStream, build_ema_update_candidate
+from database.registry_queries import DueSourceStream, build_period_estimate_candidate
 from ingestion.fintraffic.fintraffic_image_access import FintrafficImageReference
 from ingestion.windy.windy_image_access import WindyImageReference
 from ingestion.windy.windy_ingestion_workflow import (
@@ -63,7 +63,7 @@ def test_unchanged_provider_timestamp_skips_download() -> None:
         client,
         job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
         dry_run=True,
-        ema_alpha=0.2,
+        minimum_period_seconds=300,
     )
 
     assert result.outcome == "unchanged"
@@ -102,7 +102,7 @@ def test_unchanged_freshness_does_not_create_state_update() -> None:
         client,
         job(provider_timestamp=datetime(2026, 7, 30, 12, tzinfo=timezone.utc)),
         dry_run=False,
-        ema_alpha=0.2,
+        minimum_period_seconds=300,
     )
 
     assert result.outcome == "unchanged"
@@ -115,14 +115,14 @@ def test_dry_run_decodes_image_without_database_update() -> None:
         "42", "new", "https://images.example/a.png"
     )
     client.download.return_value = PNG_1PX
-    result = _process_job(client, job(), dry_run=True, ema_alpha=0.2)
+    result = _process_job(client, job(), dry_run=True, minimum_period_seconds=300)
 
     assert result.outcome == "downloaded"
     assert (result.width, result.height, result.image_format) == (1, 1, "PNG")
     assert result.state_update is not None
 
 
-def test_windy_initial_ema_is_configurable() -> None:
+def test_first_provider_observation_does_not_invent_a_period() -> None:
     client = Mock()
     client.get_current_image.return_value = WindyImageReference(
         "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
@@ -133,45 +133,39 @@ def test_windy_initial_ema_is_configurable() -> None:
         client,
         job(),
         dry_run=True,
-        ema_alpha=0.2,
-        initial_ema_seconds=120,
+        minimum_period_seconds=300,
     )
 
-    assert result.ema_update_candidate is not None
-    assert result.ema_update_candidate.estimated_source_stream_period == 120
+    assert result.period_estimate_candidate is None
 
 
 def test_bounded_minimum_period_starts_null_and_uses_provider_gaps() -> None:
     previous = datetime(2026, 7, 31, 12, tzinfo=timezone.utc)
-    first = build_ema_update_candidate(
+    first = build_period_estimate_candidate(
         job(),
         provider_update_timestamp=previous,
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
     )
     assert first is None
 
     without_estimate = job(provider_timestamp=previous)
-    learned = build_ema_update_candidate(
+    learned = build_period_estimate_candidate(
         without_estimate,
         provider_update_timestamp=previous + timedelta(seconds=620),
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
     )
     assert learned is not None and learned.estimated_source_stream_period == 620
 
     existing = replace(without_estimate, estimated_source_stream_period=600)
-    long_gap = build_ema_update_candidate(
+    long_gap = build_period_estimate_candidate(
         existing,
         provider_update_timestamp=previous + timedelta(seconds=1200),
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
     )
-    short_gap = build_ema_update_candidate(
+    short_gap = build_period_estimate_candidate(
         existing,
         provider_update_timestamp=previous + timedelta(seconds=100),
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
     )
     assert long_gap is not None and long_gap.estimated_source_stream_period == 600
     assert short_gap is not None and short_gap.estimated_source_stream_period == 300
@@ -202,7 +196,7 @@ def test_published_job_emits_latency_payload_derived_and_duration() -> None:
         client,
         job(),
         dry_run=False,
-        ema_alpha=0.2,
+        minimum_period_seconds=300,
         storage=storage,
         publisher=publisher,
         event_observer=lambda event, values: events.append((event, values)),
@@ -239,8 +233,8 @@ def test_download_failure_leaves_processed_state_for_next_attempt() -> None:
         "42", "2026-07-30T12:00:00Z", "https://images.example/a.png"
     )
     client.download.side_effect = [WindyImageAccessError("temporary"), PNG_1PX]
-    first = _process_job(client, job(), dry_run=False, ema_alpha=0.2)
-    second = _process_job(client, job(), dry_run=False, ema_alpha=0.2)
+    first = _process_job(client, job(), dry_run=False, minimum_period_seconds=300)
+    second = _process_job(client, job(), dry_run=False, minimum_period_seconds=300)
 
     assert first.outcome == "download_error"
     assert second.outcome == "downloaded"
@@ -271,7 +265,7 @@ def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
         client,
         job(),
         dry_run=False,
-        ema_alpha=0.2,
+        minimum_period_seconds=300,
         storage=storage,
         publisher=publisher,
     )
@@ -279,7 +273,7 @@ def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
         client,
         job(),
         dry_run=False,
-        ema_alpha=0.2,
+        minimum_period_seconds=300,
         storage=storage,
         publisher=publisher,
     )
@@ -303,13 +297,13 @@ def test_fintraffic_unchanged_etag_discards_image_but_returns_decision_state() -
     )
     client = Mock()
     client.get_current_image.return_value = FintrafficImageReference(
-        "42", None, "https://images.example/a.png", timestamp
+        "42", "https://images.example/a.png", timestamp
     )
     client.download.return_value = PNG_1PX
     client.downloaded_marker.return_value = '"same-etag"'
 
     result = _process_job(
-        client, fintraffic_job, dry_run=False, ema_alpha=0.2
+        client, fintraffic_job, dry_run=False, minimum_period_seconds=300
     )
 
     assert result.outcome == "unchanged"
@@ -317,7 +311,7 @@ def test_fintraffic_unchanged_etag_discards_image_but_returns_decision_state() -
     assert result.state_update.provider_update_timestamp == timestamp
     assert result.state_update.provider_image_marker == '"same-etag"'
     assert result.state_update.processed_timestamp is None
-    assert result.ema_update_candidate is not None
+    assert result.period_estimate_candidate is not None
 
 
 def test_country_selection_normalizes_and_deduplicates() -> None:

@@ -13,7 +13,7 @@ from database.registry_queries import (
     RegistryCollisionError,
     apply_discovery_update,
     apply_ingestion_state_updates,
-    build_ema_update_candidate,
+    build_period_estimate_candidate,
     get_due_source_streams,
     get_network_registry,
     set_source_stream_status,
@@ -213,7 +213,7 @@ def test_due_stream_selection_filters_status_network_and_recent_downloads(
                 processed_timestamp=now - timedelta(minutes=2),
             )
         ],
-        apply_ema=False,
+        apply_period_estimate=False,
     )
 
     due = get_due_source_streams(
@@ -372,8 +372,10 @@ def test_ingestion_state_updates_respect_workflow_stages(
     current = get_due_source_streams(
         connection, "win", timedelta(0), now=first_timestamp
     )[0]
-    first_ema = build_ema_update_candidate(
-        current, provider_update_timestamp=first_timestamp, ema_alpha=0.25
+    first_period = build_period_estimate_candidate(
+        current,
+        provider_update_timestamp=first_timestamp,
+        minimum_period_seconds=300,
     )
     apply_ingestion_state_updates(
         connection,
@@ -383,11 +385,11 @@ def test_ingestion_state_updates_respect_workflow_stages(
                 first_timestamp,
                 "first-good-marker",
                 first_timestamp,
-                first_ema,
+                first_period,
                 first_timestamp,
             )
         ],
-        apply_ema=True,
+        apply_period_estimate=True,
     )
     second_timestamp = first_timestamp + timedelta(seconds=500)
     due_job = get_due_source_streams(
@@ -397,8 +399,10 @@ def test_ingestion_state_updates_respect_workflow_stages(
         polling_interval_factor=0,
         now=second_timestamp,
     )[0]
-    second_ema = build_ema_update_candidate(
-        due_job, provider_update_timestamp=second_timestamp, ema_alpha=0.25
+    second_period = build_period_estimate_candidate(
+        due_job,
+        provider_update_timestamp=second_timestamp,
+        minimum_period_seconds=300,
     )
     apply_ingestion_state_updates(
         connection,
@@ -408,52 +412,66 @@ def test_ingestion_state_updates_respect_workflow_stages(
                 second_timestamp,
                 "second-good-marker",
                 second_timestamp,
-                second_ema,
+                second_period,
                 second_timestamp,
             )
         ],
-        apply_ema=True,
+        apply_period_estimate=True,
     )
-    assert first_ema is not None
-    assert first_ema.estimated_source_stream_period == 300.0
-    assert second_ema is not None
-    assert second_ema.estimated_source_stream_period == 350.0
+    assert first_period is None
+    assert second_period is not None
+    assert second_period.estimated_source_stream_period == 500.0
 
     stored = get_network_registry(connection, "win").source_streams[stream_id]
     assert stored["last_observed_image_marker"] == "second-good-marker"
     assert stored["last_download_timestamp"] == second_timestamp
     assert stored["last_observed_provider_timestamp"] == second_timestamp
     assert stored["last_processed_timestamp"] == second_timestamp
-    assert stored["estimated_source_stream_period"] == 350.0
+    assert stored["estimated_source_stream_period"] == 500.0
 
 
-def test_deferred_ema_is_applied_conditionally(connection, identifiers) -> None:
+def test_deferred_period_estimate_is_applied_conditionally(connection, identifiers) -> None:
     site_id, stream_id, _ = identifiers
     timestamp = datetime(2026, 7, 21, 13, 0, tzinfo=timezone.utc)
     apply_discovery_update(
         connection, "win", [site(site_id)], [stream(stream_id, site_id)]
     )
 
-    job = get_due_source_streams(connection, "win", timedelta(0), now=timestamp)[0]
-    candidate = build_ema_update_candidate(
-        job, provider_update_timestamp=timestamp, ema_alpha=0.2
+    first_update = IngestionStateUpdate(
+        stream_id, timestamp, "first-marker", timestamp
+    )
+    apply_ingestion_state_updates(
+        connection, [first_update], apply_period_estimate=True
+    )
+    next_timestamp = timestamp + timedelta(seconds=450)
+    job = get_due_source_streams(
+        connection,
+        "win",
+        timedelta(0),
+        polling_interval_factor=0,
+        now=next_timestamp,
+    )[0]
+    candidate = build_period_estimate_candidate(
+        job,
+        provider_update_timestamp=next_timestamp,
+        minimum_period_seconds=300,
     )
     assert candidate is not None
     update = IngestionStateUpdate(
-        stream_id, timestamp, "marker", timestamp, candidate
+        stream_id, next_timestamp, "marker", next_timestamp, candidate
     )
     assert apply_ingestion_state_updates(
-        connection, [update], apply_ema=False
+        connection, [update], apply_period_estimate=False
     ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
-    assert stored["last_download_timestamp"] == timestamp
+    assert stored["last_download_timestamp"] == next_timestamp
     assert stored["estimated_source_stream_period"] is None
 
     assert apply_ingestion_state_updates(
-        connection, [update], apply_ema=True
+        connection, [update], apply_period_estimate=True
     ) == 1
     stored = get_network_registry(connection, "win").source_streams[stream_id]
-    assert stored["estimated_source_stream_period"] == 300.0
+    assert stored["estimated_source_stream_period"] == 450.0
 
 
 def test_unselected_freshness_snapshot_is_not_persisted(

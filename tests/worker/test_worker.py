@@ -10,7 +10,7 @@ from ingestion.worker import (
     DatabaseConnectionPool,
     InitialPollingStagger,
     _completed_future_result,
-    _ema_update_allowed,
+    _period_update_allowed,
     _epoch_wait_s,
     _initial_phase_s,
     _progress,
@@ -41,9 +41,9 @@ def test_epoch_respects_limit_and_uses_bounded_pool(monkeypatch) -> None:
     assert summary == {
         "selected": 2,
         "outcomes": {"downloaded": 2},
-        "ema_candidates": 0,
+        "period_candidates": 0,
         "state_updates_applied": 0,
-        "ema_updates_applied": 0,
+        "period_updates_applied": 0,
         "direct_period_replacements_applied": 0,
     }
     connection.close.assert_called_once()
@@ -77,7 +77,7 @@ def test_epoch_can_prime_batched_freshness_before_jobs(monkeypatch) -> None:
     monkeypatch.setattr(
         "ingestion.worker.get_due_source_streams", lambda *a, **k: [selected]
     )
-    result = Mock(outcome="unchanged", ema_update_candidate=None)
+    result = Mock(outcome="unchanged", period_estimate_candidate=None)
     monkeypatch.setattr(
         "ingestion.worker._process_due_job", lambda *a, **k: result
     )
@@ -273,11 +273,11 @@ def test_epoch_wait_enforces_period_and_idle_floor() -> None:
     assert _epoch_wait_s(20, 15, 5) == 5
 
 
-def test_ema_update_keeps_first_epoch_and_overlong_epoch_guards() -> None:
-    assert not _ema_update_allowed(1, 10, 300)
-    assert _ema_update_allowed(2, 299.999, 300)
-    assert not _ema_update_allowed(2, 300, 300)
-    assert not _ema_update_allowed(9, 301, 300)
+def test_period_update_keeps_first_epoch_and_overlong_epoch_guards() -> None:
+    assert not _period_update_allowed(1, 10, 300)
+    assert _period_update_allowed(2, 299.999, 300)
+    assert not _period_update_allowed(2, 300, 300)
+    assert not _period_update_allowed(9, 301, 300)
 
 
 def test_worker_rejects_conflicting_or_invalid_time_limits() -> None:

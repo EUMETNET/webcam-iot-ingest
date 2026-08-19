@@ -77,6 +77,33 @@ def test_download_rejects_an_etag_change_after_freshness_check() -> None:
         client.download(reference.image_url)
 
 
+@pytest.mark.parametrize("last_modified", [None, "not-an-http-date"])
+def test_last_modified_is_optional_timing_metadata(last_modified) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == POINTER:
+            return httpx.Response(302, headers={"Location": IMAGE})
+        headers = {
+            "ETag": '"image-v1"',
+            "Content-Type": "image/jpeg",
+        }
+        if last_modified is not None:
+            headers["Last-Modified"] = last_modified
+        return httpx.Response(
+            200,
+            headers=headers,
+            content=b"" if request.method == "HEAD" else b"jpeg",
+        )
+
+    client = _client(handler)
+    reference = client.get_current_image(
+        "272", "mini", {"latest_media": {"mini": POINTER}}
+    )
+
+    assert reference.marker == '"image-v1"'
+    assert reference.provider_update_timestamp is None
+    assert client.download(reference.image_url) == b"jpeg"
+
+
 @pytest.mark.parametrize(
     ("rendition", "metadata"),
     [

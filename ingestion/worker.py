@@ -31,7 +31,7 @@ from config.deployment_config import (
 )
 from database.registry_queries import (
     DueSourceStream,
-    EmaUpdateCandidate,
+    PeriodEstimateCandidate,
     apply_ingestion_state_updates,
     get_due_source_streams,
     reset_network_period_estimates,
@@ -197,7 +197,7 @@ class InternalErrorResult:
 
     source_stream_id: str
     outcome: str = "internal_error"
-    ema_update_candidate: None = None
+    period_estimate_candidate: None = None
 
 
 def _completed_future_result(
@@ -256,7 +256,6 @@ def run_worker(
     dry_run: bool = False,
     stop_event: threading.Event | None = None,
     verbose: bool = False,
-    windy_bounded_minimum_period: bool = False,
     reset_windy_period_estimates: bool = False,
 ) -> list[dict[str, object]]:
     if network != "win":
@@ -327,7 +326,6 @@ def run_worker(
                     verbose,
                     initial_stagger,
                     batch_freshness,
-                    windy_bounded_minimum_period,
                 )
                 health.last_epoch_success_monotonic = time.monotonic()
                 metrics.epochs.labels("win", "success").inc()
@@ -365,10 +363,10 @@ def _epoch_wait_s(
     return max(idle_delay_s, minimum_period_s - elapsed_s, 0)
 
 
-def _ema_update_allowed(
+def _period_update_allowed(
     epoch_number: int, epoch_duration_s: float, minimum_ingestion_interval_s: float
 ) -> bool:
-    """Keep the established first-epoch and overlong-epoch EMA guards."""
+    """Keep the established first-epoch and overlong-epoch period guards."""
     return (
         epoch_number > 1
         and epoch_duration_s < minimum_ingestion_interval_s
@@ -388,7 +386,6 @@ def _run_epoch(
     verbose: bool = False,
     initial_stagger: InitialPollingStagger | None = None,
     batch_freshness: bool = False,
-    windy_bounded_minimum_period: bool = False,
 ) -> dict[str, object]:
     epoch_started = time.monotonic()
     database = DatabaseConfig.from_environment()
@@ -484,7 +481,6 @@ def _run_epoch(
                     publisher,
                     metrics.observe_stage,
                     metrics.observe_event,
-                    windy_bounded_minimum_period,
                 ): job
                 for job in jobs
             }
@@ -511,15 +507,15 @@ def _run_epoch(
             if getattr(result, "state_update", None) is not None
         ]
         state_updates = [
-            replace(update, ema_update_candidate=None)
+            replace(update, period_estimate_candidate=None)
             if update.source_stream_id in initial_release_ids
             else update
             for update in state_updates
         ]
         candidates = [
-            result.ema_update_candidate
+            result.period_estimate_candidate
             for result in results
-            if isinstance(result.ema_update_candidate, EmaUpdateCandidate)
+            if isinstance(result.period_estimate_candidate, PeriodEstimateCandidate)
         ]
         applicable_candidates = [
             candidate
@@ -527,7 +523,7 @@ def _run_epoch(
             if candidate.source_stream_id not in initial_release_ids
         ]
         state_updates_applied = 0
-        ema_update_eligible = not dry_run and _ema_update_allowed(
+        period_update_eligible = not dry_run and _period_update_allowed(
             epoch_number,
             time.monotonic() - epoch_started,
             windy.minimum_ingestion_interval_s,
@@ -537,10 +533,10 @@ def _run_epoch(
                 state_updates_applied = apply_ingestion_state_updates(
                     connection,
                     state_updates,
-                    apply_ema=ema_update_eligible,
+                    apply_period_estimate=period_update_eligible,
                 )
                 connection.commit()
-            if ema_update_eligible:
+            if period_update_eligible:
                 metrics.observe_period_estimate_updates(applicable_candidates)
     outcomes: dict[str, int] = {}
     for result in results:
@@ -548,17 +544,17 @@ def _run_epoch(
     summary = {
         "selected": len(jobs),
         "outcomes": dict(sorted(outcomes.items())),
-        "ema_candidates": len(candidates),
+        "period_candidates": len(candidates),
         "state_updates_applied": state_updates_applied,
-        "ema_updates_applied": (
-            len(applicable_candidates) if ema_update_eligible else 0
+        "period_updates_applied": (
+            len(applicable_candidates) if period_update_eligible else 0
         ),
         "direct_period_replacements_applied": (
             sum(
                 candidate.update_method == "direct_replacement"
                 for candidate in applicable_candidates
             )
-            if ema_update_eligible
+            if period_update_eligible
             else 0
         ),
     }
@@ -566,7 +562,7 @@ def _run_epoch(
         summary["freshness_batch"] = batch_summary
     if initial_stagger is not None:
         summary["stagger_deferred"] = stagger_deferred
-        summary["ema_candidates_deferred_initial"] = len(candidates) - len(
+        summary["period_candidates_deferred_initial"] = len(candidates) - len(
             applicable_candidates
         )
     return summary
@@ -601,19 +597,12 @@ def _process_due_job(
     publisher: MqttPublisher | None,
     stage_observer,
     event_observer,
-    bounded_minimum_period: bool = False,
 ):
     return _process_job(
         client,
         job,
         dry_run=dry_run,
-        ema_alpha=windy.ema_alpha,
-        initial_ema_seconds=windy.initial_ema_seconds,
-        running_minimum_floor_seconds=(
-            windy.minimum_ingestion_interval_s
-            if bounded_minimum_period
-            else None
-        ),
+        minimum_period_seconds=windy.minimum_ingestion_interval_s,
         direct_replacement_modulus=windy.period_direct_replacement_modulus,
         transformation=TransformationConfig.from_environment(),
         storage=storage,
@@ -668,11 +657,6 @@ def main() -> None:
         "--verbose", action="store_true", help="print epoch progress once per second"
     )
     parser.add_argument(
-        "--windy-bounded-minimum-period",
-        action="store_true",
-        help="estimate Windy source periods with a provider-timestamp running minimum",
-    )
-    parser.add_argument(
         "--reset-windy-period-estimates",
         action="store_true",
         help="clear only Windy period estimates before the worker starts",
@@ -711,7 +695,6 @@ def main() -> None:
         dry_run=args.dry_run,
         stop_event=stop,
         verbose=args.verbose,
-        windy_bounded_minimum_period=args.windy_bounded_minimum_period,
         reset_windy_period_estimates=args.reset_windy_period_estimates,
     )
     durations = [float(item["duration_s"]) for item in summaries]

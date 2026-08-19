@@ -400,19 +400,14 @@ _ingestion-test-foreground scope run_seconds mode="":
         batching=(--batch-freshness)
     fi
     if [[ "$mode" == "staggered-batched-period-min" ]]; then
-        period_estimator=(
-            --windy-bounded-minimum-period
-            --reset-windy-period-estimates
-        )
+        period_estimator=(--reset-windy-period-estimates)
         polling_factor=0.7
     fi
     if [[ "$mode" == "staggered-batched-no-adaptive" ]]; then
-        period_estimator=(--windy-bounded-minimum-period)
         polling_factor=0
         polling_floor=0
     fi
     if [[ "$mode" == "staggered-batched-nine-minute-floor" ]]; then
-        period_estimator=(--windy-bounded-minimum-period)
     fi
     exec env \
         MQTT_HOST=127.0.0.1 \
@@ -428,7 +423,6 @@ _ingestion-test-foreground scope run_seconds mode="":
         INGESTION_HEALTH_PORT=8013 \
         WINDY_POLLING_INTERVAL_FACTOR="$polling_factor" \
         WINDY_MINIMUM_POLLING_INTERVAL_S="$polling_floor" \
-        WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120 \
         UV_CACHE_DIR=/tmp/webcam-uv-cache \
         uv run --env-file .env python -m ingestion.worker \
             --network win \
@@ -680,8 +674,7 @@ ingestion-test-three-networks duration="90m":
         -e INITIAL_STAGGER_WINDOW_S=600 \
         webcam-job python -m ingestion.worker --network win \
             --max-jobs 30000 --run-for-seconds "$run_seconds" \
-            --stagger-initial-polling --batch-freshness \
-            --windy-bounded-minimum-period --verbose
+            --stagger-initial-polling --batch-freshness --verbose
 
     docker compose --env-file .env run -d --no-deps \
         --name "$fin_name" --publish 127.0.0.1:8014:8014 \

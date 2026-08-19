@@ -118,7 +118,7 @@ The implemented due query uses two conditions:
    `last_processed_timestamp + minimum_ingestion_interval`; and
 2. current time is at least
    `last_observed_provider_timestamp + 0.7 * estimated_source_stream_period`, when an
-   observed timestamp and EMA exist.
+   observed timestamp and source-period estimate exist.
 
 The current minimum ingestion interval is 300 seconds. The earlier proposed
 formula `min(max(minimum interval, 0.7 * EMA), 30 minutes)` is not the
@@ -152,24 +152,24 @@ over 600 seconds. Windy and Fintraffic use distinct fixed seeds. The phase is
 derived from the source-stream identifier, is reproducible, is kept only in
 worker memory, and does not fabricate database timestamps.
 
-The phase is independent of EMA. EMA candidates from a stream's staggered
+The phase is independent of period estimation. Period candidates from a stream's staggered
 first check are discarded to avoid treating the artificial cold-start phase as
 provider behavior.
 
-### EMA update timing
+### Source-period update timing
 
 **Type:** deliberate deviation.
 
-Download-decision state, successful-publication state, and EMA candidates are
-returned by source jobs and written together by the epoch coordinator. EMA is
+Download-decision state, successful-publication state, and period candidates are
+returned by source jobs and written together by the epoch coordinator. Period estimation is
 applied only when:
 
 - the epoch is not epoch 1; and
 - the epoch duration is shorter than the 300-second minimum ingestion
   interval.
 
-Long epochs and epoch 1 discard their EMA candidates while retaining the other
-download-decision state. Initial stagger releases also discard their EMA
+Long epochs and epoch 1 discard their period candidates while retaining the other
+download-decision state. Initial stagger releases also discard their period
 candidates. No source thread writes ingestion state individually.
 
 ### Retry defaults and separation
@@ -197,12 +197,14 @@ metadata/image races are left for the next epoch.
 The initial preferred Fintraffic path used one conditional JPEG request per
 preset with ETag/`If-None-Match`. The implementation instead performs one bulk
 station-data request per non-empty epoch and uses each preset's `measuredTime`
-as its provider update timestamp. The JPEG ETag becomes available only during
-the full GET. If that ETag equals the last observed marker, the downloaded
-body is discarded; download-decision timestamp, marker, provider timestamp,
-and eligible EMA are still retained, while processed state remains unchanged.
+as its provider update timestamp. An unchanged timestamp stops before image
+download. The JPEG ETag becomes available only during the full GET and is the
+separate opaque image marker. If that ETag equals the last observed marker,
+the downloaded body is discarded; download-decision timestamp, marker,
+provider timestamp, and eligible period estimate are still retained, while
+processed state remains unchanged.
 
-The downloaded JPEG's `Last-Modified` must match the snapshot marker. A
+The downloaded JPEG's `Last-Modified` must match the snapshot timestamp. A
 mismatch is treated as a metadata/image race and deferred to a later epoch.
 JPEG responses without a verifiable `Last-Modified` are rejected. Live
 inspection showed that stale Fintraffic cameras can return a valid JPEG
@@ -668,7 +670,8 @@ a 120-second initial EMA, and a polling factor of 0.5. It did not improve the
 full-window latency. Windy has therefore returned to a 300-second minimum and
 a polling factor of 0.7. The current bounded-minimum experiment initializes the
 period estimate as `NULL` and learns it from differences between successive
-provider timestamps; Fintraffic and Skaping retain their existing EMA behavior.
+provider timestamps. This bounded-minimum estimator is now shared by Windy,
+Fintraffic, and Skaping.
 
 ### 2026-08-01 — Windy polling interval has a nine-minute floor
 
@@ -748,4 +751,35 @@ modulus is 250 independently for Windy, Fintraffic, and Skaping.
 Direct replacement requires a non-null existing estimate. Initial learning,
 the first-epoch exclusion, initial-stagger exclusion, excessive-epoch guard,
 epoch-end batching, and Windy's minimum estimate floor are retained. Applied
-updates are observable as `initial`, `recurrent`, or `direct_replacement`.
+updates are observable as `initial`, `bounded_minimum`, or `direct_replacement`.
+
+### 2026-08-19 — Shared bounded-minimum source-period estimator
+
+**Affected component:** adaptive ingestion polling for all source networks.
+
+Fintraffic and Skaping no longer use an exponential moving average. Windy,
+Fintraffic, and Skaping now share the same provider-timestamp estimator: the
+first observation establishes an anchor without inventing a period, and each
+later positive timestamp gap updates the stored estimate to the smaller of the
+existing estimate and that gap, bounded below by 300 seconds. The existing
+deterministic direct-replacement event may periodically replace an existing
+estimate with the latest bounded gap.
+
+The first-epoch, initial-stagger, overlong-epoch, and epoch-end batching rules
+remain unchanged. EMA-specific runtime configuration and the Windy-only
+bounded-minimum command switch are removed because they no longer describe a
+provider-specific or optional algorithm.
+
+### 2026-08-19 — Skaping ETag is the sole freshness condition
+
+**Affected component:** Skaping ingestion freshness.
+
+The redirect-following HEAD of `latest_media/mini` must expose an ETag, and
+that ETag alone determines whether the source image changed. An unchanged ETag
+stops before GET even if `Last-Modified` differs. A changed ETag permits the
+GET, whose ETag must repeat the HEAD value.
+
+`Last-Modified` is optional provider-timing metadata. When valid it supplies
+the provider timestamp used for scheduling, period learning, latency, and
+notification metadata. Its absence or invalidity neither determines freshness
+nor rejects an otherwise ETag-consistent image.

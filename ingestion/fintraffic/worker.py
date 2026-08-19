@@ -23,7 +23,7 @@ from config.deployment_config import (
     WorkerConfig,
 )
 from database.registry_queries import (
-    EmaUpdateCandidate,
+    PeriodEstimateCandidate,
     apply_ingestion_state_updates,
     get_due_source_streams,
 )
@@ -35,7 +35,7 @@ from ingestion.worker import (
     InitialPollingStagger,
     RateGate,
     _completed_future_result,
-    _ema_update_allowed,
+    _period_update_allowed,
     _epoch_wait_s,
     _progress,
 )
@@ -250,18 +250,18 @@ def _run_epoch(
             if getattr(result, "state_update", None) is not None
         ]
         state_updates = [
-            replace(update, ema_update_candidate=None)
+            replace(update, period_estimate_candidate=None)
             if update.source_stream_id in initial_release_ids
             else update
             for update in state_updates
         ]
         candidates = [
-            result.ema_update_candidate
+            result.period_estimate_candidate
             for result in results
-            if isinstance(result.ema_update_candidate, EmaUpdateCandidate)
-            and result.ema_update_candidate.source_stream_id not in initial_release_ids
+            if isinstance(result.period_estimate_candidate, PeriodEstimateCandidate)
+            and result.period_estimate_candidate.source_stream_id not in initial_release_ids
         ]
-        ema_update_eligible = not dry_run and _ema_update_allowed(
+        period_update_eligible = not dry_run and _period_update_allowed(
             epoch_number,
             time.monotonic() - epoch_started,
             fintraffic.minimum_ingestion_interval_s,
@@ -270,25 +270,25 @@ def _run_epoch(
         if not dry_run and state_updates:
             with pool.connection() as connection:
                 applied = apply_ingestion_state_updates(
-                    connection, state_updates, apply_ema=ema_update_eligible
+                    connection, state_updates, apply_period_estimate=period_update_eligible
                 )
                 connection.commit()
-            if ema_update_eligible:
+            if period_update_eligible:
                 metrics.observe_period_estimate_updates(candidates)
     outcomes = Counter(result.outcome for result in results)
     return {
         "selected": len(jobs),
         "freshness_presets": freshness_presets,
         "outcomes": dict(sorted(outcomes.items())),
-        "ema_candidates": len(candidates),
+        "period_candidates": len(candidates),
         "state_updates_applied": applied,
-        "ema_updates_applied": len(candidates) if ema_update_eligible else 0,
+        "period_updates_applied": len(candidates) if period_update_eligible else 0,
         "direct_period_replacements_applied": (
             sum(
                 candidate.update_method == "direct_replacement"
                 for candidate in candidates
             )
-            if ema_update_eligible
+            if period_update_eligible
             else 0
         ),
         "stagger_deferred": deferred,
@@ -308,7 +308,7 @@ def _process_due_job(
         client,
         job,
         dry_run=dry_run,
-        ema_alpha=fintraffic.ema_alpha,
+        minimum_period_seconds=fintraffic.minimum_ingestion_interval_s,
         direct_replacement_modulus=fintraffic.period_direct_replacement_modulus,
         transformation=TransformationConfig.from_environment(),
         storage=storage,

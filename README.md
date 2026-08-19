@@ -315,8 +315,11 @@ just ingestion-test-fintraffic 2h staggered
 ```
 
 The Fintraffic staggered mode uses a fixed seed and a 600-second initial
-window. Each epoch uses one bulk preset `measuredTime` snapshot for freshness,
-then downloads only changed full-JPEG images.
+window. Each epoch uses one bulk preset `measuredTime` snapshot as the provider
+timestamp. A preset whose timestamp is unchanged stops before JPEG download.
+For a changed timestamp, the full JPEG GET must return a coherent
+`Last-Modified` and an ETag; an unchanged ETag stops transformation and
+publication while retaining the download-decision state for the epoch batch.
 
 Skaping has its own worker on metrics port 8015 and can run beside both other
 providers:
@@ -327,17 +330,20 @@ just ingestion-test-skaping 2h staggered
 
 It obtains the final mini object's ETag with a followed HEAD request, downloads
 only changed objects, and validates that the GET response has the same ETag.
-The final object's HTTP `Last-Modified` value is retained as the
-provider-availability timestamp; it is not claimed to be the physical capture
-time. Its sanitized resolved target path is included in MQTT source-image
-provider metadata without treating the timestamp-like path component as
-authoritative.
+ETag alone determines freshness. A valid HTTP `Last-Modified` value is
+optionally retained as the provider-availability timestamp for scheduling,
+period learning, latency, and notification metadata; missing or invalid
+`Last-Modified` does not reject an ETag-valid image. It is not claimed to be
+the physical capture time. The sanitized resolved target path is included in
+MQTT source-image provider metadata without treating the timestamp-like path
+component as authoritative.
 
-All networks use the provider timestamp for adaptive polling when it is
-available. Freshness comparison uses the timestamp, opaque marker, or both,
-according to what the provider exposes at assessment time. Only a freshness
-snapshot that causes a download decision is retained. Source jobs return these
-state transitions to the epoch coordinator, which writes them in one batch.
+All networks use the provider timestamp for period learning, adaptive polling,
+latency measurement, and notification metadata when it is available.
+Freshness comparison uses the timestamp, opaque marker, or both, according to
+what the provider exposes at assessment time. Only a freshness snapshot that
+causes a download decision is retained. Source jobs return these state
+transitions to the epoch coordinator, which writes them in one batch.
 The processed timestamp advances only after MQTT publication succeeds, so a
 failed pipeline remains eligible for retry. The deterministic stagger window
 is 600 seconds.
@@ -353,9 +359,10 @@ This benchmark-only mode uses the fixed seed `windy-benchmark-v1` and a
 deterministic hash of each source-stream ID to assign a phase in `[0, 600)`
 seconds by default. `INITIAL_STAGGER_WINDOW_S` configures this window, and the
 benchmark recipe sets it explicitly to 600 seconds. The initial phase is
-independent of EMA and does not fabricate database timestamps. Normal adaptive
+independent of the source-period estimator and does not fabricate database
+timestamps. Normal adaptive
 scheduling takes over after a stream's first check. As with a direct run's
-first epoch, EMA candidates from
+first epoch, period-estimate candidates from
 each stream's staggered first check are discarded to avoid cold-start bias. The
 worker prints the seed and phase window in its log.
 
@@ -366,9 +373,9 @@ The benchmark keeps two independent timing controls explicit:
 - after a download, normal selection also waits until the stored provider
   timestamp plus `WINDY_POLLING_INTERVAL_FACTOR * estimated_source_stream_period`; the
   Windy factor is currently `0.7`;
-- `WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S=120` remains available to the legacy EMA
-  estimator; the bounded-minimum experiment instead initializes its database
-  estimate as `NULL` and learns it from two provider timestamps;
+- the shared bounded-minimum estimator initializes its database estimate as
+  `NULL` and learns it from two distinct provider timestamps; all three
+  providers use a 300-second lower bound;
 - `INGESTION_MIN_EPOCH_PERIOD_S=15` prevents excessively rapid epochs;
 - `INGESTION_IDLE_DELAY_S=0` adds no post-epoch pause; the 15-second minimum
   epoch period still prevents a tight loop for short or empty epochs.
@@ -546,8 +553,9 @@ The command prints its detached `screen` session and log path. Detailed
 acceptance checks are in
 [`manual_tests/validation_to_complete_checkpoint13`](manual_tests/validation_to_complete_checkpoint13).
 
-Period estimates normally retain their network-specific recurrent update
-rule. On a deterministic rare event derived from SHA-256 of the source-stream
+All three providers normally update their period estimate with the same
+300-second-bounded running-minimum rule. On a deterministic rare event derived
+from SHA-256 of the source-stream
 ID and newly observed provider timestamp, the latest valid provider-timestamp
 gap directly replaces the estimate. This permits recovery from an erroneous
 running minimum without counters or additional database state. Initial

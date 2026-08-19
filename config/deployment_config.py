@@ -417,8 +417,6 @@ class WindyIngestionConfig:
     freshness_query_retry_count: int
     download_retry_count: int
     retry_backoff_s: float
-    ema_alpha: float
-    initial_ema_seconds: float
     period_direct_replacement_modulus: int
     default_limit: int
 
@@ -458,10 +456,6 @@ class WindyIngestionConfig:
                 os.getenv("WINDY_DOWNLOAD_RETRY_COUNT", "0")
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
-            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
-            initial_ema_seconds=float(
-                os.getenv("WINDY_INITIAL_EMA_DOWNLOAD_PERIOD_S", "120")
-            ),
             period_direct_replacement_modulus=int(
                 os.getenv("WINDY_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
             ),
@@ -479,8 +473,6 @@ class WindyIngestionConfig:
             raise ValueError("minimum ingestion interval cannot be negative")
         if self.minimum_polling_interval_s < 0:
             raise ValueError("minimum polling interval cannot be negative")
-        if self.initial_ema_seconds <= 0:
-            raise ValueError("initial Windy EMA must be positive")
         if self.polling_interval_factor < 0:
             raise ValueError("polling interval factor cannot be negative")
         if self.request_delay_s < 0 or self.retry_backoff_s < 0:
@@ -490,8 +482,6 @@ class WindyIngestionConfig:
             or self.download_retry_count < 0
         ):
             raise ValueError("Windy retry counts cannot be negative")
-        if not 0 <= self.ema_alpha <= 1:
-            raise ValueError("EMA alpha must be between 0 and 1")
         if self.default_limit < 1:
             raise ValueError("Windy ingestion default limit must be positive")
         if self.period_direct_replacement_modulus < 1:
@@ -519,7 +509,6 @@ class FintrafficIngestionConfig:
     freshness_query_retry_count: int
     download_retry_count: int
     retry_backoff_s: float
-    ema_alpha: float
     period_direct_replacement_modulus: int
     default_limit: int
 
@@ -561,7 +550,6 @@ class FintrafficIngestionConfig:
                 os.getenv("FINTRAFFIC_DOWNLOAD_RETRY_COUNT", "0")
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
-            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
             period_direct_replacement_modulus=int(
                 os.getenv("FINTRAFFIC_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
             ),
@@ -591,8 +579,8 @@ class FintrafficIngestionConfig:
             raise ValueError("invalid Fintraffic polling or retry backoff")
         if self.freshness_query_retry_count < 0 or self.download_retry_count < 0:
             raise ValueError("Fintraffic retry counts cannot be negative")
-        if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
-            raise ValueError("invalid Fintraffic EMA alpha or default limit")
+        if self.default_limit < 1:
+            raise ValueError("invalid Fintraffic default limit")
         if self.period_direct_replacement_modulus < 1:
             raise ValueError("Fintraffic direct-replacement modulus must be positive")
 
@@ -610,7 +598,6 @@ class SkapingIngestionConfig:
     freshness_query_retry_count: int
     download_retry_count: int
     retry_backoff_s: float
-    ema_alpha: float
     period_direct_replacement_modulus: int
     default_limit: int
 
@@ -644,7 +631,6 @@ class SkapingIngestionConfig:
                 os.getenv("SKAPING_DOWNLOAD_RETRY_COUNT", "0")
             ),
             retry_backoff_s=float(os.getenv("RETRY_BACKOFF_S", "1")),
-            ema_alpha=float(os.getenv("EMA_ALPHA", "0.2")),
             period_direct_replacement_modulus=int(
                 os.getenv("SKAPING_PERIOD_DIRECT_REPLACEMENT_MODULUS", "250")
             ),
@@ -668,8 +654,8 @@ class SkapingIngestionConfig:
             raise ValueError("invalid Skaping polling or retry backoff")
         if self.freshness_query_retry_count < 0 or self.download_retry_count < 0:
             raise ValueError("Skaping retry counts cannot be negative")
-        if not 0 <= self.ema_alpha <= 1 or self.default_limit < 1:
-            raise ValueError("invalid Skaping EMA alpha or default limit")
+        if self.default_limit < 1:
+            raise ValueError("invalid Skaping default limit")
         if self.period_direct_replacement_modulus < 1:
             raise ValueError("Skaping direct-replacement modulus must be positive")
 

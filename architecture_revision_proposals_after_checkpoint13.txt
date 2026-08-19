@@ -524,7 +524,9 @@ Text to insert
 
 For Fintraffic, a non-empty epoch retrieves one bulk station-data snapshot.
 Each due preset obtains its provider timestamp and current JPEG reference from
-that snapshot.  A source job performs the full JPEG GET and requires a valid
+that snapshot.  If `measuredTime` equals the stored provider timestamp, the
+job is unchanged and stops before download.  Otherwise, the source job makes
+a download decision, performs the full JPEG GET, and requires a valid
 ETag plus a `Last-Modified` timestamp coherent with the bulk observation.  A
 missing or inconsistent `Last-Modified` is treated as an image-access race or
 unavailable image and is deferred to a later epoch.  If the downloaded ETag
@@ -532,6 +534,9 @@ equals `last_observed_image_marker`, the body is discarded as unchanged; the
 download decision and observations remain eligible for the epoch-end state
 batch, but processed state does not advance.  This also excludes observed
 placeholder responses that cannot be validated with the expected timestamp.
+`measuredTime` remains the timestamp used for period learning, scheduling,
+latency measurement, and notification `provider_update_timestamp`; it is
+never used as the opaque image marker.
 
 
 2.7 Skaping freshness uses final-object ETag and Last-Modified
@@ -558,10 +563,12 @@ Text to insert
 For Skaping, discovery stores the selected point of view's
 `latest_media`/`mini` pointer.  Freshness resolution follows that pointer
 without downloading the body and requires the final object's ETag.  The ETag
-is the opaque image marker; `Last-Modified`, when valid, is the provider
-availability timestamp used for scheduling, latency, and period learning, not
-a claim about physical capture time.  A changed object is accepted only if the
-subsequent GET repeats the expected ETag.  The sanitized resolved target path
+is the authoritative opaque image marker: an unchanged ETag stops before GET
+regardless of `Last-Modified`.  `Last-Modified`, when valid, is optional
+provider-availability metadata used for scheduling, latency, period learning,
+and notification metadata, not a freshness condition or a claim about
+physical capture time.  A changed object is accepted only if the subsequent
+GET repeats the expected ETag.  The sanitized resolved target path
 is retained in source-image provider metadata and can be included in the MQTT
 message.  The archive endpoint is not queried by the continuous worker.
 
@@ -581,10 +588,10 @@ Why the current text is false
 
 The stored quantity was renamed because it estimates provider update cadence,
 not download cadence.  It is learned from consecutive distinct provider
-timestamps.  Windy uses a bounded running minimum with a five-minute floor;
-Fintraffic and Skaping retain the recurrent formula.  Updates are epoch-level,
-not immediate thread writes, and a deterministic rare direct replacement is
-being added to escape an anomalously stale minimum.
+timestamps.  All three providers use the same bounded running minimum with a
+five-minute floor.  Updates are epoch-level, not immediate thread writes, and
+a deterministic rare direct replacement can escape an anomalously stale
+minimum.
 
 Text to insert
 ~~~~~~~~~~~~~~
@@ -593,11 +600,10 @@ Text to insert
 provider update timestamps.  A job can propose a candidate only when it has a
 new valid provider timestamp and made a download decision.  Windy updates the
 estimate with the minimum of the previous estimate and the new positive
-provider-timestamp gap, bounded below by 300 seconds.  Fintraffic and Skaping
-use the configured recurrent smoothing rule over the same provider-timestamp
-gaps.  The algorithm-neutral field name permits those network-specific update
-rules without implying that the value is always an exponential average of
-local downloads.
+provider-timestamp gap, bounded below by 300 seconds.  Windy, Fintraffic, and
+Skaping use this same update rule.  The algorithm-neutral field name describes
+the estimated quantity without implying an exponential average of local
+downloads.
 
 To avoid retaining an anomalous old estimate indefinitely, a shared
 deterministic SHA-256 decision over source-stream ID and canonical provider
@@ -1229,7 +1235,7 @@ The Prometheus appendix must include at least:
 
     webcam_ingestion_period_estimate_update_total
       Counter labelled by source_network and update method
-      (`initial`, `recurrent`, or `direct_replacement`).
+      (`initial`, `bounded_minimum`, or `direct_replacement`).
 
 The S3 and MQTT counters count high-level completed operations, not attempts;
 retry attempts remain in the separate retry counter.  No publication-outbox

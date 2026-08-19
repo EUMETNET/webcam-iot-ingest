@@ -94,11 +94,11 @@ class DueSourceStream:
 
 
 @dataclass(frozen=True)
-class EmaUpdateCandidate:
+class PeriodEstimateCandidate:
     source_stream_id: str
     anchor_timestamp: datetime
     estimated_source_stream_period: float
-    update_method: str = "recurrent"
+    update_method: str = "bounded_minimum"
 
 
 @dataclass(frozen=True)
@@ -109,7 +109,7 @@ class IngestionStateUpdate:
     provider_update_timestamp: datetime | None
     provider_image_marker: str | None
     download_timestamp: datetime
-    ema_update_candidate: EmaUpdateCandidate | None = None
+    period_estimate_candidate: PeriodEstimateCandidate | None = None
     processed_timestamp: datetime | None = None
 
 
@@ -364,25 +364,18 @@ def get_due_source_streams(
         return [DueSourceStream(**dict(row)) for row in cursor.fetchall()]
 
 
-def build_ema_update_candidate(
+def build_period_estimate_candidate(
     job: DueSourceStream,
     *,
     provider_update_timestamp: datetime | None,
-    ema_alpha: float,
-    initial_ema_seconds: float = 300.0,
-    running_minimum_floor_seconds: float | None = None,
+    minimum_period_seconds: float,
     direct_replacement_modulus: int = 250,
-) -> EmaUpdateCandidate | None:
-    """Apply the established EMA formula without writing source state."""
-    if not 0 <= ema_alpha <= 1:
-        raise ValueError("ema_alpha must be between 0 and 1")
+) -> PeriodEstimateCandidate | None:
+    """Build a bounded-minimum estimate from successive provider timestamps."""
     if provider_update_timestamp is not None:
         _require_aware_datetime(provider_update_timestamp, "provider timestamp")
-    if (
-        running_minimum_floor_seconds is not None
-        and running_minimum_floor_seconds <= 0
-    ):
-        raise ValueError("running-minimum floor must be positive")
+    if minimum_period_seconds <= 0:
+        raise ValueError("minimum source period must be positive")
     if direct_replacement_modulus < 1:
         raise ValueError("direct-replacement modulus must be positive")
     previous_timestamp = job.last_observed_provider_timestamp
@@ -391,48 +384,40 @@ def build_ema_update_candidate(
         or provider_update_timestamp == previous_timestamp
     ):
         return None
-    if previous_timestamp is None and running_minimum_floor_seconds is not None:
-        return None
+    # A first observation establishes the timestamp anchor. A second distinct
+    # observation is required before a period can be estimated.
     if previous_timestamp is None:
-        next_ema = initial_ema_seconds
-        update_method = "recurrent"
-    else:
-        elapsed = (provider_update_timestamp - previous_timestamp).total_seconds()
-        if elapsed <= 0:
-            return None
-        direct_replacement = (
-            job.estimated_source_stream_period is not None
-            and use_direct_period_replacement(
-                job.source_stream_id,
-                provider_update_timestamp,
-                direct_replacement_modulus,
-            )
+        return None
+    elapsed = (provider_update_timestamp - previous_timestamp).total_seconds()
+    if elapsed <= 0:
+        return None
+    direct_replacement = (
+        job.estimated_source_stream_period is not None
+        and use_direct_period_replacement(
+            job.source_stream_id,
+            provider_update_timestamp,
+            direct_replacement_modulus,
         )
-        if direct_replacement:
-            next_ema = max(running_minimum_floor_seconds or 0, elapsed)
-            update_method = "direct_replacement"
-        elif running_minimum_floor_seconds is not None:
-            next_ema = max(
-                running_minimum_floor_seconds,
-                min(float(job.estimated_source_stream_period), elapsed)
-                if job.estimated_source_stream_period is not None
-                else elapsed,
-            )
-            update_method = "recurrent"
-        else:
-            baseline = (
-                float(job.estimated_source_stream_period)
-                if job.estimated_source_stream_period is not None
-                else initial_ema_seconds
-            )
-            next_ema = ema_alpha * elapsed + (1 - ema_alpha) * baseline
-            update_method = "recurrent"
-    if job.estimated_source_stream_period is None:
-        update_method = "initial"
-    return EmaUpdateCandidate(
+    )
+    if direct_replacement:
+        next_period = max(minimum_period_seconds, elapsed)
+        update_method = "direct_replacement"
+    else:
+        next_period = max(
+            minimum_period_seconds,
+            min(float(job.estimated_source_stream_period), elapsed)
+            if job.estimated_source_stream_period is not None
+            else elapsed,
+        )
+        update_method = (
+            "initial"
+            if job.estimated_source_stream_period is None
+            else "bounded_minimum"
+        )
+    return PeriodEstimateCandidate(
         job.source_stream_id,
         provider_update_timestamp,
-        next_ema,
+        next_period,
         update_method,
     )
 
@@ -479,7 +464,7 @@ def apply_ingestion_state_updates(
     connection: psycopg.Connection[Any],
     updates: Sequence[IngestionStateUpdate],
     *,
-    apply_ema: bool,
+    apply_period_estimate: bool,
 ) -> int:
     """Persist one epoch's download decisions atomically in a single batch."""
     if not updates:
@@ -520,15 +505,15 @@ def apply_ingestion_state_updates(
                         update.provider_image_marker,
                         update.download_timestamp,
                         update.processed_timestamp,
-                        apply_ema,
+                        apply_period_estimate,
                         (
-                            update.ema_update_candidate.estimated_source_stream_period
-                            if update.ema_update_candidate is not None
+                            update.period_estimate_candidate.estimated_source_stream_period
+                            if update.period_estimate_candidate is not None
                             else None
                         ),
                         (
-                            update.ema_update_candidate.estimated_source_stream_period
-                            if update.ema_update_candidate is not None
+                            update.period_estimate_candidate.estimated_source_stream_period
+                            if update.period_estimate_candidate is not None
                             else None
                         ),
                         update.source_stream_id,

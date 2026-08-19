@@ -232,7 +232,6 @@ def test_windy_ingestion_config_has_bounded_safe_defaults() -> None:
     assert config.minimum_ingestion_interval_s == 300
     assert config.minimum_polling_interval_s == 540
     assert config.polling_interval_factor == 0.7
-    assert config.initial_ema_seconds == 120
     assert WorkerConfig.from_environment().initial_stagger_window_s == 600
     assert WorkerConfig.from_environment().readiness_window_s == 600
 

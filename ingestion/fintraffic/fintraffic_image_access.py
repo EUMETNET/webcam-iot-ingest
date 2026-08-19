@@ -21,7 +21,6 @@ class FintrafficImageAccessError(WindyImageAccessError):
 @dataclass(frozen=True)
 class FintrafficImageReference:
     provider_id: str
-    marker: str | None
     image_url: str
     provider_update_timestamp: datetime
 
@@ -125,10 +124,13 @@ class FintrafficImageClient:
                     response.raise_for_status()
                     self._validate_last_modified(response, image_url)
                     etag = response.headers.get("ETag")
-                    if not etag:
+                    if etag is None or not etag.strip():
                         raise FintrafficImageAccessError(
                             "Fintraffic image has no ETag"
                         )
+                    # Last-Modified is coherent and the ETag is now a valid
+                    # provider observation, even if reading or validating the
+                    # response body subsequently fails.
                     self._downloaded_etags[image_url] = etag
                     content = _read_image(response, self._max_image_bytes)
                 if self._observer:
@@ -227,9 +229,9 @@ def _parse_station_data(
             if measured_time is None:
                 continue
             if not isinstance(provider_id, str) or not isinstance(measured_time, str):
-                raise FintrafficImageAccessError("invalid Fintraffic preset marker")
+                raise FintrafficImageAccessError("invalid Fintraffic preset timestamp")
             if provider_id in references:
-                raise FintrafficImageAccessError("duplicate Fintraffic preset marker")
+                raise FintrafficImageAccessError("duplicate Fintraffic preset identifier")
             try:
                 provider_timestamp = datetime.fromisoformat(
                     measured_time.replace("Z", "+00:00")
@@ -240,7 +242,6 @@ def _parse_station_data(
                 ) from error
             references[provider_id] = FintrafficImageReference(
                 provider_id=provider_id,
-                marker=None,
                 image_url=f"{image_base_url}/{quote(provider_id, safe='')}.jpg",
                 provider_update_timestamp=provider_timestamp,
             )

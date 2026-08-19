@@ -3,10 +3,10 @@ from datetime import datetime, timedelta, timezone
 
 from database.registry_queries import (
     DueSourceStream,
-    build_ema_update_candidate,
+    build_period_estimate_candidate,
     use_direct_period_replacement,
 )
-from ingestion.worker import _ema_update_allowed
+from ingestion.worker import _period_update_allowed
 
 
 def job(
@@ -61,26 +61,24 @@ def test_direct_replacement_requires_an_existing_estimate() -> None:
         if use_direct_period_replacement(f"stream-{index}", current, 10)
     )
 
-    initial = build_ema_update_candidate(
+    initial = build_period_estimate_candidate(
         job(
             source_stream_id=selected_id,
             provider_timestamp=previous,
             estimate=None,
         ),
         provider_update_timestamp=current,
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
         direct_replacement_modulus=10,
     )
-    replacement = build_ema_update_candidate(
+    replacement = build_period_estimate_candidate(
         job(
             source_stream_id=selected_id,
             provider_timestamp=previous,
             estimate=300,
         ),
         provider_update_timestamp=current,
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
         direct_replacement_modulus=10,
     )
 
@@ -97,27 +95,25 @@ def test_reset_sequence_learns_before_replacement_can_run() -> None:
     first_epoch_timestamp = datetime(2026, 8, 3, 12, tzinfo=timezone.utc)
     second_epoch_timestamp = first_epoch_timestamp + timedelta(seconds=300)
 
-    epoch_one = build_ema_update_candidate(
+    epoch_one = build_period_estimate_candidate(
         job(provider_timestamp=old, estimate=None),
         provider_update_timestamp=first_epoch_timestamp,
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
         direct_replacement_modulus=1,
     )
-    epoch_two = build_ema_update_candidate(
+    epoch_two = build_period_estimate_candidate(
         replace(
             job(provider_timestamp=old, estimate=None),
             last_observed_provider_timestamp=first_epoch_timestamp,
         ),
         provider_update_timestamp=second_epoch_timestamp,
-        ema_alpha=0.2,
-        running_minimum_floor_seconds=300,
+        minimum_period_seconds=300,
         direct_replacement_modulus=1,
     )
 
     assert epoch_one is not None and epoch_one.update_method == "initial"
     assert epoch_two is not None and epoch_two.update_method == "initial"
     assert epoch_two.estimated_source_stream_period == 300
-    assert not _ema_update_allowed(1, 10, 300)
-    assert _ema_update_allowed(2, 10, 300)
-    assert not _ema_update_allowed(2, 300, 300)
+    assert not _period_update_allowed(1, 10, 300)
+    assert _period_update_allowed(2, 10, 300)
+    assert not _period_update_allowed(2, 300, 300)
