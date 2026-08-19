@@ -799,3 +799,13 @@ points. Compose and current validation commands invoke those entry points
 directly. This is a structural refactor: provider freshness rules, epoch-end
 state batching, period learning, publication behavior, and metric definitions
 remain unchanged.
+
+### 2026-08-19 — Direct-overwrite derived-image storage
+
+**Affected component:** S3 derived-image uploads.
+
+Derived images are uploaded with a direct `put_object` call inside the bounded
+retry loop. The storage layer performs no preliminary HEAD request, existing
+object size or digest comparison, or collision rejection. A repeated key is
+therefore overwritten according to normal S3 semantics. Such overwrites remain
+exceptional because derived-image keys include the image download timestamp.

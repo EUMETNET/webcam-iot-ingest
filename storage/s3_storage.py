@@ -1,9 +1,8 @@
-"""Immutable S3-compatible derived-image upload."""
+"""Direct-overwrite S3-compatible derived-image upload."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import time
 from typing import Any, Callable
 from urllib.parse import quote
@@ -75,7 +74,6 @@ class S3Storage:
         if not object_key or not content:
             raise ValueError("S3 object key and content are required")
         last_error: Exception | None = None
-        digest = hashlib.sha256(content).hexdigest()
         for attempt in range(self._config.retry_count + 1):
             try:
                 self._client.put_object(
@@ -83,7 +81,6 @@ class S3Storage:
                     Key=object_key,
                     Body=content,
                     ContentType="image/jpeg",
-                    Metadata={"sha256": digest},
                 )
                 return self.reference(object_key)
             except Exception as error:  # SDK providers expose several subclasses.
