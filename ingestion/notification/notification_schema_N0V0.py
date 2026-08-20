@@ -28,6 +28,7 @@ def build_notification(
     publication_timestamp: datetime | None = None,
 ) -> dict[str, Any]:
     published = publication_timestamp or datetime.now(UTC)
+    source_stream_latitude, source_stream_longitude = _source_stream_coordinates(job)
     return {
         "schema_version": SCHEMA_VERSION,
         "image_id": image_id,
@@ -53,6 +54,8 @@ def build_notification(
             "source_stream_id": job.source_stream_id,
             "selected_rendition": job.selected_rendition,
             "provider_stream_id": job.provider_source_stream_id,
+            "latitude": source_stream_latitude,
+            "longitude": source_stream_longitude,
             "provider_metadata": job.source_stream_metadata,
         },
         "derived_stream": {
@@ -86,6 +89,25 @@ def build_notification(
             "colour_depth": derived.color_depth,
         },
     }
+
+
+def _source_stream_coordinates(job: DueSourceStream) -> tuple[float, float]:
+    latitude = job.latitude
+    longitude = job.longitude
+    if job.network_id == "win":
+        location = job.source_stream_metadata.get("location")
+        if isinstance(location, dict):
+            camera_latitude = location.get("latitude")
+            camera_longitude = location.get("longitude")
+            if (
+                isinstance(camera_latitude, (int, float))
+                and not isinstance(camera_latitude, bool)
+                and isinstance(camera_longitude, (int, float))
+                and not isinstance(camera_longitude, bool)
+            ):
+                latitude = float(camera_latitude)
+                longitude = float(camera_longitude)
+    return latitude, longitude
 
 
 def _timestamp(value: datetime | None) -> str | None:

@@ -846,3 +846,26 @@ or is not globally unique. Identifier-establishment failures, including
 uniqueness failures, increment the provider-neutral
 `webcam_discovery_identifier_violation_total` metric and fail the discovery
 without applying a partial registry update.
+
+### 2026-08-20 — Common production ingestion-worker scrape job
+
+**Affected component:** Prometheus worker scraping and health presentation.
+
+The three independent production worker endpoints are grouped under one
+`ingestion-workers` Prometheus job. Static target labels preserve provider
+identity as `source_network=win`, `fin`, or `ska`; the endpoints and ports
+remain independent on the Compose network. Benchmark and historical
+checkpoint scrape jobs remain separate, and no additional host ports are
+published for production scraping.
+
+### 2026-08-20 — Source-stream coordinates in MQTT notifications
+
+**Affected component:** N0V0 MQTT notification payload.
+
+The existing site latitude, longitude, and site altitude remain unchanged.
+The `source_stream` object additionally exposes `latitude` and `longitude`.
+Windy fills them from the individual camera location retained in source-stream
+provider metadata; Fintraffic and Skaping use the registered site coordinates
+because no more precise stream-level position is available. Windy falls back
+to the site position only when legacy or incomplete source-stream metadata
+lacks usable camera coordinates.
