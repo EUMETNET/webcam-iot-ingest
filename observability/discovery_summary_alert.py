@@ -9,34 +9,22 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from prometheus_client.parser import text_string_to_metric_families
-
-
 NETWORK_NAMES = {"win": "Windy", "fin": "Fintraffic", "ska": "Skaping"}
-METRIC_NAME = "webcam_discovery_sources_seen_total"
 
 
-def read_discovery_counts(gateway_url: str, *, timeout_s: float = 5) -> dict[str, int]:
-    """Read the cumulative discovery counters currently retained by Pushgateway."""
-    with urlopen(f"{gateway_url.rstrip('/')}/metrics", timeout=timeout_s) as response:
-        exposition = response.read().decode("utf-8")
-    counts = dict.fromkeys(NETWORK_NAMES, 0)
-    for family in text_string_to_metric_families(exposition):
-        for sample in family.samples:
-            if sample.name != METRIC_NAME:
-                continue
-            network = sample.labels.get("source_network")
-            if network in counts:
-                counts[network] = int(sample.value)
-    return counts
-
-
-def count_differences(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
-    """Return non-negative per-network counter changes."""
-    return {
-        network: max(0, after.get(network, 0) - before.get(network, 0))
-        for network in NETWORK_NAMES
-    }
+def read_discovery_result(path: Path) -> int:
+    """Read the final source-stream count emitted by one discovery command."""
+    source_streams: int | None = None
+    for line in path.read_text().splitlines():
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and isinstance(value.get("source_streams"), int):
+            source_streams = value["source_streams"]
+    if source_streams is None:
+        raise ValueError(f"no discovery result containing source_streams in {path}")
+    return source_streams
 
 
 def send_summary_alert(
@@ -82,19 +70,17 @@ def send_summary_alert(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    snapshot = subparsers.add_parser("snapshot")
-    snapshot.add_argument("path", type=Path)
     notify = subparsers.add_parser("notify")
-    notify.add_argument("path", type=Path)
+    notify.add_argument("windy_result", type=Path)
+    notify.add_argument("fintraffic_result", type=Path)
+    notify.add_argument("skaping_result", type=Path)
     args = parser.parse_args()
 
-    gateway_url = os.getenv("DISCOVERY_METRICS_GATEWAY_URL", "http://pushgateway:9091")
-    if args.command == "snapshot":
-        args.path.write_text(json.dumps(read_discovery_counts(gateway_url)))
-        return
-
-    before = json.loads(args.path.read_text())
-    counts = count_differences(before, read_discovery_counts(gateway_url))
+    counts = {
+        "win": read_discovery_result(args.windy_result),
+        "fin": read_discovery_result(args.fintraffic_result),
+        "ska": read_discovery_result(args.skaping_result),
+    }
     alertmanager_url = os.getenv("ALERTMANAGER_URL", "http://alertmanager:9093")
     send_summary_alert(alertmanager_url, counts)
     print(

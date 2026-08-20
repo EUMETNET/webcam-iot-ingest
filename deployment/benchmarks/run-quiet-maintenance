@@ -18,23 +18,27 @@ wait_until_offset() {
 
 run_cycle() {
     local cycle="$1"
-    local snapshot_path="/tmp/discovery-counts-before-${cycle}.json"
+    local result_prefix="/tmp/discovery-result-${cycle}"
+    local windy_result="${result_prefix}-windy.jsonl"
+    local fintraffic_result="${result_prefix}-fintraffic.jsonl"
+    local skaping_result="${result_prefix}-skaping.jsonl"
     echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"started\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
     python -m storage.s3_spool_cleanup \
         --older-than-hours "$cleanup_age_h" \
         --transformation-prefix T0V0 || status=1
-    if [[ "$notify_summary" == "true" ]]; then
-        python -m observability.discovery_summary_alert snapshot "$snapshot_path" || status=1
-    fi
-    python -m discovery.windy.windy_discovery_workflow || status=1
-    python -m discovery.fintraffic.fintraffic_discovery_workflow || status=1
-    python -m discovery.skaping.skaping_discovery_workflow || status=1
+    python -m discovery.windy.windy_discovery_workflow \
+        | tee "$windy_result" || status=1
+    python -m discovery.fintraffic.fintraffic_discovery_workflow \
+        | tee "$fintraffic_result" || status=1
+    python -m discovery.skaping.skaping_discovery_workflow \
+        | tee "$skaping_result" || status=1
     python -m database.database_backup --pg-dump-mode direct || status=1
-    if [[ "$notify_summary" == "true" && -f "$snapshot_path" && "$status" == "0" ]]; then
-        python -m observability.discovery_summary_alert notify "$snapshot_path" || status=1
+    if [[ "$notify_summary" == "true" && "$status" == "0" ]]; then
+        python -m observability.discovery_summary_alert notify \
+            "$windy_result" "$fintraffic_result" "$skaping_result" || status=1
     fi
     echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"completed\",\"status\":${status},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
-    rm -f "$snapshot_path"
+    rm -f "$windy_result" "$fintraffic_result" "$skaping_result"
 }
 
 wait_until_offset "$first_offset_s"

@@ -140,6 +140,12 @@ def test_alertmanager_is_configured_for_prometheus_email_routing() -> None:
     assert "smtp_auth_password_file: /run/secrets/smtp_password" in routing
     assert "send_resolved: true" in routing
     assert "1234" not in routing
+    group_by = routing.split("group_by:", maxsplit=1)[1].split(
+        "group_wait:", maxsplit=1
+    )[0]
+    assert "alertname" in group_by
+    assert "severity" in group_by
+    assert "source_network" not in group_by
 
     alerts = (ROOT / "prometheus/alerts.yml").read_text()
     assert 'webcam_discovery_run_total{result="failure"}' in alerts

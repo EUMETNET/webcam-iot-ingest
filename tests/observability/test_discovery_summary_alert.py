@@ -3,45 +3,20 @@ from __future__ import annotations
 import json
 
 from observability.discovery_summary_alert import (
-    count_differences,
-    read_discovery_counts,
+    read_discovery_result,
     send_summary_alert,
 )
 
 
-def test_pushgateway_counters_are_read_per_network(monkeypatch) -> None:
-    exposition = b"""# TYPE webcam_discovery_sources_seen_total counter
-webcam_discovery_sources_seen_total{source_network="win"} 25000
-webcam_discovery_sources_seen_total{source_network="fin"} 2263
-webcam_discovery_sources_seen_total{source_network="ska"} 41
-"""
-
-    class Response:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return None
-
-        def read(self):
-            return exposition
-
-    monkeypatch.setattr(
-        "observability.discovery_summary_alert.urlopen",
-        lambda *_args, **_kwargs: Response(),
+def test_reads_final_structured_discovery_result(tmp_path) -> None:
+    result = tmp_path / "windy.jsonl"
+    result.write_text(
+        '{"windy_country_classification": {"small": ["DK"]}}\n'
+        'an incidental non-JSON line\n'
+        '{"source_streams": 24916, "streams_inserted": 48}\n'
     )
-    assert read_discovery_counts("http://pushgateway:9091") == {
-        "win": 25000,
-        "fin": 2263,
-        "ska": 41,
-    }
 
-
-def test_counter_differences_are_per_network_and_non_negative() -> None:
-    assert count_differences(
-        {"win": 20, "fin": 10, "ska": 5},
-        {"win": 120, "fin": 30, "ska": 4},
-    ) == {"win": 100, "fin": 20, "ska": 0}
+    assert read_discovery_result(result) == 24916
 
 
 def test_summary_posts_one_bounded_alert(monkeypatch) -> None:
