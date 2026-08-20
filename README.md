@@ -179,7 +179,7 @@ just container-stack-stop
 
 The production-oriented units in `deployment/systemd/pilot/` let systemd start
 the Compose stack at VM boot and trigger one non-overlapping maintenance
-sequence daily at 12:00 UTC. The sequence attempts S3 image cleanup first,
+sequence daily at 00:00 UTC. The sequence attempts S3 image cleanup first,
 then Windy, Fintraffic, and Skaping discovery, then a verified PostgreSQL
 backup and its conservative retention cleanup. Every step has a timeout;
 failure is recorded but does not suppress later steps. Compose owns worker
@@ -518,6 +518,18 @@ and Skaping, uses the validated 6/0.5/0.5 CPU and 84/4/2 thread allocation,
 and invokes the cleanup-first production maintenance sequence once. The
 printed screen-session name and `/tmp` log path can be used to follow it.
 
+For the final production-scope validation, run all three workers for 36 hours
+with exactly one maintenance sequence at the next 00:00 UTC:
+
+```bash
+just final-36-hour-test
+```
+
+This uses the same 6/0.5/0.5 CPU and 84/4/2 thread allocation, deterministic
+startup staggering, production period-replacement modulus, complete S3/MQTT
+path, and cleanup-first maintenance sequence as the one-day test. It prints
+the detached Screen session name and log path.
+
 ### Reproducible monitoring versions
 
 | Component | Version | Pin location |
@@ -605,7 +617,8 @@ The dedicated command list for the four-day, full-scope checkpoint-13 live
 test is in
 [`manual_tests/run_checkpoint13_four_day_full_live_test`](manual_tests/run_checkpoint13_four_day_full_live_test).
 It includes unit installation, restricted sudo policy, start/inspection/stop
-commands, daily 12:00 UTC discovery, 24-hour spool retention, daily backup,
+commands, its historical daily 12:00 UTC discovery, 24-hour spool retention,
+daily backup,
 and the automatic four-day deadline.
 
 The checkpoint-13 unquiet recovery exercise starts the full three-network

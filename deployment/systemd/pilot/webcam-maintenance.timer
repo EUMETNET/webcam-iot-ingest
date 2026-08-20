@@ -2,7 +2,7 @@
 Description=Daily cleanup, discovery, and backup maintenance
 
 [Timer]
-OnCalendar=*-*-* 12:00:00 UTC
+OnCalendar=*-*-* 00:00:00 UTC
 Persistent=true
 Unit=webcam-maintenance-sequence.service
 

@@ -887,3 +887,12 @@ Malformed objects inside an explicitly selected transformation prefix use S3
 `LastModified` as their cleanup age and are reported separately. This prevents
 abandoned non-canonical image objects from accumulating without extending
 aggressive deletion to other bucket namespaces.
+
+### 2026-08-20 — Midnight operational maintenance
+
+**Affected component:** production maintenance scheduling.
+
+The cleanup-first maintenance sequence runs daily at 00:00 UTC. Discovery for
+all three providers and the verified PostgreSQL backup remain sequenced behind
+image cleanup. A 36-hour final validation recipe exercises all production
+workers and exactly one occurrence of that midnight sequence.

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-run_seconds=86400
+run_seconds="${1:-86400}"
+if [[ ! "$run_seconds" =~ ^[1-9][0-9]*$ ]]; then
+    echo "run duration must be a positive number of seconds" >&2
+    exit 2
+fi
 maintenance_pid=""
 
 stop_workers() {
@@ -47,16 +51,16 @@ seconds_until_midnight=$(((86400 - utc_seconds_today) % 86400))
 maintenance_epoch=$((started + seconds_until_midnight))
 deadline=$((started + run_seconds))
 
-echo "{\"one_day_quiet_test\":{\"event\":\"started\",\"timestamp\":$started,\"deadline\":$deadline,\"maintenance_timestamp\":$maintenance_epoch,\"period_replacement_modulus\":250}}"
+echo "{\"scheduled_quiet_test\":{\"event\":\"started\",\"timestamp\":$started,\"deadline\":$deadline,\"duration_seconds\":$run_seconds,\"maintenance_timestamp\":$maintenance_epoch,\"period_replacement_modulus\":250}}"
 
 (
     if ((seconds_until_midnight > 0)); then
         sleep "$seconds_until_midnight"
     fi
-    echo "{\"one_day_quiet_test\":{\"event\":\"maintenance_started\",\"timestamp\":$(date +%s)}}"
+    echo "{\"scheduled_quiet_test\":{\"event\":\"maintenance_started\",\"timestamp\":$(date +%s)}}"
     result=0
     deployment/systemd/pilot/run-maintenance-sequence || result=$?
-    echo "{\"one_day_quiet_test\":{\"event\":\"maintenance_completed\",\"result\":$result,\"timestamp\":$(date +%s)}}"
+    echo "{\"scheduled_quiet_test\":{\"event\":\"maintenance_completed\",\"result\":$result,\"timestamp\":$(date +%s)}}"
     exit "$result"
 ) &
 maintenance_pid="$!"
@@ -74,5 +78,5 @@ fi
 maintenance_pid=""
 stop_workers
 trap - EXIT
-echo "{\"one_day_quiet_test\":{\"event\":\"completed\",\"maintenance_result\":$maintenance_result,\"timestamp\":$(date +%s)}}"
+echo "{\"scheduled_quiet_test\":{\"event\":\"completed\",\"duration_seconds\":$run_seconds,\"maintenance_result\":$maintenance_result,\"timestamp\":$(date +%s)}}"
 exit "$maintenance_result"

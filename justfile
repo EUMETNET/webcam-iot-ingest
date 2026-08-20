@@ -821,9 +821,27 @@ one-day-quiet-test:
     session="one-day-quiet-${run_hash}"
     log="/tmp/${session}-${timestamp}.log"
     screen -L -Logfile "$log" -dmS "$session" \
-        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-one-day-quiet"
+        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-one-day-quiet 86400"
     echo "started screen session: $session"
     echo "log: $log"
+    echo "maintenance: once at the next 00:00 UTC"
+    echo "period direct-replacement modulus: 250 for win, fin, and ska"
+    echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
+# Final production-scope validation: all workers for 36 hours and exactly one
+# cleanup-first maintenance sequence at the next 00:00 UTC.
+final-36-hour-test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    run_hash="$(printf '%s' "${timestamp}-final-36-hour-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
+    session="final-36-hour-${run_hash}"
+    log="/tmp/${session}-${timestamp}.log"
+    screen -L -Logfile "$log" -dmS "$session" \
+        bash -lc "cd '$PWD' && exec deployment/benchmarks/run-one-day-quiet 129600"
+    echo "started screen session: $session"
+    echo "log: $log"
+    echo "duration: 36 hours"
     echo "maintenance: once at the next 00:00 UTC"
     echo "period direct-replacement modulus: 250 for win, fin, and ska"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"

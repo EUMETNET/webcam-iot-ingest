@@ -167,7 +167,7 @@ def test_systemd_only_orchestrates_compose_and_scheduled_jobs() -> None:
 
     assert "--profile application --profile monitoring up -d" in stack
     assert "python -m ingestion" not in stack
-    assert "OnCalendar=*-*-* 12:00:00 UTC" in maintenance_timer
+    assert "OnCalendar=*-*-* 00:00:00 UTC" in maintenance_timer
     expected = [
         "storage.s3_spool_cleanup",
         "run-discovery windy",
