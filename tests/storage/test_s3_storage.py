@@ -28,15 +28,15 @@ def test_uploads_jpeg_directly_and_returns_reference() -> None:
         config(),
         client=client,
         event_observer=lambda event, values: events.append((event, values)),
-    ).upload("T0V0/win/a b.jpg", b"jpeg")
+    ).upload("T0/win/a b.jpg", b"jpeg")
 
     client.put_object.assert_called_once_with(
         Bucket="webcam",
-        Key="T0V0/win/a b.jpg",
+        Key="T0/win/a b.jpg",
         Body=b"jpeg",
         ContentType="image/jpeg",
     )
-    assert stored.url == "https://public.example/webcam/T0V0/win/a%20b.jpg"
+    assert stored.url == "https://public.example/webcam/T0/win/a%20b.jpg"
     assert events == [
         ("s3_operation", {"result": "success"}),
         ("s3_upload_bytes", {"size_bytes": 4}),
@@ -109,8 +109,8 @@ def test_upload_allows_direct_overwrite_of_the_same_key() -> None:
     client = Mock()
     storage = S3Storage(config(), client=client)
 
-    storage.upload("T0V0/win/same-key.jpg", b"first")
-    storage.upload("T0V0/win/same-key.jpg", b"replacement")
+    storage.upload("T0/win/same-key.jpg", b"first")
+    storage.upload("T0/win/same-key.jpg", b"replacement")
 
     client.head_object.assert_not_called()
     assert client.put_object.call_count == 2

@@ -88,7 +88,11 @@ just cleanup-spool 24
 ```
 
 Only keys matching the configured prefix and canonical
-`T0V0/{network}/{YYYY}/{MM}/{DD}/{HH}/...jpg` layout are eligible by default.
+`T0/{network}/{YYYY}/{MM}/{DD}/{HH}/...jpg` layout are eligible by default.
+Malformed objects found inside the explicitly selected transformation prefix
+fall back to their S3 `LastModified` timestamp, preventing abandoned or
+non-canonical image objects from accumulating. This aggressive fallback is
+never applied bucket-wide and does not include `backups/postgresql/`.
 Select another version with `--transformation-prefix T1V0`, or explicitly use
 `--all-transformation-prefixes` to clean every recognized version. Unknown
 keys and database backups are never deleted. Use `--limit N` for a bounded
@@ -233,7 +237,7 @@ just ingest-fintraffic --limit 10 --dry-run
 ```
 
 Run the equivalent ETag-based Skaping check, or explicitly exercise the full
-T0V0/S3/MQTT path:
+T0/S3/MQTT path:
 
 ```bash
 just ingest-skaping --limit 10 --dry-run
@@ -489,7 +493,7 @@ just two-hour-full-alert-test
 
 This assigns Windy 6 CPUs and 84 threads, Fintraffic 0.5 CPU and 4 threads,
 and Skaping 0.5 CPU and 2 threads. A separate 0.5-CPU maintenance container
-first cleans T0V0 images older than 24 hours, then runs sequential Windy,
+first cleans T0 images older than 24 hours, then runs sequential Windy,
 Fintraffic, and Skaping discovery, and finally creates and verifies the
 PostgreSQL backup. The cycles start at T+20 and, when requested, T+60. At peak, the
 configured quotas total 7.5 CPUs, leaving approximately 0.5 CPU on an

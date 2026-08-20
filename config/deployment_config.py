@@ -693,7 +693,7 @@ class TransformationConfig:
     @classmethod
     def from_environment(cls) -> "TransformationConfig":
         config = cls(
-            version=os.getenv("TRANSFORMATION_VERSION", "T0V0"),
+            version=os.getenv("TRANSFORMATION_VERSION", "T0"),
             max_height_px=int(os.getenv("MAX_DERIVED_HEIGHT_PX", "288")),
             jpeg_quality_initial=int(os.getenv("JPEG_QUALITY_INITIAL", "90")),
             target_size_bytes=int(os.getenv("TARGET_IMAGE_SIZE_BYTES", "50000")),
@@ -708,8 +708,10 @@ class TransformationConfig:
         return config
 
     def validate(self) -> None:
-        if len(self.version) != 4 or not self.version.isalnum():
-            raise ValueError("transformation version must be four alphanumeric characters")
+        if not 1 <= len(self.version) <= 16 or not self.version.isalnum():
+            raise ValueError(
+                "transformation version must contain 1 to 16 alphanumeric characters"
+            )
         if self.max_height_px < 1:
             raise ValueError("maximum derived height must be positive")
         if not 1 <= self.jpeg_quality_initial <= 95:

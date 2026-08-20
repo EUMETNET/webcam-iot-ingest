@@ -4,7 +4,11 @@ from datetime import datetime
 
 
 def build_derived_stream_id(source_stream_id: str, version: str) -> str:
-    if not source_stream_id.isalnum() or len(version) != 4 or not version.isalnum():
+    if (
+        not source_stream_id.isalnum()
+        or not 1 <= len(version) <= 16
+        or not version.isalnum()
+    ):
         raise ValueError("derived stream components must be alphanumeric")
     return f"{source_stream_id}{version}"
 

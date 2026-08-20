@@ -188,11 +188,11 @@ def test_published_job_emits_latency_payload_derived_and_duration() -> None:
     client.download.return_value = PNG_1PX
     storage = Mock(prefix="")
     storage.reference.return_value = StoredObject(
-        "bucket", "T0V0/win/image.jpg", "https://objects.example/image.jpg"
+        "bucket", "T0/win/image.jpg", "https://objects.example/image.jpg"
     )
     storage.upload.return_value = storage.reference.return_value
     publisher = Mock()
-    publisher.publish.return_value = "webcam/T0V0"
+    publisher.publish.return_value = "webcam/T0"
     events = []
     result = process_job(
         client,
@@ -254,14 +254,14 @@ def test_publication_failure_leaves_processed_state_for_next_attempt() -> None:
     client.download.return_value = PNG_1PX
     storage = Mock(prefix="")
     stored = StoredObject(
-        "bucket", "T0V0/win/image.jpg", "https://objects.example/image.jpg"
+        "bucket", "T0/win/image.jpg", "https://objects.example/image.jpg"
     )
     storage.reference.return_value = stored
     storage.upload.return_value = stored
     publisher = Mock()
     publisher.publish.side_effect = [
         MqttPublicationError("ambiguous failure"),
-        "webcam/T0V0",
+        "webcam/T0",
     ]
     first = process_job(
         client,

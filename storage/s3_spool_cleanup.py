@@ -1,4 +1,4 @@
-"""Delete canonical derived images older than a configured exact age."""
+"""Delete derived-image objects older than a configured exact age."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from storage.s3_storage import create_s3_client
 
 _IMAGE_KEY = re.compile(
     r"^(?:(?P<prefix>.+)/)?"
-    r"(?P<version>[A-Za-z0-9]{4})/(?P<network>win|fin|ska)/"
+    r"(?P<version>[A-Za-z0-9]{1,16})/(?P<network>win|fin|ska)/"
     r"(?P<year>\d{4})/(?P<month>\d{2})/(?P<day>\d{2})/(?P<hour>\d{2})/"
     r"(?P<timestamp>\d{8}T\d{6}Z)_[^/]+\.jpg$"
 )
@@ -33,6 +33,8 @@ class CleanupResult:
     deleted: int = 0
     failed: int = 0
     skipped_unknown: int = 0
+    malformed_eligible: int = 0
+    malformed_deleted: int = 0
     eligible_bytes: int = 0
     deleted_bytes: int = 0
     duration_seconds: float = 0.0
@@ -84,6 +86,13 @@ def _objects(client: Any, bucket: str, prefix: str) -> Iterator[dict[str, Any]]:
         yield from page.get("Contents", ())
 
 
+def _last_modified_timestamp(item: dict[str, Any]) -> datetime | None:
+    value = item.get("LastModified")
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        return None
+    return value.astimezone(timezone.utc)
+
+
 def cleanup_spool(
     *,
     config: S3Config,
@@ -94,7 +103,7 @@ def cleanup_spool(
     client: Any | None = None,
     metrics: MaintenanceJobMetrics | None = None,
     include_keys: bool = False,
-    transformation_prefix: str = "T0V0",
+    transformation_prefix: str = "T0",
     all_transformation_prefixes: bool = False,
 ) -> CleanupResult:
     if older_than_hours <= 0:
@@ -102,9 +111,11 @@ def cleanup_spool(
     if limit is not None and limit < 1:
         raise ValueError("limit must be positive")
     if not all_transformation_prefixes and not re.fullmatch(
-        r"[A-Za-z0-9]{4}", transformation_prefix
+        r"[A-Za-z0-9]{1,16}", transformation_prefix
     ):
-        raise ValueError("transformation prefix must contain four alphanumerics")
+        raise ValueError(
+            "transformation prefix must contain 1 to 16 alphanumeric characters"
+        )
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=older_than_hours)
     result = CleanupResult(
@@ -117,7 +128,7 @@ def cleanup_spool(
     metrics = metrics or MaintenanceJobMetrics.from_environment("spool_cleanup")
     started = time.monotonic()
     listing_started = time.monotonic()
-    candidates: list[tuple[str, int]] = []
+    candidates: list[tuple[str, int, bool]] = []
     try:
         listing_prefix = config.prefix
         if not all_transformation_prefixes:
@@ -136,16 +147,25 @@ def cleanup_spool(
                     None if all_transformation_prefixes else transformation_prefix
                 ),
             )
+            malformed = timestamp is None
             if timestamp is None:
-                result.skipped_unknown += 1
-                continue
+                scoped_prefix = f"{listing_prefix.strip('/')}/"
+                if all_transformation_prefixes or not key.startswith(scoped_prefix):
+                    result.skipped_unknown += 1
+                    continue
+                timestamp = _last_modified_timestamp(item)
+                if timestamp is None:
+                    result.skipped_unknown += 1
+                    continue
             if timestamp < cutoff:
                 size = int(item.get("Size", 0))
-                candidates.append((key, size))
+                candidates.append((key, size, malformed))
                 if result.selected_keys is not None:
                     result.selected_keys.append(key)
                 result.eligible += 1
                 result.eligible_bytes += size
+                if malformed:
+                    result.malformed_eligible += 1
                 if limit is not None and len(candidates) >= limit:
                     break
         listing_duration = time.monotonic() - listing_started
@@ -156,7 +176,7 @@ def cleanup_spool(
                 response = client.delete_objects(
                     Bucket=config.bucket,
                     Delete={
-                        "Objects": [{"Key": key} for key, _ in batch],
+                        "Objects": [{"Key": key} for key, _, _ in batch],
                         "Quiet": False,
                     },
                 )
@@ -164,8 +184,12 @@ def cleanup_spool(
                 error_keys = {row["Key"] for row in response.get("Errors", ())}
                 result.deleted += len(deleted_keys)
                 result.failed += len(error_keys)
-                sizes = dict(batch)
+                sizes = {key: size for key, size, _ in batch}
                 result.deleted_bytes += sum(sizes[key] for key in deleted_keys)
+                malformed_keys = {
+                    key for key, _, malformed in batch if malformed
+                }
+                result.malformed_deleted += len(deleted_keys & malformed_keys)
                 unreported = len(batch) - len(deleted_keys) - len(error_keys)
                 result.failed += max(0, unreported)
         deletion_duration = time.monotonic() - deletion_started
@@ -190,6 +214,8 @@ def cleanup_spool(
             "deleted": result.deleted,
             "failed": result.failed,
             "skipped_unknown": result.skipped_unknown,
+            "malformed_eligible": result.malformed_eligible,
+            "malformed_deleted": result.malformed_deleted,
         },
         bytes_by_outcome={
             "eligible": result.eligible_bytes,
@@ -210,8 +236,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument(
         "--transformation-prefix",
-        default="T0V0",
-        help="four-character transformation prefix cleaned by default",
+        default="T0",
+        help="alphanumeric transformation prefix cleaned by default",
     )
     parser.add_argument(
         "--all-transformation-prefixes",

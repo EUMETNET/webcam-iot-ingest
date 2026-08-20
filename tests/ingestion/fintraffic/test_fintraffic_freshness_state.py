@@ -161,12 +161,12 @@ def test_measured_time_reaches_notification_and_processed_state_after_publish() 
     client = _client(current, '"etag-v2"')
     storage = Mock(prefix="")
     stored = StoredObject(
-        "bucket", "T0V0/fin/image.jpg", "https://objects.example/image.jpg"
+        "bucket", "T0/fin/image.jpg", "https://objects.example/image.jpg"
     )
     storage.reference.return_value = stored
     storage.upload.return_value = stored
     publisher = Mock()
-    publisher.publish.return_value = "webcam/T0V0"
+    publisher.publish.return_value = "webcam/T0"
 
     result = process_job(
         client,

@@ -25,7 +25,7 @@ run_cycle() {
     echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"started\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
     python -m storage.s3_spool_cleanup \
         --older-than-hours "$cleanup_age_h" \
-        --transformation-prefix T0V0 || status=1
+        --transformation-prefix T0 || status=1
     python -m discovery.windy.windy_discovery_workflow \
         | tee "$windy_result" || status=1
     python -m discovery.fintraffic.fintraffic_discovery_workflow \

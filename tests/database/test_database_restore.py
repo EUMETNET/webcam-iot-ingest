@@ -131,7 +131,7 @@ def test_noncanonical_restore_key_is_rejected(tmp_path: Path):
         restore_database_backup(
             database=database(tmp_path / "password"),
             storage=storage(),
-            object_key="T0V0/win/image.jpg",
+            object_key="T0/win/image.jpg",
             dry_run=True,
             client=Client(b"dump"),
             metrics=Metrics(),

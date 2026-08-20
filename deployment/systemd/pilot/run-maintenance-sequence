@@ -52,7 +52,7 @@ run_step spool_cleanup "${WEBCAM_CLEANUP_TIMEOUT_S:-3600}" \
     docker compose --env-file .env --profile jobs run --rm \
     webcam-job python -m storage.s3_spool_cleanup \
     --older-than-hours "${WEBCAM_SPOOL_RETENTION_HOURS:-24}" \
-    --transformation-prefix "${WEBCAM_TRANSFORMATION_PREFIX:-T0V0}"
+    --transformation-prefix "${WEBCAM_TRANSFORMATION_PREFIX:-T0}"
 run_step discovery_windy "${WEBCAM_WINDY_DISCOVERY_TIMEOUT_S:-1800}" \
     deployment/systemd/pilot/run-discovery windy
 run_step discovery_fintraffic "${WEBCAM_FINTRAFFIC_DISCOVERY_TIMEOUT_S:-900}" \

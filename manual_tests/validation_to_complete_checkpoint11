@@ -43,7 +43,7 @@ Provider markers must be ETags; do not expect a timestamp-shaped marker.
     just ingest-skaping --limit 4 --publish
 
 Confirm changed images report `published`, an S3 object key under
-`T0V0/ska/`, and an MQTT topic. In PostgreSQL, inspect without printing full
+`T0/ska/`, and an MQTT topic. In PostgreSQL, inspect without printing full
 provider metadata:
 
     docker compose exec postgres psql \

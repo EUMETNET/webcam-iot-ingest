@@ -1,4 +1,4 @@
-"""Pilot T0V0 JPEG transformation."""
+"""Pilot T0 JPEG transformation."""
 
 from __future__ import annotations
 

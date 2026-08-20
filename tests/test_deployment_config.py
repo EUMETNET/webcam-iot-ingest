@@ -296,7 +296,7 @@ def test_checkpoint6_configuration_defaults(monkeypatch) -> None:
     transformation = TransformationConfig.from_environment()
     mqtt = MqttConfig.from_environment()
 
-    assert transformation.version == "T0V0"
+    assert transformation.version == "T0"
     assert transformation.max_height_px == 288
     assert transformation.target_size_bytes == 50_000
     assert transformation.panoramic_target_size_bytes == 200_000

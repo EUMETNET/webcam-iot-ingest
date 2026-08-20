@@ -9,7 +9,7 @@ from ingestion.notification.mqtt_publisher import MqttPublisher
 def main() -> None:
     with MqttPublisher(MqttConfig.from_environment()) as publisher:
         topic = publisher.publish(
-            "T0V0", {"schema_version": "N0V0", "smoke_test": True}
+            "T0", {"schema_version": "N0V0", "smoke_test": True}
         )
     print(json.dumps({"published": True, "topic": topic}, sort_keys=True))
 

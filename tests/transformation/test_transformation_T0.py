@@ -4,12 +4,12 @@ from PIL import Image
 
 from config.deployment_config import TransformationConfig
 from ingestion.shared.source_image_validation import validate_source_image
-from ingestion.transformation.transformation_T0V0 import transform
+from ingestion.transformation.transformation_T0 import transform
 
 
 def config(**changes) -> TransformationConfig:
     values = dict(
-        version="T0V0",
+        version="T0",
         max_height_px=288,
         jpeg_quality_initial=90,
         target_size_bytes=50_000,

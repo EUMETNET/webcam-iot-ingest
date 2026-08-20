@@ -15,7 +15,7 @@ from ingestion.shared.derived_identifiers import (
     build_object_key,
 )
 from ingestion.shared.source_image_validation import SourceImage
-from ingestion.transformation.transformation_T0V0 import DerivedImage, transform
+from ingestion.transformation.transformation_T0 import DerivedImage, transform
 from storage.s3_storage import S3Storage
 
 

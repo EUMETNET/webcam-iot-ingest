@@ -64,7 +64,7 @@ not. The just recipe runs Python on the host and therefore selects
 `127.0.0.1` for the local Mosquitto broker rather than the Docker-internal
 hostname `mqtt`.
 
-Recorded result: successful. A bounded image completed validation, T0V0
+Recorded result: successful. A bounded image completed validation, T0
 transformation, EWC S3 upload, durable outbox completion, and QoS 1 MQTT
 publication.
 

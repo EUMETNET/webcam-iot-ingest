@@ -21,14 +21,14 @@ def test_publishes_compact_json_at_qos_one() -> None:
         config(),
         client=client,
         event_observer=lambda event, values: events.append((event, values)),
-    ).publish("T0V0", {"x": 1})
+    ).publish("T0", {"x": 1})
 
-    assert topic == "webcam/T0V0"
+    assert topic == "webcam/T0"
     client.publish.assert_called_once_with(
-        "webcam/T0V0", '{"x":1}', qos=1, retain=False
+        "webcam/T0", '{"x":1}', qos=1, retain=False
     )
     assert events == [
-        ("mqtt_operation", {"version": "T0V0", "result": "success"})
+        ("mqtt_operation", {"version": "T0", "result": "success"})
     ]
 
 
@@ -43,7 +43,7 @@ def test_exhausted_retries_emit_one_final_failure(retry_count: int) -> None:
             config(retry_count),
             client=client,
             event_observer=lambda event, values: events.append((event, values)),
-        ).publish("T0V0", {})
+        ).publish("T0", {})
 
     assert client.publish.call_count == retry_count + 1
     assert "broker detail" not in str(caught.value)
@@ -51,7 +51,7 @@ def test_exhausted_retries_emit_one_final_failure(retry_count: int) -> None:
         ("retry", {"operation": "mqtt_publish", "reason": "request_failure"})
     ) == retry_count
     assert events.count(
-        ("mqtt_operation", {"version": "T0V0", "result": "failure"})
+        ("mqtt_operation", {"version": "T0", "result": "failure"})
     ) == 1
 
 
@@ -72,13 +72,13 @@ def test_success_after_configured_retries_emits_one_final_success(
         config(retry_count),
         client=client,
         event_observer=lambda event, values: events.append((event, values)),
-    ).publish("T0V0", {})
+    ).publish("T0", {})
 
-    assert topic == "webcam/T0V0"
+    assert topic == "webcam/T0"
     assert client.publish.call_count == retry_count + 1
     assert events.count(
         ("retry", {"operation": "mqtt_publish", "reason": "request_failure"})
     ) == retry_count
     assert events.count(
-        ("mqtt_operation", {"version": "T0V0", "result": "success"})
+        ("mqtt_operation", {"version": "T0", "result": "success"})
     ) == 1

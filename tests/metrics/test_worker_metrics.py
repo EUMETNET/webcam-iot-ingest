@@ -43,7 +43,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
             },
         )
     metrics.observe_event(
-        "transformation", {"version": "T0V0", "outcome": "success"}
+        "transformation", {"version": "T0", "outcome": "success"}
     )
     metrics.observe_event(
         "source_download_bytes", {"size_bytes": 60000}
@@ -54,7 +54,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     metrics.observe_event("s3_operation", {"result": "success"})
     metrics.observe_event(
         "mqtt_operation",
-        {"version": "T0V0", "result": "success"},
+        {"version": "T0", "result": "success"},
     )
     metrics.observe_event(
         "retry",
@@ -75,7 +75,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
     metrics.observe_event(
         "derived_image",
         {
-            "version": "T0V0",
+            "version": "T0",
             "size_bytes": 12345,
             "width": 400,
             "height": 224,
@@ -85,7 +85,7 @@ def test_structured_job_observability_is_low_cardinality() -> None:
         },
     )
     metrics.observe_event(
-        "mqtt_payload", {"version": "T0V0", "size_bytes": 1024}
+        "mqtt_payload", {"version": "T0", "size_bytes": 1024}
     )
     metrics.observe_event(
         "failure", {"stage": "s3_upload", "reason": "s3_upload"}

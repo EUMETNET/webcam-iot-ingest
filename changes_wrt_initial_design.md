@@ -869,3 +869,21 @@ provider metadata; Fintraffic and Skaping use the registered site coordinates
 because no more precise stream-level position is available. Windy falls back
 to the site position only when legacy or incomplete source-stream metadata
 lacks usable camera coordinates.
+
+### 2026-08-20 — Compact transformation identifier
+
+**Affected component:** derived-stream identifiers, S3 keys, MQTT topics, and
+transformation-labelled observability.
+
+The pilot JPEG transformation identifier is `T0` rather than `T0V0`. The
+compact identifier remains sufficient for the expected one or two pilot
+transformation revisions and keeps every derived-stream identifier generated
+from the current registry within 16 characters. Notification schema `N0V0`
+is unchanged. Transformation-scoped S3 cleanup accepts variable-length
+alphanumeric transformation prefixes, defaults to `T0`, and remains isolated
+from PostgreSQL backup retention under `backups/postgresql/`.
+
+Malformed objects inside an explicitly selected transformation prefix use S3
+`LastModified` as their cleanup age and are reported separately. This prevents
+abandoned non-canonical image objects from accumulating without extending
+aggressive deletion to other bucket namespaces.

@@ -65,7 +65,7 @@ publication-outbox panel.
     just container-cleanup-spool 24 --dry-run \
       --all-transformation-prefixes --limit 10 --show-keys
 
-Confirm the first command selects only T0V0 and the second still ignores
+Confirm the first command selects only T0 and the second still ignores
 unknown and database-backup keys.
 
 After a verified backup exists, inspect conservative backup cleanup:

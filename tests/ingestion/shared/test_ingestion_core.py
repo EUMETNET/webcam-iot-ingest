@@ -27,8 +27,8 @@ def test_upload_precedes_notification_and_payload_references_object() -> None:
 
     def publish(version, payload):
         events.append("publish")
-        assert payload["storage"]["object_key"].startswith("pilot/T0V0/win/")
-        return "webcam/T0V0"
+        assert payload["storage"]["object_key"].startswith("pilot/T0/win/")
+        return "webcam/T0"
 
     publisher.publish.side_effect = publish
 
@@ -37,10 +37,10 @@ def test_upload_precedes_notification_and_payload_references_object() -> None:
         source=source,
         download_timestamp=datetime(2026, 7, 21, 12, 0, tzinfo=UTC),
         provider_update_timestamp=None,
-        transformation=TransformationConfig("T0V0", 288, 90, 50_000, 200_000, 2.0),
+        transformation=TransformationConfig("T0", 288, 90, 50_000, 200_000, 2.0),
         storage=storage,
         publisher=publisher,
     )
 
     assert events == ["upload", "publish"]
-    assert result.mqtt_topic == "webcam/T0V0"
+    assert result.mqtt_topic == "webcam/T0"

@@ -924,7 +924,7 @@ Image-spool cleanup lists the configured S3 namespace and recognizes only
 canonical derived-image keys.  It derives age from the UTC timestamp encoded
 in each validated key and selects objects older than the exact configured
 number of hours; the production value is 24 hours.  By default an invocation
-must name one transformation prefix, such as `T0V0`.  An explicit
+must name one transformation prefix, such as `T0`.  An explicit
 `all-transformation-prefixes` option may cover every recognized canonical
 transformation layout.  Unknown, malformed, non-image, and PostgreSQL-backup
 keys are skipped.  Dry-run, result limits, paginated listing, batched deletion,

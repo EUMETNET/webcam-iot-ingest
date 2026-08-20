@@ -7,7 +7,7 @@ from typing import Any
 
 from database.registry_queries import DueSourceStream
 from ingestion.shared.source_image_validation import SourceImage
-from ingestion.transformation.transformation_T0V0 import DerivedImage
+from ingestion.transformation.transformation_T0 import DerivedImage
 from storage.s3_storage import StoredObject
 
 

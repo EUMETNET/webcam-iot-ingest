@@ -1,4 +1,4 @@
-Checkpoint 6 validation runbook - T0V0, S3, and N0V0/MQTT
+Checkpoint 6 validation runbook - T0, S3, and N0V0/MQTT
 ==========================================================
 
 1. Safety and focused tests
@@ -24,7 +24,7 @@ not update PostgreSQL.
 ------------------------
 
     docker compose --env-file .env up -d mqtt
-    docker compose --env-file .env exec mqtt mosquitto_sub -h localhost -t 'webcam/T0V0' -q 1 -C 1 -W 30 -v
+    docker compose --env-file .env exec mqtt mosquitto_sub -h localhost -t 'webcam/T0' -q 1 -C 1 -W 30 -v
 
 In another terminal, when running from the host:
 
