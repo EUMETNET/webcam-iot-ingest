@@ -321,6 +321,7 @@ ingest-skaping *args:
 # Start the monitoring containers
 monitoring:
     docker compose --env-file .env --profile monitoring up -d
+    docker compose --env-file .env kill -s HUP prometheus
 
 # Full-scale Windy test using a NULL-initialized bounded provider-period estimate.
 windy-period-test duration="2h":
@@ -642,11 +643,12 @@ ingestion-test-fintraffic-skaping duration="40m":
 # Run all three ingestion networks through the complete publication pipeline.
 # The worker and maintenance quotas total 7.5 CPUs, leaving 0.5 CPU on an
 # eight-core VM for PostgreSQL, MQTT, and monitoring.
-ingestion-test-three-networks duration="90m" maintenance_cycles="2":
+ingestion-test-three-networks duration="90m" maintenance_cycles="2" notify_summary="false":
     #!/usr/bin/env bash
     set -euo pipefail
     duration="$1"
     maintenance_cycles="$2"
+    notify_summary="$3"
     if [[ ! "$duration" =~ ^[1-9][0-9]*[smh]$ ]]; then
         echo "duration must be a positive number followed by s, m, or h" >&2
         exit 2
@@ -661,6 +663,10 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2":
         echo "maintenance_cycles must be 1 or 2" >&2
         exit 2
     fi
+    if [[ "$notify_summary" != "true" && "$notify_summary" != "false" ]]; then
+        echo "notify_summary must be true or false" >&2
+        exit 2
+    fi
     second_maintenance_offset=3600
     if [[ "$maintenance_cycles" == "1" ]]; then
         second_maintenance_offset=0
@@ -673,7 +679,8 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2":
     maintenance_name="webcam-maintenance-${duration}-${run_hash}"
 
     docker compose --env-file .env --profile monitoring up -d \
-        postgres mqtt prometheus grafana
+        postgres mqtt prometheus alertmanager grafana pushgateway
+    docker compose --env-file .env kill -s HUP prometheus
     docker compose --env-file .env build webcam-job
     metrics_bind_host="$(docker compose --env-file .env exec -T prometheus \
         sh -c "awk '\$2 == \"host.docker.internal\" { print \$1; exit }' /etc/hosts")"
@@ -733,7 +740,7 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2":
         --name "$maintenance_name" \
         --volume "$PWD/deployment/benchmarks:/benchmarks:ro" \
         webcam-job bash /benchmarks/run-quiet-maintenance \
-            1200 "$second_maintenance_offset" 24
+            1200 "$second_maintenance_offset" 24 "$notify_summary"
 
     docker update --cpus 6.0 "$win_name" >/dev/null
     docker update --cpus 0.5 "$fin_name" "$ska_name" >/dev/null
@@ -748,6 +755,11 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2":
     fi
     echo "Logs: docker logs -f <container-name>"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
+
+# Full two-hour ingestion test, one maintenance run at T+20m, and one email
+# alert summarising source streams seen by the three discovery providers.
+two-hour-full-alert-test:
+    just ingestion-test-three-networks 2h 1 true
 
 # Checkpoint-13 recovery drill: full workers, Windy crash, PostgreSQL restart,
 # then the cleanup-first production maintenance sequence. Runs in screen.

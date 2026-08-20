@@ -297,6 +297,7 @@ services:
       S3_SECRET_KEY_FILE: /run/secrets/s3_secret_key
       DISCOVERY_METRICS_GATEWAY_URL: http://pushgateway:9091
       MAINTENANCE_METRICS_GATEWAY_URL: http://pushgateway:9091
+      ALERTMANAGER_URL: http://alertmanager:9093
     secrets:
       - database_password
       - windy_api_key
@@ -392,10 +393,39 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      - alertmanager
       - pushgateway
       - postgres-exporter
       - node-exporter
       - cadvisor
+
+  alertmanager:
+    profiles: ["monitoring"]
+    image: prom/alertmanager:v0.34.0
+    # Compose implements file-backed secrets as bind mounts and therefore
+    # preserves the host file's restrictive ownership and mode. Run without
+    # capabilities except DAC_OVERRIDE so Alertmanager can read the mode-0600
+    # secret and write its state volume without broadening host permissions.
+    user: "0:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    secrets:
+      - source: alertmanager_smtp_password
+        target: smtp_password
+    restart: unless-stopped
 
   pushgateway:
     profiles: ["monitoring"]
@@ -426,6 +456,7 @@ volumes:
   grafana-storage:
   prometheus-data:
   pushgateway-data:
+  alertmanager-data:
 
 secrets:
   database_password:
@@ -438,3 +469,5 @@ secrets:
     file: ./.secrets/s3_access_key
   s3_secret_key:
     file: ./.secrets/s3_secret_key
+  alertmanager_smtp_password:
+    file: ./.secrets/alertmanager_smtp_password

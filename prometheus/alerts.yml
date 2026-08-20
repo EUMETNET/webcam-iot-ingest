@@ -2,8 +2,8 @@ groups:
   - name: webcam-infrastructure
     rules:
       - alert: WebcamScrapeTargetDown
-        expr: up{job=~"postgres-exporter|node-exporter|cadvisor|mqtt-exporter"} == 0
-        for: 2m
+        expr: up{job=~"alertmanager|postgres-exporter|node-exporter|cadvisor|mqtt-exporter"} == 0
+        for: 30m
         labels:
           severity: warning
         annotations:
@@ -40,6 +40,12 @@ groups:
           severity: critical
         annotations:
           summary: "PostgreSQL exporter cannot reach PostgreSQL"
+      - alert: WebcamDiscoveryFailed
+        expr: increase(webcam_discovery_run_total{result="failure"}[15m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Discovery failed for {{ $labels.source_network }}"
       - alert: WebcamCleanupFailed
         expr: |
           increase(webcam_maintenance_run_total{maintenance_job="spool_cleanup",result="failure"}[15m]) > 0
@@ -73,3 +79,12 @@ groups:
           severity: critical
         annotations:
           summary: "The latest cleanup-first maintenance sequence failed"
+      # Temporary pilot notification: remove after maintenance success has
+      # been operationally established. The expression naturally resolves
+      # after 15 minutes, before the four-hour repeat interval.
+      - alert: WebcamMaintenanceSequenceSucceeded
+        expr: webcam_maintenance_sequence_last_run_unixtime{result="success"} > time() - 900
+        labels:
+          severity: info
+        annotations:
+          summary: "The cleanup-first maintenance sequence succeeded"

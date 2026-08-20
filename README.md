@@ -278,14 +278,30 @@ just ingest-skaping --limit 4 --publish
 
 ## Monitoring
 
-Start the full monitoring stack (Prometheus + Grafana):
+Start the full monitoring stack (Prometheus + Alertmanager + Grafana):
 
 ```bash
 just local
 ```
 
 - Prometheus: http://localhost:9090
+- Alertmanager: http://localhost:9093
 - Grafana: http://localhost:3000
+
+Alertmanager groups Prometheus alerts and sends both firing and resolved email
+notifications. The pilot routing configuration uses
+`tpdeeplearning@gmail.com` as sender and
+`pierre.lepetit@gmail.com` as recipient. Before starting monitoring, replace
+the placeholder content of the ignored
+`.secrets/alertmanager_smtp_password` file with a Google app password (without
+spaces or a trailing newline) and retain mode `0600`. The normal `just local`
+and `just monitoring` commands then include Alertmanager automatically. The
+SMTP password is mounted as a Docker secret and is never stored in the
+committed configuration. Compose preserves the mode-`0600` host ownership for
+this file-backed secret. The Alertmanager container consequently uses UID 0
+only to read it, while retaining only the `DAC_OVERRIDE` capability, using a
+read-only root filesystem and `no-new-privileges`; the secret is not made
+world-readable.
 
 Run a detached, monitored Windy benchmark with
 [just](https://github.com/casey/just):
@@ -456,16 +472,26 @@ just ingestion-test-three-networks 90m
 ```
 
 The optional second argument selects one or two maintenance cycles. For a
-two-hour run with exactly one discovery/cleanup cycle at T+20 minutes, use:
+two-hour run with exactly one complete maintenance cycle at T+20 minutes, use:
 
 ```bash
 just ingestion-test-three-networks 2h 1
 ```
 
+To run the same full two-hour test with one maintenance cycle at T+20 minutes
+and, on complete maintenance success, one Alertmanager email summarising the
+number of streams seen by Windy, Fintraffic, Skaping, and all three providers
+combined, run:
+
+```bash
+just two-hour-full-alert-test
+```
+
 This assigns Windy 6 CPUs and 84 threads, Fintraffic 0.5 CPU and 4 threads,
 and Skaping 0.5 CPU and 2 threads. A separate 0.5-CPU maintenance container
-runs sequential Windy, Fintraffic, and Skaping discovery followed by cleanup
-of T0V0 images older than 24 hours at T+20 and T+60 minutes. At peak, the
+first cleans T0V0 images older than 24 hours, then runs sequential Windy,
+Fintraffic, and Skaping discovery, and finally creates and verifies the
+PostgreSQL backup. The cycles start at T+20 and, when requested, T+60. At peak, the
 configured quotas total 7.5 CPUs, leaving approximately 0.5 CPU on an
 eight-core VM for PostgreSQL, MQTT, and monitoring. All three workers use
 their network-specific polling floors and the complete S3/MQTT publication
@@ -490,6 +516,7 @@ printed screen-session name and `/tmp` log path can be used to follow it.
 | Component | Version | Pin location |
 |---|---:|---|
 | Prometheus | 3.13.1 | `docker-compose.yml` image tag |
+| Alertmanager | 0.34.0 | `docker-compose.yml` image tag |
 | Prometheus Pushgateway | 1.11.3 | `docker-compose.yml` image tag |
 | Grafana OSS | 11.2.0 | `docker-compose.yml` image tag |
 | postgres_exporter | 0.19.1 | `docker-compose.yml` image tag |
@@ -508,11 +535,19 @@ Pushgateway on port 9091. Cleanup, database backup, backup retention, and
 explicit restore publish separate maintenance-job metrics. Prometheus scrapes
 the Pushgateway and Grafana displays retained results after each process exits.
 
-The monitoring profile also starts PostgreSQL, host, and container exporters.
+The monitoring profile also starts Alertmanager plus PostgreSQL, host, and
+container exporters.
 Grafana provisions an **Infrastructure health** dashboard and a
 **Maintenance jobs** dashboard. Alert rules cover unavailable
 infrastructure targets, unavailable checkpoint workers, low host disk space,
-PostgreSQL failure, and cleanup or backup failures.
+PostgreSQL failure, and cleanup or backup failures. Alertmanager groups these
+alerts, delivers email notifications, and sends a resolved notification when
+the condition clears.
+
+During pilot validation only, each successful production maintenance sequence
+also raises a short-lived informational email alert. This temporary success
+notification is intentionally separate from the permanent failure alerts and
+can be removed after scheduled maintenance has been established operationally.
 
 ## Checkpoint-12 systemd validation
 

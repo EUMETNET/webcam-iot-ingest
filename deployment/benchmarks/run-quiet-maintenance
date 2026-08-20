@@ -4,6 +4,7 @@ set -uo pipefail
 first_offset_s="${1:-1200}"
 second_offset_s="${2:-3600}"
 cleanup_age_h="${3:-24}"
+notify_summary="${4:-false}"
 started_epoch="$(date +%s)"
 status=0
 
@@ -17,14 +18,23 @@ wait_until_offset() {
 
 run_cycle() {
     local cycle="$1"
+    local snapshot_path="/tmp/discovery-counts-before-${cycle}.json"
     echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"started\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
-    python -m discovery.windy.windy_discovery_workflow || status=1
-    python -m discovery.fintraffic.fintraffic_discovery_workflow || status=1
-    python -m discovery.skaping.skaping_discovery_workflow || status=1
     python -m storage.s3_spool_cleanup \
         --older-than-hours "$cleanup_age_h" \
         --transformation-prefix T0V0 || status=1
+    if [[ "$notify_summary" == "true" ]]; then
+        python -m observability.discovery_summary_alert snapshot "$snapshot_path" || status=1
+    fi
+    python -m discovery.windy.windy_discovery_workflow || status=1
+    python -m discovery.fintraffic.fintraffic_discovery_workflow || status=1
+    python -m discovery.skaping.skaping_discovery_workflow || status=1
+    python -m database.database_backup --pg-dump-mode direct || status=1
+    if [[ "$notify_summary" == "true" && -f "$snapshot_path" && "$status" == "0" ]]; then
+        python -m observability.discovery_summary_alert notify "$snapshot_path" || status=1
+    fi
     echo "{\"quiet_maintenance\":{\"cycle\":${cycle},\"event\":\"completed\",\"status\":${status},\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}}"
+    rm -f "$snapshot_path"
 }
 
 wait_until_offset "$first_offset_s"
