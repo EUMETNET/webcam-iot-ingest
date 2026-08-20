@@ -681,17 +681,12 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2" notify_summa
     docker compose --env-file .env --profile monitoring up -d \
         postgres mqtt prometheus alertmanager grafana pushgateway
     docker compose --env-file .env kill -s HUP prometheus
-    docker compose --env-file .env build webcam-job
-    metrics_bind_host="$(docker compose --env-file .env exec -T prometheus \
-        sh -c "awk '\$2 == \"host.docker.internal\" { print \$1; exit }' /etc/hosts")"
-    if [[ -z "$metrics_bind_host" ]]; then
-        echo "could not resolve the Prometheus host-gateway address" >&2
-        exit 1
-    fi
+    docker compose --env-file .env build \
+        webcam-job windy-worker fintraffic-worker skaping-worker
 
-    docker compose --env-file .env run -d --no-deps \
-        --name "$win_name" --publish "$metrics_bind_host:8013:8013" \
-        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8013 \
+    docker compose --env-file .env --profile application run -d --no-deps \
+        --use-aliases --name "$win_name" \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8002 \
         -e INGESTION_WORKER_THREADS=84 -e INGESTION_DATABASE_POOL_SIZE=64 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=30000 \
         -e WINDY_MINIMUM_INGESTION_INTERVAL_S=300 \
@@ -700,13 +695,13 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2" notify_summa
         -e WINDY_INGESTION_REQUEST_DELAY_S=0.01 \
         -e INGESTION_MIN_EPOCH_PERIOD_S=15 -e INGESTION_IDLE_DELAY_S=0 \
         -e INITIAL_STAGGER_WINDOW_S=600 \
-        webcam-job python -m ingestion.windy.worker --network win \
+        windy-worker python -m ingestion.windy.worker --network win \
             --max-jobs 30000 --run-for-seconds "$run_seconds" \
             --stagger-initial-polling --batch-freshness --verbose
 
-    docker compose --env-file .env run -d --no-deps \
-        --name "$fin_name" --publish "$metrics_bind_host:8014:8014" \
-        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8014 \
+    docker compose --env-file .env --profile application run -d --no-deps \
+        --use-aliases --name "$fin_name" \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8003 \
         -e INGESTION_WORKER_THREADS=4 -e INGESTION_DATABASE_POOL_SIZE=8 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=3000 \
         -e MINIMUM_INGESTION_INTERVAL_S=300 \
@@ -716,13 +711,13 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2" notify_summa
         -e INITIAL_STAGGER_WINDOW_S=600 \
         -e FINTRAFFIC_FRESHNESS_QUERY_RETRY_COUNT=0 \
         -e FINTRAFFIC_DOWNLOAD_RETRY_COUNT=0 \
-        webcam-job python -m ingestion.fintraffic.worker \
+        fintraffic-worker python -m ingestion.fintraffic.worker \
             --max-jobs 3000 --run-for-seconds "$run_seconds" \
             --stagger-initial-polling --verbose
 
-    docker compose --env-file .env run -d --no-deps \
-        --name "$ska_name" --publish "$metrics_bind_host:8015:8015" \
-        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8015 \
+    docker compose --env-file .env --profile application run -d --no-deps \
+        --use-aliases --name "$ska_name" \
+        -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8004 \
         -e INGESTION_WORKER_THREADS=2 -e INGESTION_DATABASE_POOL_SIZE=4 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=100 \
         -e MINIMUM_INGESTION_INTERVAL_S=300 \
@@ -732,7 +727,7 @@ ingestion-test-three-networks duration="90m" maintenance_cycles="2" notify_summa
         -e INITIAL_STAGGER_WINDOW_S=600 \
         -e SKAPING_FRESHNESS_QUERY_RETRY_COUNT=0 \
         -e SKAPING_DOWNLOAD_RETRY_COUNT=0 \
-        webcam-job python -m ingestion.skaping.worker \
+        skaping-worker python -m ingestion.skaping.worker \
             --max-jobs 100 --run-for-seconds "$run_seconds" \
             --stagger-initial-polling --verbose
 

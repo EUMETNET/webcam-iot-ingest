@@ -234,6 +234,16 @@ def test_quiet_maintenance_uses_production_order_and_optional_summary() -> None:
     justfile = (ROOT / "justfile").read_text()
     assert "two-hour-full-alert-test:" in justfile
     assert "just ingestion-test-three-networks 2h 1 true" in justfile
+    three_networks = justfile.split(
+        'ingestion-test-three-networks duration="90m"', maxsplit=1
+    )[1].split("# Checkpoint-13 recovery drill", maxsplit=1)[0]
+    assert three_networks.count("--use-aliases") == 3
+    assert "INGESTION_HEALTH_PORT=8002" in three_networks
+    assert "INGESTION_HEALTH_PORT=8003" in three_networks
+    assert "INGESTION_HEALTH_PORT=8004" in three_networks
+    assert "8013" not in three_networks
+    assert "8014" not in three_networks
+    assert "8015" not in three_networks
 
 
 def test_checkpoint13_unquiet_crashes_process_without_operator_stopping_service() -> None:

@@ -494,9 +494,12 @@ Fintraffic, and Skaping discovery, and finally creates and verifies the
 PostgreSQL backup. The cycles start at T+20 and, when requested, T+60. At peak, the
 configured quotas total 7.5 CPUs, leaving approximately 0.5 CPU on an
 eight-core VM for PostgreSQL, MQTT, and monitoring. All three workers use
-their network-specific polling floors and the complete S3/MQTT publication
-path. If the first maintenance cycle overruns T+60, the second starts as soon
-as the first completes rather than overlapping it.
+their normal Compose service aliases and internal metrics ports 8002, 8003,
+and 8004, so Prometheus scrapes them through the production
+`ingestion-workers` job. They retain their network-specific polling floors and
+the complete S3/MQTT publication path. If the first maintenance cycle overruns
+T+60, the second starts as soon as the first completes rather than overlapping
+it.
 
 For a production-scope one-day quiet test with exactly one maintenance run at
 the next 00:00 UTC, use:
