@@ -9,12 +9,12 @@ groups:
         annotations:
           summary: "Infrastructure scrape target {{ $labels.job }} is down"
       - alert: WebcamIngestionWorkerDown
-        expr: up{job=~"windy-worker|fintraffic-worker|skaping-worker"} == 0
+        expr: up{job="ingestion-workers"} == 0
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Ingestion worker {{ $labels.job }} is down"
+          summary: "Ingestion worker {{ $labels.source_network }} ({{ $labels.instance }}) is down"
       - alert: WebcamIngestionWorkerRestartLoop
         expr: changes(container_start_time_seconds{container_label_com_docker_compose_service=~"windy-worker|fintraffic-worker|skaping-worker"}[15m]) > 2
         labels:

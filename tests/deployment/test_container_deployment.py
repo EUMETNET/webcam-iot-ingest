@@ -62,6 +62,36 @@ def test_long_lived_workers_have_isolated_runtime_controls() -> None:
         assert service["depends_on"]["mqtt"]["condition"] == "service_healthy"
 
 
+def test_prometheus_scrapes_production_workers_symmetrically() -> None:
+    prometheus = (ROOT / "prometheus/prometheus.yml").read_text()
+    production_workers = prometheus.split(
+        "  - job_name: ingestion-workers", maxsplit=1
+    )[1].split("  - job_name: windy-worker-host-benchmark", maxsplit=1)[0]
+
+    assert 'targets: ["windy-worker:8002"]' in production_workers
+    assert "source_network: win" in production_workers
+    assert 'targets: ["fintraffic-worker:8003"]' in production_workers
+    assert "source_network: fin" in production_workers
+    assert 'targets: ["skaping-worker:8004"]' in production_workers
+    assert "source_network: ska" in production_workers
+    assert "  - job_name: windy-worker\n" not in prometheus
+    assert "  - job_name: fintraffic-worker\n" not in prometheus
+    assert "  - job_name: skaping-worker\n" not in prometheus
+
+    alerts = (ROOT / "prometheus/alerts.yml").read_text()
+    assert 'up{job="ingestion-workers"} == 0' in alerts
+    assert "$labels.source_network" in alerts
+
+    dashboard = json.loads(
+        (ROOT / "grafana/dashboards/infrastructure-health.json").read_text()
+    )
+    scrape_health = next(
+        panel for panel in dashboard["panels"] if panel["id"] == 1
+    )
+    expressions = [target["expr"] for target in scrape_health["targets"]]
+    assert 'up{job="ingestion-workers"}' in expressions
+
+
 def test_persistent_state_and_short_lived_job_are_declared() -> None:
     config = _compose_config()
     assert {

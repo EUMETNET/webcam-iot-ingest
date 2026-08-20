@@ -187,6 +187,9 @@ The worker health and Prometheus endpoints use internal ports 8002 (Windy),
 are configurable through the deployment environment; reproducible defaults
 are listed in `.env.example`. Readiness windows are deliberately longer than
 a normal epoch so a healthy long epoch cannot trigger a false restart.
+Prometheus scrapes the three production endpoints through one
+`ingestion-workers` job on the Compose network. Its targets carry explicit
+`source_network` labels and require no additional host port publication.
 
 ## Webcam discovery
 

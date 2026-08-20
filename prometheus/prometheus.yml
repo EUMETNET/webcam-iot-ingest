@@ -17,15 +17,17 @@ scrape_configs:
   - job_name: ingest
     static_configs:
       - targets: ["ingest:8001"]
-  - job_name: windy-worker
+  - job_name: ingestion-workers
     static_configs:
       - targets: ["windy-worker:8002"]
-  - job_name: fintraffic-worker
-    static_configs:
+        labels:
+          source_network: win
       - targets: ["fintraffic-worker:8003"]
-  - job_name: skaping-worker
-    static_configs:
+        labels:
+          source_network: fin
       - targets: ["skaping-worker:8004"]
+        labels:
+          source_network: ska
   - job_name: windy-worker-host-benchmark
     static_configs:
       - targets: ["host.docker.internal:8013"]

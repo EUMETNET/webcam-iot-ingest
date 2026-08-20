@@ -11,7 +11,10 @@
       "gridPos": {"h": 5, "w": 24, "x": 0, "y": 0},
       "id": 1,
       "options": {"colorMode": "background", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "targets": [{"expr": "up{job=~\"postgres-exporter|node-exporter|cadvisor|mqtt-exporter|windy-worker|fintraffic-worker|skaping-worker\"}", "legendFormat": "{{job}}"}],
+      "targets": [
+        {"expr": "up{job=~\"postgres-exporter|node-exporter|cadvisor|mqtt-exporter\"}", "legendFormat": "{{job}}"},
+        {"expr": "up{job=\"ingestion-workers\"}", "legendFormat": "worker {{source_network}}"}
+      ],
       "title": "Infrastructure and worker scrape health",
       "type": "stat"
     },
