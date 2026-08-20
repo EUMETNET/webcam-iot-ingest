@@ -43,7 +43,7 @@ def connection():
 
 @pytest.fixture()
 def identifiers() -> tuple[str, str, str]:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:10]
     return f"win{suffix}", f"win{suffix}a", f"win{suffix}b"
 
 

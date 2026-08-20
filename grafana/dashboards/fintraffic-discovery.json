@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Persistent metrics for Fintraffic discovery batch jobs.",
+  "description": "Persistent metrics for Fintraffic discovery runs.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [

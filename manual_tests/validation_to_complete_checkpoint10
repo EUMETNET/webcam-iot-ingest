@@ -155,7 +155,7 @@ Run one applied discovery and confirm that its JSON contains
 
     just discover-skaping
 
-Check the persistent batch metrics without printing any provider metadata:
+Check the persistent discovery metrics without printing any provider metadata:
 
     curl -fsS -G http://127.0.0.1:9090/api/v1/query \
       --data-urlencode \

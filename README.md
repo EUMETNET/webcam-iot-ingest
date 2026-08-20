@@ -216,7 +216,12 @@ Skaping discovery reads its API key from the ignored
 the `mini` rendition; it never prints the key or complete provider payload.
 Fintraffic discovery retrieves the complete station list and then paced details
 for every eligible station so descriptive station and preset metadata are
-retained in the registry.
+retained in the registry. Internal site and source-stream identifiers are
+alphanumeric and limited to 16 characters for every provider; complete
+provider identifiers remain in their dedicated registry fields. Fintraffic
+uses `fin{station_id}` for sites and `fin{preset_id}` for streams after checking
+that accepted preset identifiers embed their station identifier and remain
+globally unique.
 
 Run a bounded Fintraffic ingestion check without S3 or MQTT writes:
 
@@ -262,8 +267,9 @@ just ingest-skaping --limit 4 --publish
 | `BUCKET_SECRET_ACCESS_KEY` | — | S3 secret key |
 | `BUCKET_ENDPOINT_URL` | — | S3 endpoint URL |
 | `BUCKET_OBJECT_URL` | — | S3 object URL |
-| `BATCH_METRICS_ENABLED` | `true` | Publish cleanup and backup metrics through Pushgateway |
-| `BATCH_METRICS_GATEWAY_URL` | `http://localhost:9091` | Operational batch Pushgateway |
+| `MAINTENANCE_METRICS_ENABLED` | `true` | Publish cleanup, backup, and restore metrics through Pushgateway |
+| `MAINTENANCE_METRICS_GATEWAY_URL` | `http://localhost:9091` | Maintenance-job Pushgateway |
+| `MAINTENANCE_METRICS_PUSH_TIMEOUT_S` | `5` | Maintenance metric push timeout |
 | `DATABASE_BACKUP_S3_PREFIX` | `backups/postgresql` | S3 namespace for timestamped database dumps |
 | `PG_DUMP_MODE` | `docker-compose` in `.env.example` | Host-side legacy mode; the operational container recipe forces direct execution with its bundled PostgreSQL 16.9 client |
 
@@ -435,12 +441,22 @@ eight-minute polling floor and two Skaping threads with a four-minute polling
 floor. Each container is limited to 0.5 CPU. Both
 use deterministic ten-minute staggering, separate metrics ports 8014/8015,
 normal S3 and MQTT publication, and remain available after completion for
-`docker logs` inspection.
+`docker logs` inspection. The benchmark recipes bind worker metric ports to
+Docker's host-gateway address (resolved from the Prometheus container), so
+Prometheus can scrape them without exposing those ports on every host
+interface.
 
 For a quiet three-network run on an eight-core VM, use:
 
 ```bash
 just ingestion-test-three-networks 90m
+```
+
+The optional second argument selects one or two maintenance cycles. For a
+two-hour run with exactly one discovery/cleanup cycle at T+20 minutes, use:
+
+```bash
+just ingestion-test-three-networks 2h 1
 ```
 
 This assigns Windy 6 CPUs and 84 threads, Fintraffic 0.5 CPU and 4 threads,
@@ -483,14 +499,15 @@ version level. For byte-identical container images, deployments may additionally
 lock the resolved image digests in their deployment manifest.
 
 Pre-built dashboards for FastAPI, MQTT, all three ingestion workers, and all
-three discovery providers are provisioned automatically. Short-lived discovery jobs publish
-their persistent batch metrics to the locally bound Pushgateway on port 9091;
-Prometheus scrapes it and Grafana displays the retained results after the
-discovery process exits.
+three discovery providers are provisioned automatically. Short-lived discovery
+jobs publish their provider-specific discovery metrics to the locally bound
+Pushgateway on port 9091. Cleanup, database backup, backup retention, and
+explicit restore publish separate maintenance-job metrics. Prometheus scrapes
+the Pushgateway and Grafana displays retained results after each process exits.
 
 The monitoring profile also starts PostgreSQL, host, and container exporters.
-Grafana provisions an **Infrastructure health** dashboard and an
-**Operational batch jobs** dashboard. Alert rules cover unavailable
+Grafana provisions an **Infrastructure health** dashboard and a
+**Maintenance jobs** dashboard. Alert rules cover unavailable
 infrastructure targets, unavailable checkpoint workers, low host disk space,
 PostgreSQL failure, and cleanup or backup failures.
 

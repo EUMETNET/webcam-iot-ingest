@@ -11,7 +11,7 @@ import time
 from typing import Any, Iterator
 
 from config.deployment_config import S3Config
-from storage.batch_metrics import BatchJobMetrics
+from observability.maintenance_metrics import MaintenanceJobMetrics
 from storage.s3_storage import create_s3_client
 
 
@@ -71,7 +71,7 @@ def cleanup_database_backups(
     backup_prefix: str = "backups/postgresql",
     dry_run: bool = False,
     client: Any | None = None,
-    metrics: BatchJobMetrics | None = None,
+    metrics: MaintenanceJobMetrics | None = None,
     include_keys: bool = False,
 ) -> BackupCleanupResult:
     current_date = _backup_date(current_key, backup_prefix)
@@ -83,7 +83,9 @@ def cleanup_database_backups(
         selected_keys=[] if include_keys else None,
     )
     client = client or create_s3_client(config)
-    metrics = metrics or BatchJobMetrics.from_environment("database_backup_cleanup")
+    metrics = metrics or MaintenanceJobMetrics.from_environment(
+        "database_backup_cleanup"
+    )
     started = time.monotonic()
     recognized: list[tuple[str, date, int]] = []
     current_seen = False

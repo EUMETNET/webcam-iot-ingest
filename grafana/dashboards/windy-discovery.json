@@ -1,6 +1,6 @@
 {
   "annotations": {"list": []},
-  "description": "Persistent metrics for Windy discovery batch jobs.",
+  "description": "Persistent metrics for Windy discovery runs.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass, replace
-import hashlib
 import json
 import math
-import re
 import time
 from typing import Any, Mapping, Sequence
 
@@ -32,9 +30,20 @@ from discovery.shared.discovery_metrics import (
     DiscoveryMetrics,
     registry_status_counts,
 )
+from discovery.shared.identifiers import (
+    IdentifierEstablishmentError,
+    compact_identifier,
+    validate_internal_identifier,
+)
 
 
 NETWORK_ID = "fin"
+
+
+class FintrafficIdentifierError(
+    FintrafficDiscoveryError, IdentifierEstablishmentError
+):
+    """Fintraffic data cannot establish a valid compact internal identifier."""
 
 
 @dataclass(frozen=True)
@@ -87,7 +96,7 @@ def build_discovery_snapshot(
             stations_excluded += 1
             continue
         if station.provider_id in seen_station_ids:
-            raise FintrafficDiscoveryError(
+            raise FintrafficIdentifierError(
                 f"duplicate Fintraffic station: {station.provider_id}"
             )
         seen_station_ids.add(station.provider_id)
@@ -107,12 +116,20 @@ def build_discovery_snapshot(
     sites: list[DiscoveredSite] = []
     streams: list[DiscoveredSourceStream] = []
 
+    seen_preset_ids: set[str] = set()
     for station in sorted(stations, key=lambda item: item.provider_id):
         previous_site = existing_sites.get(station.provider_id)
         site_id = (
-            str(previous_site["site_id"])
+            validate_internal_identifier(
+                str(previous_site["site_id"]), error_type=FintrafficIdentifierError
+            )
             if previous_site is not None
-            else _new_identifier("fin", station.provider_id, used_site_ids)
+            else compact_identifier(
+                "fin",
+                station.provider_id,
+                used_site_ids,
+                error_type=FintrafficIdentifierError,
+            )
         )
         used_site_ids.add(site_id)
         altitude = None
@@ -135,12 +152,16 @@ def build_discovery_snapshot(
             )
         )
 
-        seen_preset_ids: set[str] = set()
         for preset in station.presets:
             preset_id = str(preset["id"])
+            if not preset_id.startswith(station.provider_id):
+                raise FintrafficIdentifierError(
+                    f"Fintraffic preset {preset_id} does not start with station "
+                    f"identifier {station.provider_id}"
+                )
             if preset_id in seen_preset_ids:
-                raise FintrafficDiscoveryError(
-                    f"duplicate preset {preset_id} in station {station.provider_id}"
+                raise FintrafficIdentifierError(
+                    f"duplicate preset identifier: {preset_id}"
                 )
             seen_preset_ids.add(preset_id)
             previous_stream = existing_streams.get(preset_id)
@@ -148,14 +169,20 @@ def build_discovery_snapshot(
                 previous_stream is not None
                 and previous_stream["site_id"] != site_id
             ):
-                raise FintrafficDiscoveryError(
+                raise FintrafficIdentifierError(
                     f"preset {preset_id} moved between Fintraffic stations"
                 )
             stream_id = (
-                str(previous_stream["source_stream_id"])
+                validate_internal_identifier(
+                    str(previous_stream["source_stream_id"]),
+                    error_type=FintrafficIdentifierError,
+                )
                 if previous_stream is not None
-                else _new_identifier(
-                    f"{site_id}PRE", preset_id, used_stream_ids
+                else compact_identifier(
+                    "fin",
+                    preset_id,
+                    used_stream_ids,
+                    error_type=FintrafficIdentifierError,
                 )
             )
             used_stream_ids.add(stream_id)
@@ -267,26 +294,10 @@ def _required_identifier(value: Any, entity: str) -> str:
         or isinstance(value, bool)
         or not str(value).strip()
     ):
-        raise FintrafficDiscoveryError(
+        raise FintrafficIdentifierError(
             f"Fintraffic {entity} has an invalid identifier"
         )
     return str(value).strip()
-
-
-def _new_identifier(prefix: str, provider_id: str, used: set[str]) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9]", "", provider_id)
-    if not sanitized:
-        sanitized = hashlib.sha256(provider_id.encode()).hexdigest()[:16]
-    candidate = f"{prefix}{sanitized}"
-    if candidate not in used:
-        return candidate
-    suffix = hashlib.sha256(provider_id.encode()).hexdigest()[:10]
-    candidate = f"{prefix}{sanitized}{suffix}"
-    if candidate in used:
-        raise FintrafficDiscoveryError(
-            f"cannot assign a unique identifier for {provider_id}"
-        )
-    return candidate
 
 
 def run_discovery(
@@ -416,7 +427,9 @@ def main() -> None:
             dry_run=args.dry_run,
             metrics=metrics,
         )
-    except Exception:
+    except Exception as error:
+        if isinstance(error, IdentifierEstablishmentError):
+            metrics.observe_identifier_violation()
         metrics.publish_failure(duration_s=time.monotonic() - started)
         raise
     duration_s = time.monotonic() - started

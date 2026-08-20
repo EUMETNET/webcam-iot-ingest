@@ -73,6 +73,11 @@ class DiscoveryMetrics:
             ["reason"],
             registry=self.events,
         )
+        self.identifier_violations = Counter(
+            "webcam_discovery_identifier_violation_total",
+            "Discovery failures caused by an internal identifier rule violation",
+            registry=self.events,
+        )
         self.provider_requests = Counter(
             "webcam_provider_request_total",
             "Provider HTTP request attempts",
@@ -123,6 +128,10 @@ class DiscoveryMetrics:
         self.provider_duration.labels(endpoint).observe(max(0.0, duration_s))
         if result == "throttled":
             self.provider_throttling.inc()
+
+    def observe_identifier_violation(self) -> None:
+        """Record one provider-independent identifier establishment failure."""
+        self.identifier_violations.inc()
 
     def publish_success(
         self,

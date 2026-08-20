@@ -27,6 +27,7 @@ def test_success_emits_architecture_metrics_and_replaces_state(monkeypatch) -> N
     )
     metrics = DiscoveryMetrics("ska", config())
     metrics.observe_provider_request("summary", "success", 0.12)
+    metrics.observe_identifier_violation()
 
     published = metrics.publish_success(
         duration_s=0.5,
@@ -51,6 +52,7 @@ def test_success_emits_architecture_metrics_and_replaces_state(monkeypatch) -> N
         'webcam_provider_request_total{endpoint_type="summary",result="success"} 1.0'
         in events
     )
+    assert "webcam_discovery_identifier_violation_total 1.0" in events
     assert 'webcam_source_stream_status_count{status="active"} 40.0' in state
     assert "webcam_discovery_last_duration_seconds 0.5" in state
 

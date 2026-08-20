@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass, replace
-import hashlib
 import json
 import math
-import re
 import time
 from typing import Any, Mapping, Sequence
 
@@ -28,10 +26,21 @@ from discovery.shared.discovery_metrics import (
     DiscoveryMetrics,
     registry_status_counts,
 )
+from discovery.shared.identifiers import (
+    IdentifierEstablishmentError,
+    compact_identifier,
+    validate_internal_identifier,
+)
 from discovery.windy.windy_source_access import WindyClient, WindyDiscoveryError
 
 
 NETWORK_ID = "win"
+
+
+class WindyIdentifierError(WindyDiscoveryError, IdentifierEstablishmentError):
+    """Windy data cannot establish a valid compact internal identifier."""
+
+
 EARTH_RADIUS_M = 6_371_000.0
 
 
@@ -60,7 +69,7 @@ def normalize_webcam(raw: Mapping[str, Any], allowed_countries: set[str]) -> Win
     title = raw.get("title")
     location = raw.get("location")
     if not isinstance(provider_id, (str, int)) or isinstance(provider_id, bool):
-        raise WindyDiscoveryError("Windy webcam has an invalid webcamId")
+        raise WindyIdentifierError("Windy webcam has an invalid webcamId")
     if not isinstance(title, str) or not title.strip():
         raise WindyDiscoveryError(f"Windy webcam {provider_id} has no title")
     if not isinstance(location, Mapping):
@@ -129,7 +138,9 @@ def build_discovery_snapshot(
         else:
             normalized.append(webcam)
     if len({item.provider_id for item in normalized}) != len(normalized):
-        raise WindyDiscoveryError("normalized Windy snapshot contains duplicate webcams")
+        raise WindyIdentifierError(
+            "normalized Windy snapshot contains duplicate webcams"
+        )
 
     existing_streams = {
         str(row["provider_source_stream_id"]): row
@@ -144,7 +155,9 @@ def build_discovery_snapshot(
     for webcam in sorted(normalized, key=lambda item: item.provider_id):
         existing = existing_streams.get(webcam.provider_id)
         if existing is not None:
-            assigned_site_ids[webcam.provider_id] = existing["site_id"]
+            assigned_site_ids[webcam.provider_id] = validate_internal_identifier(
+                str(existing["site_id"]), error_type=WindyIdentifierError
+            )
             continue
         nearest_site_id, nearest_distance = _nearest_site(webcam, site_rows)
         if nearest_site_id is not None and nearest_distance <= site_distance_threshold_m:
@@ -177,9 +190,16 @@ def build_discovery_snapshot(
     for webcam in sorted(normalized, key=lambda item: item.provider_id):
         existing = existing_streams.get(webcam.provider_id)
         stream_id = (
-            existing["source_stream_id"]
+            validate_internal_identifier(
+                str(existing["source_stream_id"]), error_type=WindyIdentifierError
+            )
             if existing is not None
-            else _new_identifier("win", webcam.provider_id, used_stream_ids)
+            else compact_identifier(
+                "win",
+                webcam.provider_id,
+                used_stream_ids,
+                error_type=WindyIdentifierError,
+            )
         )
         used_stream_ids.add(stream_id)
         streams.append(
@@ -320,18 +340,14 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * EARTH_RADIUS_M * math.asin(math.sqrt(value))
 
 
-def _new_identifier(prefix: str, provider_id: str, used: Mapping[str, Any] | set[str]) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9]", "", provider_id)
-    if not sanitized:
-        sanitized = hashlib.sha256(provider_id.encode()).hexdigest()[:16]
-    candidate = f"{prefix}{sanitized}"
-    if candidate not in used:
-        return candidate
-    suffix = hashlib.sha256(provider_id.encode()).hexdigest()[:10]
-    candidate = f"{prefix}{sanitized}{suffix}"
-    if candidate in used:
-        raise WindyDiscoveryError(f"cannot assign a unique identifier for {provider_id}")
-    return candidate
+def _new_identifier(
+    prefix: str,
+    provider_id: str,
+    used: Mapping[str, Any] | set[str],
+) -> str:
+    return compact_identifier(
+        prefix, provider_id, used, error_type=WindyIdentifierError
+    )
 
 
 def _site_from_webcam(
@@ -384,7 +400,9 @@ def main() -> None:
             dry_run=args.dry_run,
             metrics=metrics,
         )
-    except Exception:
+    except Exception as error:
+        if isinstance(error, IdentifierEstablishmentError):
+            metrics.observe_identifier_violation()
         metrics.publish_failure(duration_s=time.monotonic() - started)
         raise
     duration_s = time.monotonic() - started

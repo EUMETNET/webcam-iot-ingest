@@ -37,7 +37,7 @@ def test_expected_tables_and_seed_networks(connection) -> None:
 
 
 def test_json_metadata_round_trip(connection) -> None:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:6]
     site_id = f"win{suffix}"
     stream_id = f"win{suffix}stream"
     with connection.cursor() as cursor:
@@ -81,12 +81,12 @@ def test_invalid_coordinates_are_rejected(
                 INSERT INTO site (site_id, network_id, latitude, longitude)
                 VALUES (%s, 'win', %s, %s)
                 """,
-                (uuid.uuid4().hex, latitude, longitude),
+                (uuid.uuid4().hex[:16], latitude, longitude),
             )
 
 
 def test_invalid_stream_status_is_rejected(connection) -> None:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:6]
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -111,7 +111,7 @@ def test_invalid_stream_status_is_rejected(connection) -> None:
 
 
 def test_source_stream_requires_existing_site(connection) -> None:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:6]
     with connection.cursor() as cursor:
         with pytest.raises(psycopg.errors.ForeignKeyViolation):
             cursor.execute(
@@ -124,4 +124,44 @@ def test_source_stream_requires_existing_site(connection) -> None:
                 ) VALUES (%s, %s, %s, 'preview')
                 """,
                 (f"win{suffix}stream", f"missing{suffix}", suffix),
+            )
+
+
+@pytest.mark.parametrize("site_id", ["site-with-dash", "x" * 17])
+def test_site_identifier_contract_is_enforced(connection, site_id: str) -> None:
+    with connection.cursor() as cursor:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cursor.execute(
+                """
+                INSERT INTO site (site_id, network_id, latitude, longitude)
+                VALUES (%s, 'win', 60.0, 25.0)
+                """,
+                (site_id,),
+            )
+
+
+@pytest.mark.parametrize("stream_id", ["stream-with-dash", "x" * 17])
+def test_source_stream_identifier_contract_is_enforced(
+    connection, stream_id: str
+) -> None:
+    site_id = f"win{uuid.uuid4().hex[:8]}"
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO site (site_id, network_id, latitude, longitude)
+            VALUES (%s, 'win', 60.0, 25.0)
+            """,
+            (site_id,),
+        )
+        with pytest.raises(psycopg.errors.CheckViolation):
+            cursor.execute(
+                """
+                INSERT INTO source_stream (
+                    source_stream_id,
+                    site_id,
+                    provider_source_stream_id,
+                    selected_rendition
+                ) VALUES (%s, %s, %s, 'preview')
+                """,
+                (stream_id, site_id, stream_id),
             )

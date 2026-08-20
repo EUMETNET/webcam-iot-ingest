@@ -268,7 +268,11 @@ Objectives:
 - Select stations with collectionStatus equal to GATHERING.
 - Select presets with inCollection equal to true.
 - Treat stations as sites and presets as source streams.
-- Generate fin{station_id}PRE{preset_id} internal identifiers.
+- Generate `fin{station_id}` site identifiers and `fin{preset_id}` source-stream
+  identifiers after validating that every accepted preset embeds its station
+  identifier and is globally unique.
+- Keep every internal site and source-stream identifier alphanumeric and no
+  longer than 16 characters; retain complete provider identifiers separately.
 - Retrieve paced details for every eligible station and preserve complete
   provider station and preset metadata in jsonb snapshots.
 - Reuse the shared transactional registry update layer.
@@ -333,7 +337,8 @@ Objectives:
 - Treat Skaping cameras as sites.
 - Treat point_of_views entries with type=image as source streams.
 - Exclude video and frame point-of-view types.
-- Generate ska{camera_id}POV{point_of_view_id} identifiers.
+- Generate stable `ska`-prefixed identifiers through the shared compact,
+  collision-safe identifier allocator.
 - Preserve customer, timezone, label, title, tag, and public-page metadata in
   normalized jsonb snapshots.
 - Reuse the shared transactional registry update layer.
@@ -533,6 +538,15 @@ Objectives:
   worker owns each camera and no camera is processed concurrently by two VMs.
 - Keep PostgreSQL as the shared authoritative registry and ingestion-state
   store.
+- Make application-side infrastructure locations externally configurable for
+  the multi-VM deployment, including PostgreSQL, MQTT, Pushgateway, and other
+  applicable service endpoints, while retaining the current Compose service
+  names as defaults for the single-VM topology.
+- Provide and document a multi-VM Compose override or profile that removes
+  inappropriate dependencies on local PostgreSQL, MQTT, Pushgateway, and
+  related migration or exporter services when their external equivalents are
+  selected. Do not rely on endpoint substitutions alone to change the
+  dependency topology.
 - Give each worker a stable identity and separate health/metrics target.
 - Retain the validated 0.01-second request-start pacing per VM initially.
 - Bound and compare database connection pressure across the single-VM and
@@ -546,6 +560,12 @@ Objectives:
 
 Expected validation:
 
+- Confirm the existing single-VM Compose deployment still starts without any
+  additional endpoint configuration.
+- Confirm workers and scheduled jobs can use the external PostgreSQL, MQTT,
+  and metrics endpoints without starting or waiting for their local Compose
+  equivalents, and that schema migration and monitoring use the intended
+  external topology.
 - Demonstrate that the configured partitions are disjoint and cover the
   intended Windy scope.
 - Stop one VM and confirm that its partition is not silently processed by

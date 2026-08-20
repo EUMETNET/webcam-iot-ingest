@@ -110,8 +110,8 @@ def test_excludes_known_non_member_country_but_accepts_missing_country() -> None
 def test_preserves_ids_altitude_and_country_until_coordinates_change() -> None:
     stored = RegistrySnapshot(
         sites={
-            "site-kept": {
-                "site_id": "site-kept",
+            "sitekept": {
+                "site_id": "sitekept",
                 "provider_site_id": "7",
                 "latitude": 45.0,
                 "longitude": 6.0,
@@ -121,9 +121,9 @@ def test_preserves_ids_altitude_and_country_until_coordinates_change() -> None:
             }
         },
         source_streams={
-            "stream-kept": {
-                "source_stream_id": "stream-kept",
-                "site_id": "site-kept",
+            "streamkept": {
+                "source_stream_id": "streamkept",
+                "site_id": "sitekept",
                 "provider_source_stream_id": "11",
             }
         },
@@ -131,10 +131,10 @@ def test_preserves_ids_altitude_and_country_until_coordinates_change() -> None:
     unchanged = build(camera(7, country=None), stored=stored)
     moved = build(camera(7, longitude=6.1, country=None), stored=stored)
 
-    assert unchanged.sites[0].site_id == "site-kept"
+    assert unchanged.sites[0].site_id == "sitekept"
     assert unchanged.sites[0].altitude == 99.0
     assert unchanged.sites[0].country == "CH"
-    assert unchanged.source_streams[0].source_stream_id == "stream-kept"
+    assert unchanged.source_streams[0].source_stream_id == "streamkept"
     assert moved.sites[0].altitude is None
     assert moved.sites[0].country is None
 
@@ -146,6 +146,8 @@ def test_identifier_collision_is_resolved_deterministically() -> None:
     )
     assert len({site.site_id for site in result.sites}) == 2
     assert all(site.site_id.isalnum() for site in result.sites)
+    assert all(len(site.site_id) <= 16 for site in result.sites)
+    assert all(len(stream.source_stream_id) <= 16 for stream in result.source_streams)
 
 
 def test_rejects_duplicate_camera_and_point_ids() -> None:

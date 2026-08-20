@@ -33,7 +33,7 @@ reviewing its scope:
 
     just cleanup-spool 24 --limit 10
 
-Confirm the Operational batch jobs dashboard records the run.
+Confirm the Maintenance jobs dashboard records the run.
 
 4. Create and verify a database backup:
 

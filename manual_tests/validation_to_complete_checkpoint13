@@ -93,7 +93,7 @@ Follow it with:
       windy-worker fintraffic-worker skaping-worker postgres
 
 Through the port-3000 tunnel, inspect all ingestion dashboards plus
-Infrastructure health and Operational batch jobs. Confirm:
+Infrastructure health and Maintenance jobs. Confirm:
 
 - every worker is initially healthy and produces completed epochs;
 - Windy restarts after the injected kill, then resumes publication;

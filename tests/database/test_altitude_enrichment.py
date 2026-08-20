@@ -52,7 +52,7 @@ def _site(site_id: str, altitude: float | None = None) -> DiscoveredSite:
 
 
 def test_dry_run_write_and_repeat_are_safe(connection) -> None:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:6]
     network = f"alt{suffix}"
     missing_id = f"{network}a"
     existing_id = f"{network}b"
@@ -94,7 +94,7 @@ def test_dry_run_write_and_repeat_are_safe(connection) -> None:
 
 
 def test_coordinate_guard_prevents_stale_altitude_write(connection) -> None:
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:6]
     network = f"alt{suffix}"
     site_id = f"{network}site"
     connection.execute(

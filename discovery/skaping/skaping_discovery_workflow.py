@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass, replace
-import hashlib
 import json
 import math
-import re
 import time
 from typing import Any, Mapping
 
@@ -32,6 +30,11 @@ from discovery.shared.discovery_metrics import (
     DiscoveryMetrics,
     registry_status_counts,
 )
+from discovery.shared.identifiers import (
+    IdentifierEstablishmentError,
+    compact_identifier,
+    validate_internal_identifier,
+)
 from discovery.skaping.skaping_source_access import (
     SkapingClient,
     SkapingDiscoveryError,
@@ -39,6 +42,10 @@ from discovery.skaping.skaping_source_access import (
 
 
 NETWORK_ID = "ska"
+
+
+class SkapingIdentifierError(SkapingDiscoveryError, IdentifierEstablishmentError):
+    """Skaping data cannot establish a valid compact internal identifier."""
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ def build_discovery_snapshot(
             excluded_country += 1
             continue
         if camera.provider_id in seen_camera_ids:
-            raise SkapingDiscoveryError(
+            raise SkapingIdentifierError(
                 f"duplicate Skaping camera: {camera.provider_id}"
             )
         seen_camera_ids.add(camera.provider_id)
@@ -108,9 +115,16 @@ def build_discovery_snapshot(
     for camera in sorted(cameras, key=lambda item: item.provider_id):
         previous_site = existing_sites.get(camera.provider_id)
         site_id = (
-            str(previous_site["site_id"])
+            validate_internal_identifier(
+                str(previous_site["site_id"]), error_type=SkapingIdentifierError
+            )
             if previous_site is not None
-            else _new_identifier("ska", camera.provider_id, used_site_ids)
+            else compact_identifier(
+                "ska",
+                camera.provider_id,
+                used_site_ids,
+                error_type=SkapingIdentifierError,
+            )
         )
         used_site_ids.add(site_id)
         coordinates_unchanged = (
@@ -148,16 +162,22 @@ def build_discovery_snapshot(
         for point_of_view in camera.image_points_of_view:
             pov_id = str(point_of_view["id"])
             if pov_id in seen_pov_ids:
-                raise SkapingDiscoveryError(
+                raise SkapingIdentifierError(
                     f"duplicate point of view {pov_id} in camera {camera.provider_id}"
                 )
             seen_pov_ids.add(pov_id)
             previous_stream = existing_streams.get((site_id, pov_id))
             stream_id = (
-                str(previous_stream["source_stream_id"])
+                validate_internal_identifier(
+                    str(previous_stream["source_stream_id"]),
+                    error_type=SkapingIdentifierError,
+                )
                 if previous_stream is not None
-                else _new_identifier(
-                    f"{site_id}POV", pov_id, used_stream_ids
+                else compact_identifier(
+                    f"{site_id}POV",
+                    pov_id,
+                    used_stream_ids,
+                    error_type=SkapingIdentifierError,
                 )
             )
             used_stream_ids.add(stream_id)
@@ -235,7 +255,7 @@ def _required_identifier(value: Any, entity: str) -> str:
         or isinstance(value, bool)
         or not str(value).strip()
     ):
-        raise SkapingDiscoveryError(
+        raise SkapingIdentifierError(
             f"Skaping {entity} has an invalid identifier"
         )
     return str(value).strip()
@@ -280,22 +300,6 @@ def _country_code(camera: Mapping[str, Any]) -> str | None:
             if len(candidate) == 2 and candidate.isalpha():
                 return candidate
     return None
-
-
-def _new_identifier(prefix: str, provider_id: str, used: set[str]) -> str:
-    sanitized = re.sub(r"[^A-Za-z0-9]", "", provider_id)
-    if not sanitized:
-        sanitized = hashlib.sha256(provider_id.encode()).hexdigest()[:16]
-    candidate = f"{prefix}{sanitized}"
-    if candidate not in used:
-        return candidate
-    suffix = hashlib.sha256(provider_id.encode()).hexdigest()[:10]
-    candidate = f"{prefix}{sanitized}{suffix}"
-    if candidate in used:
-        raise SkapingDiscoveryError(
-            f"cannot assign a unique identifier for {provider_id}"
-        )
-    return candidate
 
 
 def run_discovery(
@@ -389,7 +393,9 @@ def main() -> None:
             dry_run=args.dry_run,
             metrics=metrics,
         )
-    except Exception:
+    except Exception as error:
+        if isinstance(error, IdentifierEstablishmentError):
+            metrics.observe_identifier_violation()
         metrics.publish_failure(duration_s=time.monotonic() - started)
         raise
     duration_s = time.monotonic() - started

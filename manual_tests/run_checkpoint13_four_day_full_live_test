@@ -83,7 +83,7 @@ Follow operation and dashboards
       -u webcam-checkpoint13-db-backup.service
 
 Use the existing local tunnel to Grafana on port 3000. Review all three worker
-and discovery dashboards, Operational batch jobs, and Infrastructure health.
+and discovery dashboards, Maintenance jobs, and Infrastructure health.
 
 Stop early or confirm the automatic stop
 ----------------------------------------

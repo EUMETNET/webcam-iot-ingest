@@ -11,7 +11,7 @@ import time
 from typing import Any, Iterator
 
 from config.deployment_config import S3Config
-from storage.batch_metrics import BatchJobMetrics
+from observability.maintenance_metrics import MaintenanceJobMetrics
 from storage.s3_storage import create_s3_client
 
 
@@ -92,7 +92,7 @@ def cleanup_spool(
     limit: int | None = None,
     now: datetime | None = None,
     client: Any | None = None,
-    metrics: BatchJobMetrics | None = None,
+    metrics: MaintenanceJobMetrics | None = None,
     include_keys: bool = False,
     transformation_prefix: str = "T0V0",
     all_transformation_prefixes: bool = False,
@@ -114,7 +114,7 @@ def cleanup_spool(
         selected_keys=[] if include_keys else None,
     )
     client = client or create_s3_client(config)
-    metrics = metrics or BatchJobMetrics.from_environment("spool_cleanup")
+    metrics = metrics or MaintenanceJobMetrics.from_environment("spool_cleanup")
     started = time.monotonic()
     listing_started = time.monotonic()
     candidates: list[tuple[str, int]] = []

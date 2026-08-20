@@ -97,7 +97,7 @@ validate-database-restore object_key:
     docker compose --env-file .env exec -T postgres \
         createdb --username webcam_ingestion "$test_database"
     docker compose --env-file .env --profile jobs run --rm \
-        -e BATCH_METRICS_ENABLED=false \
+        -e MAINTENANCE_METRICS_ENABLED=false \
         webcam-job python -m database.database_restore \
         --object-key "$object_key" --confirm-object-key "$object_key" \
         --target-database "$test_database"
@@ -585,10 +585,16 @@ ingestion-test-fintraffic-skaping duration="40m":
     docker compose --env-file .env --profile monitoring up -d \
         postgres mqtt prometheus grafana
     docker compose --env-file .env build webcam-job
+    metrics_bind_host="$(docker compose --env-file .env exec -T prometheus \
+        sh -c "awk '\$2 == \"host.docker.internal\" { print \$1; exit }' /etc/hosts")"
+    if [[ -z "$metrics_bind_host" ]]; then
+        echo "could not resolve the Prometheus host-gateway address" >&2
+        exit 1
+    fi
 
     docker compose --env-file .env run -d --no-deps \
         --name "$fin_name" \
-        --publish 127.0.0.1:8014:8014 \
+        --publish "$metrics_bind_host:8014:8014" \
         -e INGESTION_HEALTH_HOST=0.0.0.0 \
         -e INGESTION_HEALTH_PORT=8014 \
         -e INGESTION_WORKER_THREADS=4 \
@@ -608,7 +614,7 @@ ingestion-test-fintraffic-skaping duration="40m":
 
     docker compose --env-file .env run -d --no-deps \
         --name "$ska_name" \
-        --publish 127.0.0.1:8015:8015 \
+        --publish "$metrics_bind_host:8015:8015" \
         -e INGESTION_HEALTH_HOST=0.0.0.0 \
         -e INGESTION_HEALTH_PORT=8015 \
         -e INGESTION_WORKER_THREADS=2 \
@@ -636,10 +642,11 @@ ingestion-test-fintraffic-skaping duration="40m":
 # Run all three ingestion networks through the complete publication pipeline.
 # The worker and maintenance quotas total 7.5 CPUs, leaving 0.5 CPU on an
 # eight-core VM for PostgreSQL, MQTT, and monitoring.
-ingestion-test-three-networks duration="90m":
+ingestion-test-three-networks duration="90m" maintenance_cycles="2":
     #!/usr/bin/env bash
     set -euo pipefail
     duration="$1"
+    maintenance_cycles="$2"
     if [[ ! "$duration" =~ ^[1-9][0-9]*[smh]$ ]]; then
         echo "duration must be a positive number followed by s, m, or h" >&2
         exit 2
@@ -650,6 +657,14 @@ ingestion-test-three-networks duration="90m":
         m) run_seconds="$((value * 60))" ;;
         h) run_seconds="$((value * 3600))" ;;
     esac
+    if [[ "$maintenance_cycles" != "1" && "$maintenance_cycles" != "2" ]]; then
+        echo "maintenance_cycles must be 1 or 2" >&2
+        exit 2
+    fi
+    second_maintenance_offset=3600
+    if [[ "$maintenance_cycles" == "1" ]]; then
+        second_maintenance_offset=0
+    fi
     timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
     run_hash="$(printf '%s' "${timestamp}-${duration}-three-networks-${BASHPID}-${RANDOM}" | sha256sum | cut -c1-8)"
     win_name="webcam-windy-${duration}-${run_hash}"
@@ -660,9 +675,15 @@ ingestion-test-three-networks duration="90m":
     docker compose --env-file .env --profile monitoring up -d \
         postgres mqtt prometheus grafana
     docker compose --env-file .env build webcam-job
+    metrics_bind_host="$(docker compose --env-file .env exec -T prometheus \
+        sh -c "awk '\$2 == \"host.docker.internal\" { print \$1; exit }' /etc/hosts")"
+    if [[ -z "$metrics_bind_host" ]]; then
+        echo "could not resolve the Prometheus host-gateway address" >&2
+        exit 1
+    fi
 
     docker compose --env-file .env run -d --no-deps \
-        --name "$win_name" --publish 127.0.0.1:8013:8013 \
+        --name "$win_name" --publish "$metrics_bind_host:8013:8013" \
         -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8013 \
         -e INGESTION_WORKER_THREADS=84 -e INGESTION_DATABASE_POOL_SIZE=64 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=30000 \
@@ -677,7 +698,7 @@ ingestion-test-three-networks duration="90m":
             --stagger-initial-polling --batch-freshness --verbose
 
     docker compose --env-file .env run -d --no-deps \
-        --name "$fin_name" --publish 127.0.0.1:8014:8014 \
+        --name "$fin_name" --publish "$metrics_bind_host:8014:8014" \
         -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8014 \
         -e INGESTION_WORKER_THREADS=4 -e INGESTION_DATABASE_POOL_SIZE=8 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=3000 \
@@ -693,7 +714,7 @@ ingestion-test-three-networks duration="90m":
             --stagger-initial-polling --verbose
 
     docker compose --env-file .env run -d --no-deps \
-        --name "$ska_name" --publish 127.0.0.1:8015:8015 \
+        --name "$ska_name" --publish "$metrics_bind_host:8015:8015" \
         -e INGESTION_HEALTH_HOST=0.0.0.0 -e INGESTION_HEALTH_PORT=8015 \
         -e INGESTION_WORKER_THREADS=2 -e INGESTION_DATABASE_POOL_SIZE=4 \
         -e INGESTION_MAX_JOBS_PER_EPOCH=100 \
@@ -711,7 +732,8 @@ ingestion-test-three-networks duration="90m":
     docker compose --env-file .env run -d --no-deps \
         --name "$maintenance_name" \
         --volume "$PWD/deployment/benchmarks:/benchmarks:ro" \
-        webcam-job bash /benchmarks/run-quiet-maintenance 1200 3600 24
+        webcam-job bash /benchmarks/run-quiet-maintenance \
+            1200 "$second_maintenance_offset" 24
 
     docker update --cpus 6.0 "$win_name" >/dev/null
     docker update --cpus 0.5 "$fin_name" "$ska_name" >/dev/null
@@ -719,7 +741,11 @@ ingestion-test-three-networks duration="90m":
     echo "Windy container:      $win_name (6 CPUs, 84 threads, 9-minute floor)"
     echo "Fintraffic container: $fin_name (0.5 CPU, 4 threads, 8-minute floor)"
     echo "Skaping container:    $ska_name (0.5 CPU, 2 threads, 4-minute floor)"
-    echo "Maintenance container: $maintenance_name (0.5 CPU; cycles at T+20m and T+60m)"
+    if [[ "$maintenance_cycles" == "1" ]]; then
+        echo "Maintenance container: $maintenance_name (0.5 CPU; one cycle at T+20m)"
+    else
+        echo "Maintenance container: $maintenance_name (0.5 CPU; cycles at T+20m and T+60m)"
+    fi
     echo "Logs: docker logs -f <container-name>"
     echo "Grafana: tunnel local port 3000 to remote 127.0.0.1:3000"
 

@@ -17,7 +17,7 @@ from typing import Any
 import psycopg
 
 from config.deployment_config import DatabaseConfig, S3Config
-from storage.batch_metrics import BatchJobMetrics
+from observability.maintenance_metrics import MaintenanceJobMetrics
 from storage.s3_storage import create_s3_client
 
 
@@ -150,7 +150,7 @@ def restore_database_backup(
     target_database: str | None = None,
     pg_restore_binary: str = "pg_restore",
     client: Any | None = None,
-    metrics: BatchJobMetrics | None = None,
+    metrics: MaintenanceJobMetrics | None = None,
 ) -> RestoreResult:
     target = target_database or database.name
     result = RestoreResult(
@@ -158,7 +158,7 @@ def restore_database_backup(
         target_database=target,
         dry_run=dry_run,
     )
-    metrics = metrics or BatchJobMetrics.from_environment("database_restore")
+    metrics = metrics or MaintenanceJobMetrics.from_environment("database_restore")
     started = time.monotonic()
     try:
         with tempfile.TemporaryDirectory(prefix="webcam-db-restore-") as directory:

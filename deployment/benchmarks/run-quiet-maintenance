@@ -29,6 +29,8 @@ run_cycle() {
 
 wait_until_offset "$first_offset_s"
 run_cycle 1
-wait_until_offset "$second_offset_s"
-run_cycle 2
+if ((second_offset_s > 0)); then
+    wait_until_offset "$second_offset_s"
+    run_cycle 2
+fi
 exit "$status"

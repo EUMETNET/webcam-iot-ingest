@@ -1,4 +1,4 @@
-"""Persistent Prometheus metrics for short-lived operational batch jobs."""
+"""Persistent Prometheus metrics for short-lived maintenance jobs."""
 
 from __future__ import annotations
 
@@ -8,61 +8,61 @@ import time
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
 from prometheus_client import push_to_gateway, pushadd_to_gateway
 
-from config.deployment_config import BatchMetricsConfig
+from config.deployment_config import MaintenanceMetricsConfig
 
 
-class BatchJobMetrics:
-    def __init__(self, job_name: str, config: BatchMetricsConfig) -> None:
+class MaintenanceJobMetrics:
+    def __init__(self, job_name: str, config: MaintenanceMetricsConfig) -> None:
         if job_name not in {
             "spool_cleanup",
             "database_backup",
             "database_backup_cleanup",
             "database_restore",
         }:
-            raise ValueError("unsupported operational batch job")
+            raise ValueError("unsupported maintenance job")
         self.job_name = job_name
         self.config = config
         self.events = CollectorRegistry()
         self.state = CollectorRegistry()
         self.runs = Counter(
-            "webcam_batch_run_total",
-            "Completed operational batch runs",
+            "webcam_maintenance_run_total",
+            "Completed maintenance runs",
             ["result"],
             registry=self.events,
         )
         self.duration = Histogram(
-            "webcam_batch_duration_seconds",
-            "End-to-end operational batch duration",
+            "webcam_maintenance_duration_seconds",
+            "End-to-end maintenance-job duration",
             buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 180, 600),
             registry=self.events,
         )
         self.items = Counter(
-            "webcam_batch_items_total",
-            "Objects processed by an operational batch",
+            "webcam_maintenance_items_total",
+            "Objects processed by a maintenance job",
             ["outcome"],
             registry=self.events,
         )
         self.bytes = Counter(
-            "webcam_batch_bytes_total",
-            "Bytes processed by an operational batch",
+            "webcam_maintenance_bytes_total",
+            "Bytes processed by a maintenance job",
             ["outcome"],
             registry=self.events,
         )
         self.stage_duration = Histogram(
-            "webcam_batch_stage_duration_seconds",
-            "Operational batch stage duration",
+            "webcam_maintenance_stage_duration_seconds",
+            "Maintenance-job stage duration",
             ["stage"],
             buckets=(0.01, 0.05, 0.1, 0.5, 1, 2.5, 5, 10, 30, 60, 180),
             registry=self.events,
         )
         self.last_success = Gauge(
-            "webcam_batch_last_success_unixtime",
-            "Unix timestamp of the last successful operational batch",
+            "webcam_maintenance_last_success_unixtime",
+            "Unix timestamp of the last successful maintenance job",
             registry=self.state,
         )
         self.last_duration = Gauge(
-            "webcam_batch_last_duration_seconds",
-            "Duration of the latest successful operational batch",
+            "webcam_maintenance_last_duration_seconds",
+            "Duration of the latest successful maintenance job",
             registry=self.state,
         )
         self.retention_hours = (
@@ -85,8 +85,8 @@ class BatchJobMetrics:
         )
 
     @classmethod
-    def from_environment(cls, job_name: str) -> "BatchJobMetrics":
-        return cls(job_name, BatchMetricsConfig.from_environment())
+    def from_environment(cls, job_name: str) -> "MaintenanceJobMetrics":
+        return cls(job_name, MaintenanceMetricsConfig.from_environment())
 
     def publish(
         self,
@@ -121,11 +121,11 @@ class BatchJobMetrics:
     def _push(self, *, include_state: bool) -> bool:
         if not self.config.enabled:
             return False
-        grouping = {"batch_job": self.job_name}
+        grouping = {"maintenance_job": self.job_name}
         try:
             pushadd_to_gateway(
                 self.config.gateway_url,
-                job="webcam_batch_events",
+                job="webcam_maintenance_events",
                 registry=self.events,
                 grouping_key=grouping,
                 timeout=self.config.push_timeout_s,
@@ -133,7 +133,7 @@ class BatchJobMetrics:
             if include_state:
                 push_to_gateway(
                     self.config.gateway_url,
-                    job="webcam_batch_state",
+                    job="webcam_maintenance_state",
                     registry=self.state,
                     grouping_key=grouping,
                     timeout=self.config.push_timeout_s,

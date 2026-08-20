@@ -18,7 +18,7 @@ from botocore.exceptions import ClientError
 
 from config.deployment_config import DatabaseConfig, S3Config
 from database.database_backup_cleanup import cleanup_database_backups
-from storage.batch_metrics import BatchJobMetrics
+from observability.maintenance_metrics import MaintenanceJobMetrics
 from storage.s3_storage import create_s3_client
 
 
@@ -56,7 +56,7 @@ def create_database_backup(
     pg_dump_binary: str = "pg_dump",
     pg_dump_mode: str = "direct",
     client: Any | None = None,
-    metrics: BatchJobMetrics | None = None,
+    metrics: MaintenanceJobMetrics | None = None,
 ) -> BackupResult:
     timestamp = timestamp or datetime.now(timezone.utc)
     key = backup_object_key(timestamp, backup_prefix)
@@ -64,7 +64,7 @@ def create_database_backup(
     if dry_run:
         return result
 
-    metrics = metrics or BatchJobMetrics.from_environment("database_backup")
+    metrics = metrics or MaintenanceJobMetrics.from_environment("database_backup")
     started = time.monotonic()
     try:
         with tempfile.NamedTemporaryFile(

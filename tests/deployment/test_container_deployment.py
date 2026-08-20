@@ -77,7 +77,7 @@ def test_persistent_state_and_short_lived_job_are_declared() -> None:
     assert job["environment"]["DISCOVERY_METRICS_GATEWAY_URL"] == (
         "http://pushgateway:9091"
     )
-    assert job["environment"]["BATCH_METRICS_GATEWAY_URL"] == (
+    assert job["environment"]["MAINTENANCE_METRICS_GATEWAY_URL"] == (
         "http://pushgateway:9091"
     )
     assert job["environment"]["MQTT_HOST"] == "mqtt"

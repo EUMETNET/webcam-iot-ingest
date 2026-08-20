@@ -1,17 +1,20 @@
 {
   "annotations": {"list": []},
-  "description": "Persistent Pushgateway metrics for cleanup, discovery/maintenance sequencing, PostgreSQL backup, and explicit restore.",
+  "description": "Persistent Pushgateway metrics for cleanup, PostgreSQL backup, backup retention, explicit restore, and maintenance sequencing.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [
     {
       "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-      "description": "Last successful completion of each operational batch job.",
+      "description": "Last successful completion of each maintenance job. Legacy batch-named series preserve earlier run traces.",
       "fieldConfig": {"defaults": {"unit": "dateTimeFromNow"}, "overrides": []},
       "gridPos": {"h": 4, "w": 8, "x": 0, "y": 0},
       "id": 1,
       "options": {"colorMode": "value", "graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "targets": [{"expr": "webcam_batch_last_success_unixtime * 1000", "legendFormat": "{{batch_job}}"}],
+      "targets": [
+        {"expr": "webcam_maintenance_last_success_unixtime * 1000", "legendFormat": "{{maintenance_job}}"},
+        {"expr": "webcam_batch_last_success_unixtime * 1000", "legendFormat": "legacy · {{batch_job}}"}
+      ],
       "title": "Last successful runs",
       "type": "stat"
     },
@@ -22,7 +25,10 @@
       "gridPos": {"h": 4, "w": 8, "x": 8, "y": 0},
       "id": 2,
       "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
-      "targets": [{"expr": "webcam_batch_last_duration_seconds", "legendFormat": "{{batch_job}}"}],
+      "targets": [
+        {"expr": "webcam_maintenance_last_duration_seconds", "legendFormat": "{{maintenance_job}}"},
+        {"expr": "webcam_batch_last_duration_seconds", "legendFormat": "legacy · {{batch_job}}"}
+      ],
       "title": "Latest run duration",
       "type": "stat"
     },
@@ -37,7 +43,7 @@
         {"expr": "webcam_spool_cleanup_retention_hours", "legendFormat": "retention hours"},
         {"expr": "webcam_database_backup_last_size_bytes", "legendFormat": "backup bytes"}
       ],
-      "title": "Current batch state",
+      "title": "Current maintenance state",
       "type": "stat"
     },
     {
@@ -47,7 +53,10 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
       "id": 4,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-      "targets": [{"expr": "webcam_batch_items_total", "legendFormat": "{{batch_job}} · {{outcome}}"}],
+      "targets": [
+        {"expr": "webcam_maintenance_items_total", "legendFormat": "{{maintenance_job}} · {{outcome}}"},
+        {"expr": "webcam_batch_items_total", "legendFormat": "legacy · {{batch_job}} · {{outcome}}"}
+      ],
       "title": "Objects and backups processed",
       "type": "timeseries"
     },
@@ -58,7 +67,10 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "id": 5,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-      "targets": [{"expr": "webcam_batch_bytes_total", "legendFormat": "{{batch_job}} · {{outcome}}"}],
+      "targets": [
+        {"expr": "webcam_maintenance_bytes_total", "legendFormat": "{{maintenance_job}} · {{outcome}}"},
+        {"expr": "webcam_batch_bytes_total", "legendFormat": "legacy · {{batch_job}} · {{outcome}}"}
+      ],
       "title": "Processed volume",
       "type": "timeseries"
     },
@@ -69,8 +81,11 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "id": 6,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-      "targets": [{"expr": "histogram_quantile(0.95, sum by (batch_job,stage,le) (webcam_batch_stage_duration_seconds_bucket))", "legendFormat": "{{batch_job}} · {{stage}}"}],
-      "title": "Batch-stage duration p95",
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (maintenance_job,stage,le) (webcam_maintenance_stage_duration_seconds_bucket))", "legendFormat": "{{maintenance_job}} · {{stage}}"},
+        {"expr": "histogram_quantile(0.95, sum by (batch_job,stage,le) (webcam_batch_stage_duration_seconds_bucket))", "legendFormat": "legacy · {{batch_job}} · {{stage}}"}
+      ],
+      "title": "Maintenance-stage duration p95",
       "type": "timeseries"
     },
     {
@@ -80,8 +95,11 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "id": 7,
       "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-      "targets": [{"expr": "webcam_batch_run_total", "legendFormat": "{{batch_job}} · {{result}}"}],
-      "title": "Batch outcomes",
+      "targets": [
+        {"expr": "webcam_maintenance_run_total", "legendFormat": "{{maintenance_job}} · {{result}}"},
+        {"expr": "webcam_batch_run_total", "legendFormat": "legacy · {{batch_job}} · {{result}}"}
+      ],
+      "title": "Maintenance outcomes",
       "type": "timeseries"
     },
     {
@@ -104,7 +122,8 @@
       "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"]}},
       "targets": [
         {"expr": "webcam_maintenance_sequence_last_duration_seconds", "legendFormat": "maintenance · {{result}}"},
-        {"expr": "webcam_batch_last_duration_seconds{batch_job=\"database_restore\"}", "legendFormat": "latest successful restore"}
+        {"expr": "webcam_maintenance_last_duration_seconds{maintenance_job=\"database_restore\"}", "legendFormat": "latest successful restore"},
+        {"expr": "webcam_batch_last_duration_seconds{batch_job=\"database_restore\"}", "legendFormat": "legacy · latest successful restore"}
       ],
       "title": "Maintenance and recovery duration",
       "type": "stat"
@@ -116,7 +135,7 @@
   "templating": {"list": [{"current": {"text": "Prometheus", "value": "Prometheus"}, "hide": 2, "name": "DS_PROMETHEUS", "query": "prometheus", "type": "datasource"}]},
   "time": {"from": "now-24h", "to": "now"},
   "timezone": "browser",
-  "title": "Operational batch jobs",
-  "uid": "webcam-operational-batches",
+  "title": "Maintenance jobs",
+  "uid": "webcam-maintenance-jobs",
   "version": 1
 }

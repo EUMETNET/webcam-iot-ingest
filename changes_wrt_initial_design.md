@@ -547,6 +547,14 @@ freshness failures, throttling, epoch duration, database contention, and
 provider-marker latency. This work is deliberately excluded from checkpoint
 13, which remains focused on single-VM production orchestration and recovery.
 
+Checkpoint 14 will also make PostgreSQL, MQTT, Pushgateway, and other
+applicable infrastructure locations externally configurable. The current
+Compose service names remain the defaults so the validated single-VM topology
+continues to work without extra configuration. Because endpoint substitutions
+do not remove local `depends_on` relationships, the distributed deployment
+will include an explicit Compose override or profile covering external
+dependencies, schema migration, exporters, and monitoring targets.
+
 ### 2026-07-24 — Four-day full-scope checkpoint-13 observation
 
 **Affected component:** checkpoint-13 deployment validation.
@@ -809,3 +817,32 @@ retry loop. The storage layer performs no preliminary HEAD request, existing
 object size or digest comparison, or collision rejection. A repeated key is
 therefore overwritten according to normal S3 semantics. Such overwrites remain
 exceptional because derived-image keys include the image download timestamp.
+
+### 2026-08-19 — Maintenance observability terminology
+
+**Affected component:** cleanup, database backup/retention, and restore metrics.
+
+Short-lived operational housekeeping is described consistently as maintenance,
+not as generic batch processing. Its shared helper lives under
+`observability/maintenance_metrics.py`; configuration, Pushgateway jobs,
+Prometheus metric families and labels, Grafana, and alerts use maintenance
+terminology. The former `BATCH_METRICS_*` environment variables remain
+temporary fallbacks, and the dashboard retains legacy `webcam_batch_*` queries
+so metrics from earlier pilot runs remain visible during the transition.
+
+### 2026-08-19 — Compact internal discovery identifiers
+
+**Affected component:** provider discovery and registry constraints.
+
+Internal site and source-stream identifiers are now established by shared code
+as stable, deterministic, alphanumeric values no longer than 16 characters.
+Collision suffixes remain inside that limit by shortening the readable portion
+first, while complete provider identifiers remain in their dedicated columns.
+PostgreSQL enforces the same contract.
+
+Fintraffic uses `fin{station_id}` for sites and `fin{preset_id}` for source
+streams. Discovery rejects a preset that does not embed its station identifier
+or is not globally unique. Identifier-establishment failures, including
+uniqueness failures, increment the provider-neutral
+`webcam_discovery_identifier_violation_total` metric and fail the discovery
+without applying a partial registry update.

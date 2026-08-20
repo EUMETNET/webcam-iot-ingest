@@ -49,9 +49,11 @@ Identifiers and metadata
 ------------------------
 
 - Site IDs follow `ska{camera_id}`.
-- Stream IDs follow `ska{camera_id}POV{point_of_view_id}`.
+- Stream IDs use the readable `ska{camera_id}POV{point_of_view_id}` form when
+  it fits.
 - Provider components are normalized to the registry's alphanumeric ID
-  constraint; collisions are resolved deterministically.
+  constraint; long values and collision suffixes are resolved
+  deterministically within the shared 16-character bound.
 - Existing IDs are preserved on repeated discovery.
 - Full camera metadata is stored on the site, including provider label,
   customer/customer ID, timezone, coordinates, and any provider fields.

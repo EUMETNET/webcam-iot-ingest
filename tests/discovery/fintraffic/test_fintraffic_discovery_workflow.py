@@ -51,7 +51,7 @@ def test_normalizes_station_and_preset_with_stable_identifiers() -> None:
     assert result.sites[0].altitude is None
     assert result.sites[0].country == "FI"
     assert result.sites[0].provider_metadata["geometry"]["coordinates"][2] == 0.0
-    assert result.source_streams[0].source_stream_id == "finC01503PREC0150301"
+    assert result.source_streams[0].source_stream_id == "finC0150301"
     assert result.source_streams[0].selected_rendition == "full_jpeg"
 
 
@@ -116,8 +116,8 @@ def test_expands_only_eligible_stations_with_detailed_metadata() -> None:
 def test_preserves_existing_identifiers_and_altitude_until_coordinates_change() -> None:
     stored = RegistrySnapshot(
         sites={
-            "fin-kept": {
-                "site_id": "fin-kept",
+            "finkept": {
+                "site_id": "finkept",
                 "provider_site_id": "C1",
                 "latitude": 60.0,
                 "longitude": 24.0,
@@ -127,9 +127,9 @@ def test_preserves_existing_identifiers_and_altitude_until_coordinates_change() 
             }
         },
         source_streams={
-            "stream-kept": {
-                "source_stream_id": "stream-kept",
-                "site_id": "fin-kept",
+            "streamkept": {
+                "source_stream_id": "streamkept",
+                "site_id": "finkept",
                 "provider_source_stream_id": "C101",
             }
         },
@@ -140,9 +140,9 @@ def test_preserves_existing_identifiers_and_altitude_until_coordinates_change() 
         snapshot(station("C1", coordinates=(24.1, 60.0, 0.0))), stored
     )
 
-    assert unchanged.sites[0].site_id == "fin-kept"
+    assert unchanged.sites[0].site_id == "finkept"
     assert unchanged.sites[0].altitude == 42.0
-    assert unchanged.source_streams[0].source_stream_id == "stream-kept"
+    assert unchanged.source_streams[0].source_stream_id == "streamkept"
     assert moved.sites[0].altitude is None
 
 
@@ -156,6 +156,32 @@ def test_identifier_collision_is_resolved_deterministically() -> None:
     )
     assert len({site.site_id for site in result.sites}) == 2
     assert all(site.site_id.isalnum() for site in result.sites)
+    assert all(len(site.site_id) <= 16 for site in result.sites)
+    assert all(len(stream.source_stream_id) <= 16 for stream in result.source_streams)
+
+
+def test_rejects_preset_that_does_not_embed_station_identifier() -> None:
+    with pytest.raises(FintrafficDiscoveryError, match="does not start with station"):
+        build_discovery_snapshot(
+            snapshot(
+                station(
+                    "C01503",
+                    presets=[{"id": "C9999901", "inCollection": True}],
+                )
+            ),
+            empty_registry(),
+        )
+
+
+def test_rejects_globally_duplicate_preset_identifier() -> None:
+    with pytest.raises(FintrafficDiscoveryError, match="duplicate preset"):
+        build_discovery_snapshot(
+            snapshot(
+                station("C1", presets=[{"id": "C101", "inCollection": True}]),
+                station("C101", presets=[{"id": "C101", "inCollection": True}]),
+            ),
+            empty_registry(),
+        )
 
 
 @pytest.mark.parametrize(

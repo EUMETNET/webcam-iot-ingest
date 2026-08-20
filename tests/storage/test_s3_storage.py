@@ -43,24 +43,51 @@ def test_uploads_jpeg_directly_and_returns_reference() -> None:
     ]
 
 
-def test_retries_once_then_reports_sanitized_failure() -> None:
+@pytest.mark.parametrize("retry_count", [0, 1, 3])
+def test_exhausted_retries_emit_one_final_failure(retry_count: int) -> None:
     client = Mock()
     client.put_object.side_effect = RuntimeError("secret response")
 
     events = []
     with pytest.raises(S3StorageError) as caught:
         S3Storage(
-            config(),
+            config(retry_count),
             client=client,
             event_observer=lambda event, values: events.append((event, values)),
         ).upload("key", b"jpeg")
 
-    assert client.put_object.call_count == 2
-    assert events == [
-        ("retry", {"operation": "s3_upload", "reason": "request_failure"}),
-        ("s3_operation", {"result": "failure"}),
-    ]
+    assert client.put_object.call_count == retry_count + 1
+    assert events.count(
+        ("retry", {"operation": "s3_upload", "reason": "request_failure"})
+    ) == retry_count
+    assert events.count(("s3_operation", {"result": "failure"})) == 1
+    assert not tuple(event for event, _ in events if event == "s3_upload_bytes")
     assert "secret response" not in str(caught.value)
+
+
+@pytest.mark.parametrize("retry_count", [0, 1, 3])
+def test_success_after_configured_retries_emits_one_final_success_and_bytes(
+    retry_count: int,
+) -> None:
+    client = Mock()
+    client.put_object.side_effect = [
+        *[RuntimeError("temporary failure") for _ in range(retry_count)],
+        {},
+    ]
+    events = []
+
+    S3Storage(
+        config(retry_count),
+        client=client,
+        event_observer=lambda event, values: events.append((event, values)),
+    ).upload("key", b"jpeg")
+
+    assert client.put_object.call_count == retry_count + 1
+    assert events.count(
+        ("retry", {"operation": "s3_upload", "reason": "request_failure"})
+    ) == retry_count
+    assert events.count(("s3_operation", {"result": "success"})) == 1
+    assert events.count(("s3_upload_bytes", {"size_bytes": 4})) == 1
 
 
 def test_upload_does_not_issue_a_preliminary_head_request() -> None:

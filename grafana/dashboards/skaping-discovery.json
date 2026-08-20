@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Persistent metrics for the short-lived Skaping discovery batch job.",
+  "description": "Persistent metrics for short-lived Skaping discovery runs.",
   "editable": true,
   "graphTooltip": 1,
   "panels": [

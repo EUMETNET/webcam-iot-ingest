@@ -8,6 +8,7 @@ from config.deployment_config import (
     DiscoveryMetricsConfig,
     FintrafficConfig,
     FintrafficIngestionConfig,
+    MaintenanceMetricsConfig,
     SkapingConfig,
     SkapingIngestionConfig,
     WindyConfig,
@@ -73,6 +74,43 @@ def test_discovery_metrics_config_has_batch_gateway_defaults(
 def test_discovery_metrics_config_can_be_disabled(monkeypatch) -> None:
     monkeypatch.setenv("DISCOVERY_METRICS_ENABLED", "false")
     assert DiscoveryMetricsConfig.from_environment().enabled is False
+
+
+def test_maintenance_metrics_config_prefers_new_environment_names(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAINTENANCE_METRICS_ENABLED", "false")
+    monkeypatch.setenv("MAINTENANCE_METRICS_GATEWAY_URL", "https://new.example/")
+    monkeypatch.setenv("MAINTENANCE_METRICS_PUSH_TIMEOUT_S", "7")
+    monkeypatch.setenv("BATCH_METRICS_ENABLED", "true")
+    monkeypatch.setenv("BATCH_METRICS_GATEWAY_URL", "https://old.example")
+    monkeypatch.setenv("BATCH_METRICS_PUSH_TIMEOUT_S", "9")
+
+    config = MaintenanceMetricsConfig.from_environment()
+
+    assert config.enabled is False
+    assert config.gateway_url == "https://new.example"
+    assert config.push_timeout_s == 7
+
+
+def test_maintenance_metrics_config_accepts_legacy_environment_fallbacks(
+    monkeypatch,
+) -> None:
+    for name in (
+        "MAINTENANCE_METRICS_ENABLED",
+        "MAINTENANCE_METRICS_GATEWAY_URL",
+        "MAINTENANCE_METRICS_PUSH_TIMEOUT_S",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("BATCH_METRICS_ENABLED", "false")
+    monkeypatch.setenv("BATCH_METRICS_GATEWAY_URL", "https://legacy.example/")
+    monkeypatch.setenv("BATCH_METRICS_PUSH_TIMEOUT_S", "11")
+
+    config = MaintenanceMetricsConfig.from_environment()
+
+    assert config.enabled is False
+    assert config.gateway_url == "https://legacy.example"
+    assert config.push_timeout_s == 11
 
 
 def test_period_direct_replacement_modulus_defaults_per_network(

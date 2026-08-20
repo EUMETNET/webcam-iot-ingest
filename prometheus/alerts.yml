@@ -41,19 +41,28 @@ groups:
         annotations:
           summary: "PostgreSQL exporter cannot reach PostgreSQL"
       - alert: WebcamCleanupFailed
-        expr: increase(webcam_batch_run_total{batch_job="spool_cleanup",result="failure"}[15m]) > 0
+        expr: |
+          increase(webcam_maintenance_run_total{maintenance_job="spool_cleanup",result="failure"}[15m]) > 0
+          or
+          increase(webcam_batch_run_total{batch_job="spool_cleanup",result="failure"}[15m]) > 0
         labels:
           severity: warning
         annotations:
           summary: "The S3 spool cleanup job failed"
       - alert: WebcamDatabaseBackupFailed
-        expr: increase(webcam_batch_run_total{batch_job="database_backup",result="failure"}[15m]) > 0
+        expr: |
+          increase(webcam_maintenance_run_total{maintenance_job="database_backup",result="failure"}[15m]) > 0
+          or
+          increase(webcam_batch_run_total{batch_job="database_backup",result="failure"}[15m]) > 0
         labels:
           severity: critical
         annotations:
           summary: "The PostgreSQL S3 backup job failed"
       - alert: WebcamDatabaseRestoreFailed
-        expr: increase(webcam_batch_run_total{batch_job="database_restore",result="failure"}[15m]) > 0
+        expr: |
+          increase(webcam_maintenance_run_total{maintenance_job="database_restore",result="failure"}[15m]) > 0
+          or
+          increase(webcam_batch_run_total{batch_job="database_restore",result="failure"}[15m]) > 0
         labels:
           severity: critical
         annotations:
