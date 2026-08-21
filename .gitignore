@@ -46,4 +46,9 @@ data/
 
 # macOS
 .DS_Store
+
+# Local project history and private architecture-review notes
+/history/
+/architecture_revision_proposals_after_checkpoint13.txt
 /changes_wrt_initial_design.md
+/code_review_step12
