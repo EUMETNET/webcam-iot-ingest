@@ -896,3 +896,15 @@ The cleanup-first maintenance sequence runs daily at 00:00 UTC. Discovery for
 all three providers and the verified PostgreSQL backup remain sequenced behind
 image cleanup. A 36-hour final validation recipe exercises all production
 workers and exactly one occurrence of that midnight sequence.
+
+### 2026-08-21 — Untruncated discovery identifiers
+
+**Affected component:** discovery identifier establishment and registry
+constraints.
+
+The pilot no longer truncates internal site or source-stream identifiers to 16
+characters. Provider-derived identifiers retain their complete sanitized
+alphanumeric form; deterministic hash suffixes are appended only to resolve a
+collision. PostgreSQL continues enforcing non-empty alphanumeric identifiers
+but no longer imposes a length bound. Complete raw provider identifiers remain
+stored separately as before.

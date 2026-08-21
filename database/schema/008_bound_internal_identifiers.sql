@@ -1,5 +1,6 @@
--- Enforce the compact internal identifier contract after provider-specific
--- discovery identifiers have been migrated or rediscovered.
+-- Historical compatibility migration. Identifier length is no longer bounded,
+-- so this step enforces only the alphanumeric portion of the former contract.
+-- Migration 009 replaces these legacy constraint names.
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -9,8 +10,7 @@ BEGIN
     ) THEN
         ALTER TABLE site
             ADD CONSTRAINT site_id_compact_alphanumeric CHECK (
-                char_length(site_id) <= 16
-                AND site_id ~ '^[A-Za-z0-9]+$'
+                site_id ~ '^[A-Za-z0-9]+$'
             );
     END IF;
 END
@@ -25,8 +25,7 @@ BEGIN
     ) THEN
         ALTER TABLE source_stream
             ADD CONSTRAINT source_stream_id_compact_alphanumeric CHECK (
-                char_length(source_stream_id) <= 16
-                AND source_stream_id ~ '^[A-Za-z0-9]+$'
+                source_stream_id ~ '^[A-Za-z0-9]+$'
             );
     END IF;
 END

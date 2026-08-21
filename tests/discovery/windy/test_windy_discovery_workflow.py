@@ -160,4 +160,3 @@ def test_identifier_collision_gets_deterministic_alphanumeric_suffix() -> None:
     identifiers = [item.source_stream_id for item in result.source_streams]
     assert len(set(identifiers)) == 2
     assert all(identifier.isalnum() for identifier in identifiers)
-    assert all(len(identifier) <= 16 for identifier in identifiers)

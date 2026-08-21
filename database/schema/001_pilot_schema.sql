@@ -27,9 +27,7 @@ CREATE TABLE IF NOT EXISTS site (
     corrected_altitude double precision,
     provider_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT site_id_not_empty CHECK (site_id <> ''),
-    CONSTRAINT site_id_compact_alphanumeric CHECK (
-        char_length(site_id) <= 16 AND site_id ~ '^[A-Za-z0-9]+$'
-    ),
+    CONSTRAINT site_id_alphanumeric CHECK (site_id ~ '^[A-Za-z0-9]+$'),
     CONSTRAINT site_latitude_valid CHECK (latitude BETWEEN -90 AND 90),
     CONSTRAINT site_longitude_valid CHECK (longitude BETWEEN -180 AND 180),
     CONSTRAINT site_corrected_latitude_valid CHECK (
@@ -57,9 +55,8 @@ CREATE TABLE IF NOT EXISTS source_stream (
     last_processed_timestamp timestamptz,
     estimated_source_stream_period double precision,
     CONSTRAINT source_stream_id_not_empty CHECK (source_stream_id <> ''),
-    CONSTRAINT source_stream_id_compact_alphanumeric CHECK (
-        char_length(source_stream_id) <= 16
-        AND source_stream_id ~ '^[A-Za-z0-9]+$'
+    CONSTRAINT source_stream_id_alphanumeric CHECK (
+        source_stream_id ~ '^[A-Za-z0-9]+$'
     ),
     CONSTRAINT source_stream_provider_id_not_empty CHECK (provider_source_stream_id <> ''),
     CONSTRAINT source_stream_rendition_not_empty CHECK (selected_rendition <> ''),

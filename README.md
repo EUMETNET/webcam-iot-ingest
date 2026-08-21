@@ -224,8 +224,8 @@ the `mini` rendition; it never prints the key or complete provider payload.
 Fintraffic discovery retrieves the complete station list and then paced details
 for every eligible station so descriptive station and preset metadata are
 retained in the registry. Internal site and source-stream identifiers are
-alphanumeric and limited to 16 characters for every provider; complete
-provider identifiers remain in their dedicated registry fields. Fintraffic
+stable, deterministic, alphanumeric, and are not truncated; complete provider
+identifiers also remain in their dedicated registry fields. Fintraffic
 uses `fin{station_id}` for sites and `fin{preset_id}` for streams after checking
 that accepted preset identifiers embed their station identifier and remain
 globally unique.

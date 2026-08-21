@@ -19,6 +19,7 @@ services:
       - ./database/schema/006_simplify_ingestion_state.sql:/docker-entrypoint-initdb.d/006_simplify_ingestion_state.sql:ro
       - ./database/schema/007_rename_source_stream_period.sql:/docker-entrypoint-initdb.d/007_rename_source_stream_period.sql:ro
       - ./database/schema/008_bound_internal_identifiers.sql:/docker-entrypoint-initdb.d/008_bound_internal_identifiers.sql:ro
+      - ./database/schema/009_unbound_internal_identifiers.sql:/docker-entrypoint-initdb.d/009_unbound_internal_identifiers.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -41,6 +42,7 @@ services:
       - ./database/schema/006_simplify_ingestion_state.sql:/migrations/006_simplify_ingestion_state.sql:ro
       - ./database/schema/007_rename_source_stream_period.sql:/migrations/007_rename_source_stream_period.sql:ro
       - ./database/schema/008_bound_internal_identifiers.sql:/migrations/008_bound_internal_identifiers.sql:ro
+      - ./database/schema/009_unbound_internal_identifiers.sql:/migrations/009_unbound_internal_identifiers.sql:ro
     command:
       - bash
       - -euc
@@ -50,6 +52,7 @@ services:
         psql --set=ON_ERROR_STOP=1 --file=/migrations/006_simplify_ingestion_state.sql
         psql --set=ON_ERROR_STOP=1 --file=/migrations/007_rename_source_stream_period.sql
         psql --set=ON_ERROR_STOP=1 --file=/migrations/008_bound_internal_identifiers.sql
+        psql --set=ON_ERROR_STOP=1 --file=/migrations/009_unbound_internal_identifiers.sql
     depends_on:
       postgres:
         condition: service_healthy

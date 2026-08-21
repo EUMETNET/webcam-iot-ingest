@@ -28,7 +28,7 @@ from discovery.shared.discovery_metrics import (
 )
 from discovery.shared.identifiers import (
     IdentifierEstablishmentError,
-    compact_identifier,
+    establish_identifier,
     validate_internal_identifier,
 )
 from discovery.windy.windy_source_access import WindyClient, WindyDiscoveryError
@@ -194,7 +194,7 @@ def build_discovery_snapshot(
                 str(existing["source_stream_id"]), error_type=WindyIdentifierError
             )
             if existing is not None
-            else compact_identifier(
+            else establish_identifier(
                 "win",
                 webcam.provider_id,
                 used_stream_ids,
@@ -345,7 +345,7 @@ def _new_identifier(
     provider_id: str,
     used: Mapping[str, Any] | set[str],
 ) -> str:
-    return compact_identifier(
+    return establish_identifier(
         prefix, provider_id, used, error_type=WindyIdentifierError
     )
 

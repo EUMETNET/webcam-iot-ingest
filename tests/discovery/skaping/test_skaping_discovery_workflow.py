@@ -146,8 +146,7 @@ def test_identifier_collision_is_resolved_deterministically() -> None:
     )
     assert len({site.site_id for site in result.sites}) == 2
     assert all(site.site_id.isalnum() for site in result.sites)
-    assert all(len(site.site_id) <= 16 for site in result.sites)
-    assert all(len(stream.source_stream_id) <= 16 for stream in result.source_streams)
+    assert all(stream.source_stream_id.isalnum() for stream in result.source_streams)
 
 
 def test_rejects_duplicate_camera_and_point_ids() -> None:

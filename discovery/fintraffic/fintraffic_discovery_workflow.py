@@ -32,7 +32,7 @@ from discovery.shared.discovery_metrics import (
 )
 from discovery.shared.identifiers import (
     IdentifierEstablishmentError,
-    compact_identifier,
+    establish_identifier,
     validate_internal_identifier,
 )
 
@@ -124,7 +124,7 @@ def build_discovery_snapshot(
                 str(previous_site["site_id"]), error_type=FintrafficIdentifierError
             )
             if previous_site is not None
-            else compact_identifier(
+            else establish_identifier(
                 "fin",
                 station.provider_id,
                 used_site_ids,
@@ -178,7 +178,7 @@ def build_discovery_snapshot(
                     error_type=FintrafficIdentifierError,
                 )
                 if previous_stream is not None
-                else compact_identifier(
+                else establish_identifier(
                     "fin",
                     preset_id,
                     used_stream_ids,

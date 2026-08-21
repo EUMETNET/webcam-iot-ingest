@@ -32,7 +32,7 @@ from discovery.shared.discovery_metrics import (
 )
 from discovery.shared.identifiers import (
     IdentifierEstablishmentError,
-    compact_identifier,
+    establish_identifier,
     validate_internal_identifier,
 )
 from discovery.skaping.skaping_source_access import (
@@ -119,7 +119,7 @@ def build_discovery_snapshot(
                 str(previous_site["site_id"]), error_type=SkapingIdentifierError
             )
             if previous_site is not None
-            else compact_identifier(
+            else establish_identifier(
                 "ska",
                 camera.provider_id,
                 used_site_ids,
@@ -173,7 +173,7 @@ def build_discovery_snapshot(
                     error_type=SkapingIdentifierError,
                 )
                 if previous_stream is not None
-                else compact_identifier(
+                else establish_identifier(
                     f"{site_id}POV",
                     pov_id,
                     used_stream_ids,
